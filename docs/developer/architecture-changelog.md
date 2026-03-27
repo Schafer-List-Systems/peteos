@@ -1,5 +1,13 @@
 # Architecture Changelog
 
+## [2026-03-27] - ChatBot Documentation and Examples
+- Created dedicated ChatBot documentation in `docs/developer/chatbot.md`
+- Fixed `AnthropicChatBot` non-streaming bug (stream was hardcoded to True)
+- Added `test_anthropic_chatbot_non_streaming_with_mock` E2E test
+- Removed commented-out real endpoint tests
+- Created examples directory with `openai_chatbot.py` and `anthropic_chatbot.py`
+- Clarified API protocol vs. model distinction in documentation
+
 ## [2026-03-27] - Anthropic API Support
 - Updated `AnthropicChatBotResponse` to support Anthropic-compatible format
 - Handles `thinking`/`thinking_delta` keys (Anthropic-compatible) in addition to `reasoning`/`reasoning_delta`

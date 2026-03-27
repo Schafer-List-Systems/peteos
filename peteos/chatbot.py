@@ -124,10 +124,10 @@ class OpenAIChatBot(ChatBot):
         body["stream"] = streaming if streaming else False
 
         if streaming:
-            stream = self._http_client.stream_post(f"{self._base_url}/chat/completions", body)
+            stream = self._http_client.stream_post(f"{self._base_url}/v1/chat/completions", body)
             return OpenAIChatBotResponse(stream)
         else:
-            response_data = await self._http_client.post(f"{self._base_url}/chat/completions", body)
+            response_data = await self._http_client.post(f"{self._base_url}/v1/chat/completions", body)
             # For non-streaming, convert to a simple stream of one event
             async def events():
                 choices = response_data.get("choices", [])
@@ -171,8 +171,7 @@ class AnthropicChatBot(ChatBot):
         Returns:
             AnthropicChatBotResponse (inherits from ChatBotResponse).
         """
-        body = self._build_anthropic_body(chat_history)
-        body["stream"] = streaming if streaming else False
+        body = self._build_anthropic_body(chat_history, streaming)
 
         if streaming:
             stream = self._http_client.stream_post(f"{self._base_url}/messages", body)
@@ -181,9 +180,8 @@ class AnthropicChatBot(ChatBot):
             response_data = await self._http_client.post(f"{self._base_url}/messages", body)
             # For non-streaming, convert to events
             async def events():
-                # Anthropic non-streaming response has a message object
-                message = response_data.get("message", {})
-                for block in message.get("content", []):
+                # Anthropic non-streaming response has content array directly
+                for block in response_data.get("content", []):
                     if block.get("type") == "text":
                         yield f"data: {json.dumps({
                             "type": "content_block_start",
@@ -200,12 +198,13 @@ class AnthropicChatBot(ChatBot):
                 yield "[DONE]"
             return AnthropicChatBotResponse(events())
 
-    def _build_anthropic_body(self, chat_history: ChatHistory) -> Dict[str, Any]:
+    def _build_anthropic_body(self, chat_history: ChatHistory, streaming: bool = True) -> Dict[str, Any]:
         """
         Build Anthropic-specific request body.
 
         Args:
             chat_history: The chat history to convert.
+            streaming: Whether to enable streaming.
 
         Returns:
             Anthropic-formatted request body.
@@ -229,7 +228,7 @@ class AnthropicChatBot(ChatBot):
         body = {
             "model": self._model,
             "messages": messages,
-            "stream": True
+            "stream": streaming
         }
 
         if system_message:
