@@ -17,12 +17,36 @@ The class names refer to the **API protocol**, not the LLM model:
 
 - `OpenAIChatBot` - OpenAI-compatible API (uses `reasoning` key for thinking content)
 - `AnthropicChatBot` - Anthropic-compatible API (uses `thinking` or `reasoning` keys)
+- `GenericChatBot` - Configurable bot for any API protocol
 
 The model (e.g., `qwen3.5-35b`, `gpt-4`, `claude-3`) is a parameter passed to the API. Any model can run on any API protocol as long as it speaks that protocol.
 
 ### Streaming-First Design
 
 All responses stream via Server-Sent Events (SSE). Non-streaming responses are converted to a single-event stream for consistent handling.
+
+### Configurable Translation
+
+The `GenericChatBot` and `GenericChatBotResponse` classes use path-based translation configuration:
+
+```python
+GenericChatBot(
+    http_client,
+    model="my-model",
+    chat_endpoint="/v1/chat/completions",
+    models_endpoint="/v1/models",
+    response_translations={
+        "choices[*].delta.content": "text_content",
+        "choices[*].delta.reasoning": "thinking_content"
+    }
+)
+```
+
+Path notation supports:
+- Simple keys: `"field"` -> `data["field"]`
+- Array indexing: `"choices[0]"` -> `data["choices"][0]`
+- Wildcards: `"choices[*].delta.content"` -> iterate all choices
+- Type discriminators: `"content_block_start.content_block.text"` -> matches `type` field, then navigates nested structure
 
 ## Components
 
@@ -39,6 +63,24 @@ class ChatBot(ABC):
 - Manage HTTP connection to API
 - Build API-specific request bodies
 - Return streaming responses wrapped in `ChatBotResponse`
+
+### GenericChatBot
+
+Configurable base class that handles request building and response wrapping:
+
+**Constructor Parameters:**
+- `http_client` - HTTP client for API requests
+- `model` - Model identifier to use
+- `base_url` - API base URL (e.g., `"http://localhost:8000"`)
+- `chat_endpoint` - Chat endpoint (default: `"/v1/chat/completions"`)
+- `models_endpoint` - Models listing endpoint (default: `"/v1/models"`)
+- `response_translations` - Dict mapping source path -> target field
+- `**defaults` - Additional request body parameters (e.g., `max_tokens=4096`)
+
+**Request Building:**
+- Builds messages array from `ChatHistory`
+- Extracts system messages separately (for APIs that require it)
+- Merges with `defaults` and streaming flag
 
 ### OpenAIChatBot
 
@@ -58,13 +100,22 @@ class ChatBot(ABC):
 {"choices": [{"delta": {"content": "...", "reasoning": "..."}}]}
 ```
 
+**Translation Config:**
+```python
+{
+    "choices[*].delta.content": "text_content",
+    "choices[*].delta.reasoning": "thinking_content",
+    "choices[*].delta.thinking": "thinking_content"
+}
+```
+
 **Key Behavior:**
 - Maps `reasoning` key to `thinking_content` property
 - Supports incremental reasoning streaming
 
 ### AnthropicChatBot
 
-**API Endpoint:** `/messages`
+**API Endpoint:** `/v1/messages`
 
 **Request Format:**
 ```json
@@ -72,7 +123,8 @@ class ChatBot(ABC):
     "model": "claude-3-opus",
     "messages": [{"role": "user", "content": "..."}],
     "system": "optional system prompt",
-    "stream": true
+    "stream": true,
+    "max_tokens": 4096
 }
 ```
 
@@ -80,6 +132,18 @@ class ChatBot(ABC):
 ```json
 {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "..."}}
 {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "..."}}
+```
+
+**Translation Config:**
+```python
+{
+    "content_block_delta.delta.text": "text_content",
+    "content_block_delta.delta.reasoning": "thinking_content",
+    "content_block_delta.delta.thinking": "thinking_content",
+    "content_block_start.content_block.text": "text_content",
+    "content_block_start.content_block.reasoning": "thinking_content",
+    "message_start.message.content[*].text": "text_content"
+}
 ```
 
 **Key Behavior:**
@@ -102,23 +166,27 @@ class ChatBotResponse:
 **Responsibilities:**
 - Parse SSE stream line-by-line
 - Translate API-specific events to common schema
-- Accumulate `text_content` and `thinking_content`
+- Accumulate content in separate fields based on key naming
 - Yield accumulated text on each iteration
+
+### GenericChatBotResponse
+
+Configurable response class that translates events using path-based lookups:
+
+**Constructor:**
+```python
+GenericChatBotResponse(stream, translations)
+```
+
+Where `translations` is a Dict mapping source path -> target field. Target fields ending in `_thinking` are accumulated into `thinking_content`, all others into `text_content`.
 
 ### OpenAIChatBotResponse
 
-**Translation Logic:**
-- `choices[0].delta.content` -> `content`
-- `choices[0].delta.reasoning` or `choices[0].delta.thinking` -> `thinking`
+Uses standard OpenAI translation config (inherits from `GenericChatBotResponse`).
 
 ### AnthropicChatBotResponse
 
-**Translation Logic:**
-- `content_block_delta.delta.text` -> `content`
-- `content_block_delta.delta.thinking` -> `thinking`
-- `content_block_delta.delta.reasoning` -> `thinking`
-- `content_block_start.content_block.thinking` / `reasoning` -> `thinking`
-- `message_start.message.thinking` / `reasoning` -> `thinking`
+Uses standard Anthropic translation config (inherits from `GenericChatBotResponse`).
 
 ## Streaming Behavior
 
@@ -126,10 +194,9 @@ class ChatBotResponse:
 
 1. `ChatBot.send_message()` calls `HTTPClient.stream_post()` which yields raw SSE lines
 2. `ChatBotResponse.__anext__()` processes each SSE line:
-   - Skips comments and empty lines
    - Parses `data: {...}` JSON
    - Calls `_translate_event()` to normalize to common schema
-   - Accumulates `content` and `thinking` separately
+   - Accumulates content into appropriate fields
    - Returns accumulated text (includes all previous chunks)
 
 ### Yield Behavior
@@ -175,14 +242,49 @@ Tests use `tests/http/mock_server.py` which provides:
 - **E2E tests** (`tests/e2e/test_chatbot_integration.py`): Full integration with mock servers
 - Both streaming and non-streaming modes tested
 
-## Usage Example
+## Usage
+
+### Environment Configuration
+
+Copy `.env.example` to `.env` and configure your API endpoints:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+```
+OPENAI_COMPATIBLE_BASE_URL=http://192.168.255.10:8123
+OPENAI_COMPATIBLE_MODEL=qwen/qwen3.5-35b-a3b
+```
+
+### Running Examples
+
+```bash
+# OpenAI-compatible API
+python examples/openai_chatbot.py
+
+# Anthropic-compatible API
+python examples/anthropic_chatbot.py
+```
+
+Or with explicit environment variables:
+
+```bash
+OPENAI_COMPATIBLE_BASE_URL=http://192.168.255.10:8123 \
+OPENAI_COMPATIBLE_MODEL=qwen/qwen3.5-35b-a3b \
+python examples/openai_chatbot.py
+```
+
+### Programmatic Usage
 
 ```python
-from peteos.chatbot import OpenAIChatBot
+from peteos.chatbot import OpenAIChatBot, AnthropicChatBot, GenericChatBot
 from peteos.httpclient import HTTPClient
 from peteos.chathistory import ChatHistory
 from peteos.message import Message
 
+# OpenAI-compatible
 async def main():
     http_client = HTTPClient(timeout=60.0)
     chatbot = OpenAIChatBot(

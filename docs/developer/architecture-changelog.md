@@ -1,4 +1,13 @@
-# Architecture Changelog
+## [2026-03-27] - GenericChatBot Refactoring
+- Added `GenericChatBot` class: configurable base with endpoints and response translation
+- Added `GenericChatBotResponse` class: path-based event translation
+- Added `get_value_at_path()` utility: supports wildcards, indexing, and type discriminators
+- `OpenAIChatBot` and `AnthropicChatBot` now inherit from `GenericChatBot`
+- Response translations configurable via path notation (e.g., `"choices[*].delta.content"`)
+- Type discriminator support: paths like `"content_block_start.content_block.text"` match `type` field then navigate
+- Updated chatbot.md documentation with new architecture
+- Added `.env.example` and updated examples usage documentation
+- All 32 tests pass
 
 ## [2026-03-27] - ChatBot Documentation and Examples
 - Created dedicated ChatBot documentation in `docs/developer/chatbot.md`

@@ -45,3 +45,6 @@ CLAUDE.md
 
 # HTTP client notes
 http_client.md
+
+# Environment variables (local configuration)
+.env
