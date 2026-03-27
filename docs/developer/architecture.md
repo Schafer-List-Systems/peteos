@@ -3,7 +3,7 @@
 ## Initial Architecture (2026-03-27)
 
 ### Overview
-Project now includes Message, ChatHistory, ToolManager, ExecutionEnvironment, Session, Role, Agent, ChatBot, and REPLExecutionEnvironment classes.
+Project now includes Message, ChatHistory, ToolManager, ExecutionEnvironment, Session, Role, Agent, HTTPClient, ChatBot (abstract), ChatBotResponse (abstract), OpenAIChatBot, AnthropicChatBot, and REPLExecutionEnvironment classes.
 
 ### Structure
 ```
@@ -11,10 +11,12 @@ peteos/
 ├── __init__.py
 ├── agent.py
 ├── chatbot.py
+├── chatbotresponse.py
 ├── message.py
 ├── chathistory.py
 ├── toolmanager.py
 ├── executionenvironment.py
+├── httpclient.py
 ├── replexecutionenvironment.py
 ├── session.py
 ├── role.py
@@ -37,12 +39,27 @@ peteos/
   - Contains: dictionary of registered tools
   - Methods: `register_tool(...)` - registers tools (accepts Tool instance or Callable with metadata)
   - Methods: `get_tool(name: str)` - retrieves tool by name
-- **ChatBot**: Communicates with an LLM
 
-  - Attributes: `url` (str), `model` (str)
-  - Methods: `send_message(ChatHistory)` (async) - sends history, returns Message
+- **HTTPClient**: Async HTTP client for LLM API communication
+
+  - Methods: `stream_post(url, body)` - async generator yielding raw SSE lines
+  - Methods: `post(url, body)` - returns parsed JSON dict (non-streaming)
+
+- **ChatBot** (abstract): Abstract base class for LLM chatbot implementations
+
+  - Contains: `HTTPClient`, `model` (str)
+  - Methods: `send_message(ChatHistory, streaming=True)` (async) - returns ChatBotResponse
   - Methods: `list_available_models()` - lists available models
   - Property: `model` - getter and setter for model identifier
+  - Subclasses: `OpenAIChatBot`, `AnthropicChatBot`
+
+- **ChatBotResponse** (abstract): Abstract base class for LLM responses with streaming support
+
+  - Contains: `_stream` (raw SSE generator), `_thinking_content` (str), `_text_content` (str)
+  - Async iterable: yields accumulated text chunks as they arrive
+  - Properties: `thinking_content`, `text_content`
+  - Subclasses: `OpenAIChatBotResponse`, `AnthropicChatBotResponse`
+  - Translation: normalizes "reasoning" (Anthropic) and "thinking" (OpenAI) to `thinking_content`
 
 - **ExecutionEnvironment**: Abstract base class for agent execution environments
 
@@ -78,7 +95,7 @@ peteos/
 
 ### Dependencies
 - Python >= 3.10
-- No runtime dependencies
+- `httpx` - async HTTP client
 
 ### Class Diagram
 
@@ -113,13 +130,56 @@ classDiagram
         +get_tool(name: str) Tool
     }
 
+    class HTTPClient {
+        +__init__(timeout: float)
+        +stream_post(url: str, body: dict) AsyncGenerator[str]
+        +post(url: str, body: dict) dict
+    }
+
     class ChatBot {
-        +str _url
+        <<Abstract>>
+        +HTTPClient _http_client
         +str _model
-        +__init__(url: str, model: str)
-        +send_message(chat_history: ChatHistory) Message
+        +__init__(http_client: HTTPClient, model: str)
+        +send_message(chat_history: ChatHistory, streaming: bool=True) ChatBotResponse
         +list_available_models() list[str]
         +model str {get; set}
+    }
+
+    class OpenAIChatBot {
+        +str _base_url
+        +__init__(http_client: HTTPClient, model: str, base_url: str)
+        +send_message(chat_history: ChatHistory, streaming: bool=True) OpenAIChatBotResponse
+        +list_available_models() list[str]
+    }
+
+    class AnthropicChatBot {
+        +str _base_url
+        +__init__(http_client: HTTPClient, model: str, base_url: str)
+        +send_message(chat_history: ChatHistory, streaming: bool=True) AnthropicChatBotResponse
+        +list_available_models() list[str]
+    }
+
+    class ChatBotResponse {
+        <<Abstract>>
+        +AsyncGenerator _stream
+        +str _thinking_content
+        +str _text_content
+        +__init__(stream: AsyncGenerator)
+        +__aiter__()
+        +__anext__() str
+        +thinking_content str {get}
+        +text_content str {get}
+    }
+
+    class OpenAIChatBotResponse {
+        +_translate_event(event: dict) dict
+        +_accumulate_content(event: dict)
+    }
+
+    class AnthropicChatBotResponse {
+        +_translate_event(event: dict) dict
+        +_accumulate_content(event: dict)
     }
 
     class ExecutionEnvironment {
@@ -165,6 +225,10 @@ classDiagram
     }
 
     ExecutionEnvironment <|-- REPLExecutionEnvironment
+    ChatBot <|-- OpenAIChatBot
+    ChatBot <|-- AnthropicChatBot
+    ChatBotResponse <|-- OpenAIChatBotResponse
+    ChatBotResponse <|-- AnthropicChatBotResponse
     ChatHistory --> Message : contains
     ExecutionEnvironment --> ChatHistory : has
     ExecutionEnvironment --> ToolManager : has
@@ -175,8 +239,10 @@ classDiagram
     Session --> ChatBot : has
     Agent --> Session : manages
     Agent --> ChatBot : has
-    ChatBot --> Message : returns
+    ChatBot --> HTTPClient : uses
     ChatBot --> ChatHistory : accepts
+    ChatBot --> ChatBotResponse : returns
+    ChatBotResponse --> AsyncGenerator : consumes
 ```
 
 ### Architecture Diagram

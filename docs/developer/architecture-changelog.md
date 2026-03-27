@@ -1,5 +1,25 @@
 # Architecture Changelog
 
+## [2026-03-27] - Anthropic API Support
+- Updated `AnthropicChatBotResponse` to support Anthropic-compatible format
+- Handles `thinking`/`thinking_delta` keys (Anthropic-compatible) in addition to `reasoning`/`reasoning_delta`
+- Response translation: `thinking` → `thinking_content`, `text` → `text_content`
+- Both OpenAI and Anthropic endpoints now supported on the same host/port
+- Added test: `test_anthropic_compatible_thinking`
+
+## [2026-03-27] - ChatBot Refactoring with Response Wrappers
+- Made `ChatBot` an abstract base class
+- Created `HTTPClient` class for async HTTP communication with SSE streaming
+- Created `ChatBotResponse` abstract base class for streaming responses
+- Created `OpenAIChatBotResponse` and `AnthropicChatBotResponse` implementations
+- Response classes translate API-specific schemas to common format:
+  - OpenAI/Qwen: `reasoning`/`thinking` → `thinking_content`, `content` → `text_content`
+  - Anthropic: `reasoning`/`reasoning_delta` → `thinking_content`, `thinking`/`thinking_delta` → `thinking_content`, `text`/`text_delta` → `text_content`
+- `send_message()` supports streaming mode (default) and non-streaming mode via `streaming: bool = True`
+- `ChatBotResponse` is async iterable, yields accumulated text as it arrives
+- HTTPClient can be mocked for testing
+- Updated architecture documentation with class and component diagrams
+
 ## [2026-03-27] - REPLExecutionEnvironment Class
 - Added `REPLExecutionEnvironment` class: concrete implementation of ExecutionEnvironment
 - Implements `run()` method with REPL logic (empty placeholder)
