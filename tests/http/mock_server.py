@@ -74,7 +74,7 @@ class MockLLMServer:
             return response
         else:
             # Return JSON (non-streaming)
-            if self.endpoint == "/messages":
+            if "/v1/messages" in self.endpoint:
                 # Anthropic format
                 full_content = ""
                 for resp in self.json_response:
@@ -146,4 +146,4 @@ def create_anthropic_mock_server(thinking: str = "Thinking step by step", respon
         }),
         "[DONE]"
     ]
-    return MockLLMServer(responses, port=port, endpoint="/messages", enable_streaming=enable_streaming)
+    return MockLLMServer(responses, port=port, endpoint="/v1/messages", enable_streaming=enable_streaming)

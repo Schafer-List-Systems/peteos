@@ -32,6 +32,7 @@ async def main():
     model = os.getenv("OPENAI_COMPATIBLE_MODEL", "qwen3.5-35b")
 
     print(f"Connecting to {base_url} with model {model}")
+    print("Note: Qwen models stream reasoning first, then the response. This may take 30+ seconds.")
 
     # Create HTTP client with timeout
     http_client = HTTPClient(timeout=60.0)
@@ -45,7 +46,7 @@ async def main():
 
     # Build chat history
     history = ChatHistory()
-    history.append_message(Message(content={"role": "user", "content": "Hello! Please think step by step and explain your reasoning."}))
+    history.append_message(Message(content={"role": "user", "content": "Explain how photosynthesis works step by step."}))
 
     # Send message with streaming
     print("\nRequesting response...\n")

@@ -32,6 +32,7 @@ async def main():
     model = os.getenv("ANTHROPIC_COMPATIBLE_MODEL", "claude-3-opus")
 
     print(f"Connecting to {base_url} with model {model}")
+    print("Note: Models that stream reasoning may take 30+ seconds before text appears.")
 
     # Create HTTP client with timeout
     http_client = HTTPClient(timeout=60.0)
@@ -45,8 +46,8 @@ async def main():
 
     # Build chat history with system prompt
     history = ChatHistory()
-    history.append_message(Message(content={"role": "system", "content": "You are a helpful assistant that shows your thinking process."}))
-    history.append_message(Message(content={"role": "user", "content": "Hello! Please think step by step and explain your reasoning."}))
+    history.append_message(Message(content={"role": "system", "content": "You are a helpful assistant."}))
+    history.append_message(Message(content={"role": "user", "content": "Explain how photosynthesis works step by step."}))
 
     # Send message with streaming
     print("\nRequesting response...\n")

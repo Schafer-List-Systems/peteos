@@ -144,7 +144,7 @@ class OpenAIChatBot(ChatBot):
 class AnthropicChatBot(ChatBot):
     """ChatBot implementation for Anthropic API."""
 
-    def __init__(self, http_client: HTTPClient, model: str, base_url: str):
+    def __init__(self, http_client: HTTPClient, model: str, base_url: str, max_tokens: int = 4096):
         """
         Initialize AnthropicChatBot.
 
@@ -152,14 +152,17 @@ class AnthropicChatBot(ChatBot):
             http_client: HTTP client for making API requests.
             model: The Anthropic model identifier (e.g., "claude-3-opus-20240229").
             base_url: The Anthropic API base URL.
+            max_tokens: Maximum tokens to generate (default: 4096).
         """
         super().__init__(http_client, model)
         self._base_url = base_url
+        self._max_tokens = max_tokens
 
     async def send_message(
         self,
         chat_history: ChatHistory,
-        streaming: bool = True
+        streaming: bool = True,
+        **kwargs
     ) -> ChatBotResponse:
         """
         Send a chat history to Anthropic and receive a response.
@@ -167,17 +170,18 @@ class AnthropicChatBot(ChatBot):
         Args:
             chat_history: The ChatHistory to send.
             streaming: If True, returns streaming response.
+            **kwargs: Additional request parameters that will override defaults.
 
         Returns:
             AnthropicChatBotResponse (inherits from ChatBotResponse).
         """
-        body = self._build_anthropic_body(chat_history, streaming)
+        body = self._build_anthropic_body(chat_history, streaming, kwargs)
 
         if streaming:
-            stream = self._http_client.stream_post(f"{self._base_url}/messages", body)
+            stream = self._http_client.stream_post(f"{self._base_url}/v1/messages", body)
             return AnthropicChatBotResponse(stream)
         else:
-            response_data = await self._http_client.post(f"{self._base_url}/messages", body)
+            response_data = await self._http_client.post(f"{self._base_url}/v1/messages", body)
             # For non-streaming, convert to events
             async def events():
                 # Anthropic non-streaming response has content array directly
@@ -198,13 +202,14 @@ class AnthropicChatBot(ChatBot):
                 yield "[DONE]"
             return AnthropicChatBotResponse(events())
 
-    def _build_anthropic_body(self, chat_history: ChatHistory, streaming: bool = True) -> Dict[str, Any]:
+    def _build_anthropic_body(self, chat_history: ChatHistory, streaming: bool = True, kwargs: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Build Anthropic-specific request body.
 
         Args:
             chat_history: The chat history to convert.
             streaming: Whether to enable streaming.
+            kwargs: Additional parameters that override defaults.
 
         Returns:
             Anthropic-formatted request body.
@@ -228,11 +233,16 @@ class AnthropicChatBot(ChatBot):
         body = {
             "model": self._model,
             "messages": messages,
-            "stream": streaming
+            "stream": streaming,
+            "max_tokens": self._max_tokens
         }
 
         if system_message:
             body["system"] = system_message
+
+        # Allow kwargs to override defaults
+        if kwargs:
+            body.update(kwargs)
 
         return body
 
