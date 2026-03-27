@@ -87,10 +87,6 @@ class ChatBotResponse(ABC):
         Raises:
             StopAsyncIteration: When stream is exhausted.
         """
-        if not hasattr(self, '_lines_iterator'):
-            self._lines_iterator = self._stream.__aiter__()
-            self._last_chunk = ""
-
         try:
             line = await self._lines_iterator.__anext__()
             if line.startswith("data: "):
