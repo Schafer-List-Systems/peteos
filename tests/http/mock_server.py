@@ -101,7 +101,7 @@ class MockLLMServer:
                                 full_content += choice["delta"].get("content", "")
                 return web.json_response({
                     "choices": [{
-                        "message": {
+                        "delta": {
                             "role": "assistant",
                             "content": full_content
                         }

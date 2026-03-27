@@ -4,6 +4,8 @@ import json
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, AsyncGenerator, Dict, Any, List, Optional
 
+from peteos.utils import get_value_at_path as _get_value_at_path
+
 
 class ChatBotResponse(ABC):
     """Abstract base class for chatbot responses.
@@ -33,18 +35,18 @@ class ChatBotResponse(ABC):
 
     def _accumulate_content(self, event: Dict[str, Any]) -> None:
         """
-        Accumulate content from a translated event.
+        Accumulate all fields from a translated event.
 
         Args:
-            event: Event with common schema (has 'content' key).
+            event: Translated event with any number of fields.
         """
-        content = event.get("content", "")
-        if content:
-            self._text_content += content
-
-        thinking = event.get("thinking", "")
-        if thinking:
-            self._thinking_content += thinking
+        for key, value in event.items():
+            if value:
+                # Route to appropriate accumulator based on field name
+                if "thinking" in key.lower():
+                    self._thinking_content += str(value)
+                else:
+                    self._text_content += str(value)
 
     @abstractmethod
     async def _translate_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -109,89 +111,75 @@ class ChatBotResponse(ABC):
             raise
 
 
-class OpenAIChatBotResponse(ChatBotResponse):
-    """Response wrapper for OpenAI API.
+class GenericChatBotResponse(ChatBotResponse):
+    """ChatBotResponse with configurable path-based translations.
 
-    Handles both:
-    - content -> text_content
-    - thinking -> thinking_content
-    - reasoning -> thinking_content (for Qwen-style models)
+    Args:
+        stream: Async generator of raw SSE lines from HTTPClient.
+        translations: Dict mapping source path -> target field.
+            Paths use JSONPath-style notation like "choices[*].delta.content".
+            Valid target fields are "content" and "thinking".
+            If no translation matches, the event is passed through silently.
+
+    Example:
+        response = GenericChatBotResponse(stream, {
+            "choices[*].delta.content": "text_content",
+            "choices[*].delta.reasoning": "thinking_content"
+        })
     """
+
+    def __init__(self, stream: AsyncGenerator[str, None], translations: Dict[str, str]):
+        super().__init__(stream)
+        self._translations = translations
 
     async def _translate_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Translate OpenAI-compatible event to common schema.
+        Translate an event using configured path translations.
 
-        OpenAI format: {"choices": [{"delta": {"content": "...", "reasoning": "..."}}]}
-        Translates: content -> content, reasoning/thinking -> thinking
+        Args:
+            event: Raw API response event.
+
+        Returns:
+            Translated event with configurable fields.
         """
-        translated: Dict[str, Any] = {"content": "", "thinking": ""}
-        choices = event.get("choices", [])
-        if choices and "delta" in choices[0]:
-            delta = choices[0]["delta"]
-            translated["content"] = delta.get("content", "")
-            # Handle both "reasoning" (Qwen) and "thinking" keys
-            translated["thinking"] = delta.get("reasoning", "") or delta.get("thinking", "")
+        translated: Dict[str, Any] = {}
+
+        for path, target in self._translations.items():
+            value = _get_value_at_path(event, path)
+            if value is not None:
+                # Handle array values from wildcard paths
+                if isinstance(value, list):
+                    value = "".join(str(v) for v in value if v)
+                else:
+                    value = str(value)
+                translated[target] = value
+
         return translated
 
 
-class AnthropicChatBotResponse(ChatBotResponse):
-    """Response wrapper for Anthropic API.
+class OpenAIChatBotResponse(GenericChatBotResponse):
+    """Response wrapper for OpenAI API using standard translations."""
 
-    Handles both:
-    - text / text_delta -> content
-    - reasoning / reasoning_delta -> thinking (original Anthropic)
-    - thinking / thinking_delta -> thinking (Anthropic-compatible)
-    """
+    def __init__(self, stream: AsyncGenerator[str, None]):
+        super().__init__(stream, {
+            "choices[*].delta.content": "text_content",
+            "choices[*].delta.reasoning": "thinking_content",
+            "choices[*].delta.thinking": "thinking_content",
+        })
 
-    async def _translate_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Translate Anthropic event to common schema.
 
-        Anthropic format variations:
-        - {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "..."}}
-        - {"type": "content_block_delta", "delta": {"type": "reasoning_delta", "reasoning": "..."}}
-        - {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "..."}}
-        - {"type": "message_start", "message": {"content": [...], "reasoning": {...}}}
-        - {"type": "content_block_start", "content_block": {"type": "text", "reasoning": "..."}}
-        - {"type": "content_block_start", "content_block": {"type": "thinking", "thinking": "..."}}
+class AnthropicChatBotResponse(GenericChatBotResponse):
+    """Response wrapper for Anthropic API using standard translations."""
 
-        Translates: reasoning/thinking -> thinking, text -> content
-        """
-        translated: Dict[str, Any] = {"content": "", "thinking": ""}
-        event_type = event.get("type", "")
-
-        if event_type == "content_block_delta":
-            delta = event.get("delta", {})
-            if delta.get("type") == "text_delta":
-                translated["content"] = delta.get("text", "")
-            elif delta.get("type") == "reasoning_delta":
-                # Handle incremental reasoning streaming (original Anthropic)
-                translated["thinking"] = delta.get("reasoning", "")
-            elif delta.get("type") == "thinking_delta":
-                # Handle incremental thinking streaming (Anthropic-compatible)
-                translated["thinking"] = delta.get("thinking", "")
-
-        elif event_type == "content_block_start":
-            # Extract reasoning/thinking from content_block if present
-            content_block = event.get("content_block", {})
-            if "reasoning" in content_block:
-                translated["thinking"] = content_block["reasoning"]
-            if "thinking" in content_block:
-                translated["thinking"] = content_block["thinking"]
-            if "text" in content_block:
-                translated["content"] = content_block["text"]
-
-        elif event_type == "message_start":
-            message = event.get("message", {})
-            # Handle nested content array
-            for block in message.get("content", []):
-                if block.get("type") == "text":
-                    translated["content"] = block.get("text", "")
-            # Also check for top-level reasoning/thinking key in message
-            if "reasoning" in message:
-                translated["thinking"] = message["reasoning"]
-            if "thinking" in message:
-                translated["thinking"] = message["thinking"]
-
-        return translated
+    def __init__(self, stream: AsyncGenerator[str, None]):
+        super().__init__(stream, {
+            "content_block_delta.delta.text": "text_content",
+            "content_block_delta.delta.reasoning": "thinking_content",
+            "content_block_delta.delta.thinking": "thinking_content",
+            "content_block_start.content_block.text": "text_content",
+            "content_block_start.content_block.reasoning": "thinking_content",
+            "content_block_start.content_block.thinking": "thinking_content",
+            "message_start.message.content[*].text": "text_content",
+            "message_start.message.reasoning": "thinking_content",
+            "message_start.message.thinking": "thinking_content",
+        })

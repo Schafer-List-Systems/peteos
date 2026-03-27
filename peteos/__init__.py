@@ -1,8 +1,8 @@
 # Peteos - Agentic application framework
 
 from peteos.agent import Agent
-from peteos.chatbot import ChatBot, OpenAIChatBot, AnthropicChatBot
-from peteos.chatbotresponse import ChatBotResponse, OpenAIChatBotResponse, AnthropicChatBotResponse
+from peteos.chatbot import ChatBot, OpenAIChatBot, AnthropicChatBot, GenericChatBot
+from peteos.chatbotresponse import ChatBotResponse, OpenAIChatBotResponse, AnthropicChatBotResponse, GenericChatBotResponse
 from peteos.chathistory import ChatHistory
 from peteos.executionenvironment import ExecutionEnvironment
 from peteos.httpclient import HTTPClient
@@ -18,6 +18,8 @@ __all__ = [
     "ChatBotResponse",
     "ChatHistory",
     "ExecutionEnvironment",
+    "GenericChatBot",
+    "GenericChatBotResponse",
     "HTTPClient",
     "Message",
     "OpenAIChatBot",
