@@ -62,12 +62,12 @@ class TestOpenAIChatBotResponse:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify streaming accumulation - reasoning yields empty text chunks
+        # Verify streaming accumulation - yields accumulated text after every SSE event
         assert len(accumulated) == 4
-        assert accumulated[0] == ""  # First reasoning chunk
-        assert accumulated[1] == ""  # Second reasoning chunk
-        assert accumulated[2] == "Hello"
-        assert accumulated[3] == "Hello World"
+        assert accumulated[0] == ""  # First reasoning chunk (empty text)
+        assert accumulated[1] == ""  # Second reasoning chunk (empty text)
+        assert accumulated[2] == "Hello"  # Accumulated text
+        assert accumulated[3] == "Hello World"  # Final accumulated text
 
         # Verify both reasoning and text content extracted
         assert response.thinking_content == "Thinking step by step"
@@ -111,13 +111,13 @@ class TestAnthropicChatBotResponse:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify streaming accumulation - yields after every SSE event
+        # Verify streaming accumulation - yields accumulated text after every SSE event
         assert len(accumulated) >= 3
         # Event 1: reasoning event adds to thinking but no text
         assert accumulated[0] == ""
-        # Event 2: "Hello" text
+        # Event 2: accumulated "Hello" text
         assert accumulated[1] == "Hello"
-        # Event 3: " World" text
+        # Event 3: accumulated "Hello World" text
         assert "Hello World" in accumulated[2] or accumulated[2] == "Hello World"
 
         # Verify reasoning content is extracted

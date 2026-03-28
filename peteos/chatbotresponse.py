@@ -74,17 +74,17 @@ class ChatBotResponse(ABC):
         return self._text_content
 
     def __aiter__(self) -> "ChatBotResponse":
-        """Async iterable that yields text chunks."""
+        """Async iterable that yields accumulated text content."""
         self._lines_iterator = self._stream.__aiter__()
-        self._last_len = 0
+        self._last_chunk = ""
         return self
 
     async def __anext__(self) -> str:
         """
-        Get next text chunk (not accumulated).
+        Get next accumulated text chunk.
 
         Returns:
-            New text content since last iteration.
+            Accumulated text content after processing next event.
 
         Raises:
             StopAsyncIteration: When stream is exhausted.
@@ -98,10 +98,8 @@ class ChatBotResponse(ABC):
                         event = json.loads(data)
                         translated = await self._translate_event(event)
                         self._accumulate_content(translated)
-                        # Return only the new text (delta from last chunk)
-                        new_text = self._text_content[self._last_len:]
-                        self._last_len = len(self._text_content)
-                        return new_text
+                        self._last_chunk = self._text_content
+                        return self._last_chunk
                     except json.JSONDecodeError:
                         return await self.__anext__()
             elif line.strip() == "[DONE]":
