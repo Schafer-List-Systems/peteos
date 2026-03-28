@@ -261,10 +261,10 @@ OPENAI_COMPATIBLE_MODEL=qwen/qwen3.5-35b-a3b
 ### Running Examples
 
 ```bash
-# OpenAI-compatible API
+# OpenAI-compatible API (streaming)
 python examples/openai_chatbot.py
 
-# Anthropic-compatible API
+# Anthropic-compatible API (streaming)
 python examples/anthropic_chatbot.py
 ```
 
@@ -275,6 +275,20 @@ OPENAI_COMPATIBLE_BASE_URL=http://192.168.255.10:8123 \
 OPENAI_COMPATIBLE_MODEL=qwen/qwen3.5-35b-a3b \
 python examples/openai_chatbot.py
 ```
+
+### Streaming Mode
+
+By default, examples run in streaming mode. To disable streaming:
+
+```bash
+# Non-streaming mode
+USE_STREAMING=false python examples/openai_chatbot.py
+
+# Non-streaming with Anthropic API
+USE_STREAMING=false python examples/anthropic_chatbot.py
+```
+
+The `USE_STREAMING` environment variable controls the `streaming` parameter passed to `send_message()`.
 
 ### Programmatic Usage
 
