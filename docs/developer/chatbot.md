@@ -151,23 +151,28 @@ Configurable base class that handles request building and response wrapping:
 - Supports `thinking_delta` and `reasoning_delta` keys
 - Handles `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop` events
 
-### ChatBotResponse (Abstract Base Class)
+### ChatBotResponse (Generic Class)
 
 ```python
 class ChatBotResponse:
-    def __aiter__() -> self
-    async def __anext__() -> str  # accumulated text chunk
+    def __aiter__() -> AsyncIterator[tuple[str, Any]]
+    async def __anext__() -> tuple[str, Any]  # (key, chunk) pair
     @property
-    def text_content() -> str  # final accumulated response
-    @property
-    def thinking_content() -> str  # final accumulated reasoning
+    def data() -> Dict[str, Any]  # all accumulated fields
+
+class GenericChatBotResponse(ChatBotResponse):
+    def __init__(stream, translations: Dict[str, str])
+    async def _translate_event(event) -> Dict[str, Any]
+    def _accumulate_event(event) -> None
 ```
 
 **Responsibilities:**
 - Parse SSE stream line-by-line
-- Translate API-specific events to common schema
-- Accumulate content in separate fields based on key naming
-- Yield accumulated text on each iteration
+- Translate API-specific events to common schema using path-based translations
+- Accumulate all fields into `response.data` dict
+- Yield **(key, chunk)** tuples for each field update
+  - `("text", "Hello")`, `("reasoning", "Thinking...")`
+- Supports multiple fields per event (e.g., `message_start` with both text and reasoning)
 
 ### GenericChatBotResponse
 
@@ -175,10 +180,31 @@ Configurable response class that translates events using path-based lookups:
 
 **Constructor:**
 ```python
-GenericChatBotResponse(stream, translations)
+GenericChatBotResponse(stream, translations: Dict[str, str])
 ```
 
-Where `translations` is a Dict mapping source path -> target field. Target fields ending in `_thinking` are accumulated into `thinking_content`, all others into `text_content`.
+Where `translations` maps source path -> target field. All accumulated fields are accessible via `response.data`:
+- `response.data["text_content"]`
+- `response.data["thinking_content"]`
+- `response.data["tool_calls"]`
+
+**Async Iteration:**
+```python
+async for key, chunk in response:
+    # key: "text_content", "thinking_content", etc.
+    # chunk: actual delta (not accumulated)
+    print(f"{key}: {chunk}")
+```
+
+**Example:**
+```python
+response = OpenAIChatBotResponse(stream)
+async for key, chunk in response:
+    if key == "text_content":
+        yield chunk  # stream text to user
+# After iteration:
+response.data["text"]  # accumulated full response
+response.data["reasoning"]  # accumulated reasoning
 
 ### OpenAIChatBotResponse
 
@@ -193,28 +219,39 @@ Uses standard Anthropic translation config (inherits from `GenericChatBotRespons
 ### How It Works
 
 1. `ChatBot.send_message()` calls `HTTPClient.stream_post()` which yields raw SSE lines
-2. `ChatBotResponse.__anext__()` processes each SSE line:
+2. `GenericChatBotResponse._event_generator()` processes each SSE line:
    - Parses `data: {...}` JSON
    - Calls `_translate_event()` to normalize to common schema
-   - Accumulates content into appropriate fields
-   - Returns accumulated text (includes all previous chunks)
+   - Accumulates all fields into `response.data` dict
+   - Yields **(key, chunk)** tuple for each field update
 
 ### Yield Behavior
 
-Each `__anext__()` call returns the **accumulated** text, not just the new chunk:
+Each iteration yields a **(key, chunk)** pair:
 
 ```python
-async for chunk in response:
-    # chunk contains all text accumulated so far
-    print(chunk)  # "Hello", "Hello World", "Hello World!"
+# Simple streaming
+async for key, chunk in response:
+    if key == "text_content":
+        print(chunk, end="")  # "H", "e", "l", "l", "o"
+
+# Multi-field event
+data: {"type": "message_start", "message": {"content": [...], "reasoning": "R"}}
+# Yields: ("text_content", "..."), ("reasoning", "R")
 ```
+
+**Key Points:**
+- `chunk` is the **actual delta**, not accumulated
+- `response.data[key]` contains the **accumulated** value
+- Multiple fields from same event are yielded sequentially
 
 ### Non-Streaming Mode
 
 When `streaming=False`:
 1. `ChatBot` makes non-streaming HTTP request
-2. Response is wrapped in a generator that yields a single SSE event
-3. Response class behaves identically to streaming mode
+2. Response is wrapped via `GenericChatBotResponse.from_json()`
+3. Yields all fields in a single SSE event
+4. Same iteration behavior as streaming mode
 
 ## Reasoning/Thinking Support
 
@@ -312,10 +349,14 @@ async def main():
 
     response = await chatbot.send_message(history, streaming=True)
 
-    async for chunk in response:
-        print(chunk, end="", flush=True)
+    # Stream text content to user
+    async for key, chunk in response:
+        if key == "text_content":
+            print(chunk, end="", flush=True)
 
-    print("\nThinking:", response.thinking_content)
+    # Access accumulated values after iteration
+    print("\nThinking:", response.data.get("thinking_content", ""))
+    print("Full text:", response.data.get("text_content", ""))
 ```
 
 See `examples/openai_chatbot.py` and `examples/anthropic_chatbot.py` for complete working examples.

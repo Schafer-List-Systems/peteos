@@ -1,3 +1,12 @@
+## [2026-03-29] - ChatBotResponse Refactoring
+- Converted `GenericChatBotResponse` from async iterator to async generator
+- `__anext__` now yields all **(key, chunk)** pairs per SSE event (not just first field)
+- Supports multi-field events (e.g., `message_start` with both text and reasoning)
+- `response.data` contains all accumulated fields: `text`, `reasoning`, `tool_calls`
+- `_build_body()` now passes full message dict (supports multi-part content)
+- Updated chatbot.md with async generator behavior and yield examples
+- All 51 tests pass
+
 ## [2026-03-27] - GenericChatBot Refactoring
 - Added `GenericChatBot` class: configurable base with endpoints and response translation
 - Added `GenericChatBotResponse` class: path-based event translation

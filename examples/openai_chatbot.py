@@ -58,17 +58,17 @@ async def main():
     print(f"\nRequesting response... ({streaming_mode})\n")
     response = await chatbot.send_message(history, streaming=use_streaming)
 
-    # Collect streaming response
-    accumulated = []
-    async for chunk in response:
-        accumulated.append(chunk)
-        print(chunk, end="", flush=True)
+    # Collect streaming response - yields (key, chunk) tuples
+    async for key, chunk in response:
+        # Print only text chunks (skip reasoning)
+        if key == "text_content":
+            print(chunk, end="", flush=True)
 
     print("\n" + "=" * 60)
     print("Final accumulated response:")
-    print(response.text_content)
+    print(response.data.get("text_content", ""))
     print("\nThinking/Reasoning content:")
-    print(response.thinking_content)
+    print(response.data.get("thinking_content", ""))
 
 
 if __name__ == "__main__":

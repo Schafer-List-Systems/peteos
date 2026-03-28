@@ -2,7 +2,7 @@ from datetime import datetime
 
 
 class Message:
-    """A single message in chat history."""
+    """A single (immutable) message in chat history."""
 
     def __init__(self, content: dict, creation_timestamp: datetime = None):
         """
