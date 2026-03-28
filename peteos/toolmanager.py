@@ -63,6 +63,10 @@ class Tool:
         """Call the tool with provided arguments."""
         return self.func(**kwargs)
 
+    def execute(self, **kwargs) -> Any:
+        """Execute the tool with provided arguments."""
+        return self.func(**kwargs)
+
 
 class ToolManager:
     """Manages tools for the execution environment."""
