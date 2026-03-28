@@ -43,10 +43,16 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 streaming=True
             )
 
-            # Collect accumulated response
+            # Collect accumulated response with interrupt checks
+            interrupted = False
             async for _ in response:
-                # Streaming - just wait for completion
-                pass
+                if self._interrupt:
+                    interrupted = True
+                    break
+
+            if interrupted:
+                # Request dropped mid-stream, exit loop
+                break
 
             # Check if we're interrupted
             if self._interrupt:
