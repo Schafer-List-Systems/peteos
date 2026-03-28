@@ -7,10 +7,12 @@ Requirements:
     Set environment variables:
         OPENAI_COMPATIBLE_BASE_URL: Base URL of OpenAI-compatible API endpoint
         OPENAI_COMPATIBLE_MODEL: Model identifier (e.g., "qwen3.5-35b")
+        USE_STREAMING: "true" (default) or "false" for non-streaming mode
 
 Example with local endpoint:
     OPENAI_COMPATIBLE_BASE_URL=http://192.168.255.10:8123 \\
     OPENAI_COMPATIBLE_MODEL=qwen/qwen3.5-35b-a3b \\
+    USE_STREAMING=true \\
     python examples/openai_chatbot.py
 
 API Protocol: OpenAI-compatible
@@ -30,9 +32,12 @@ async def main():
     # Configuration from environment
     base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "http://localhost:8000")
     model = os.getenv("OPENAI_COMPATIBLE_MODEL", "qwen3.5-35b")
+    use_streaming = os.getenv("USE_STREAMING", "true").lower() == "true"
 
     print(f"Connecting to {base_url} with model {model}")
-    print("Note: Qwen models stream reasoning first, then the response. This may take 30+ seconds.")
+    print(f"Streaming mode: {use_streaming}")
+    if use_streaming:
+        print("Note: Qwen models stream reasoning first, then the response. This may take 30+ seconds.")
 
     # Create HTTP client with timeout
     http_client = HTTPClient(timeout=60.0)
@@ -48,9 +53,10 @@ async def main():
     history = ChatHistory()
     history.append_message(Message(content={"role": "user", "content": "Explain how photosynthesis works step by step."}))
 
-    # Send message with streaming
-    print("\nRequesting response...\n")
-    response = await chatbot.send_message(history, streaming=True)
+    # Send message
+    streaming_mode = "streaming" if use_streaming else "non-streaming"
+    print(f"\nRequesting response... ({streaming_mode})\n")
+    response = await chatbot.send_message(history, streaming=use_streaming)
 
     # Collect streaming response
     accumulated = []

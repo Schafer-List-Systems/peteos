@@ -132,6 +132,22 @@ class GenericChatBotResponse(ChatBotResponse):
         super().__init__(stream)
         self._translations = translations
 
+    @classmethod
+    def from_json(cls, data: Dict[str, Any], translations: Dict[str, str]) -> "GenericChatBotResponse":
+        """Create a response from a JSON response (for non-streaming mode).
+
+        Args:
+            data: Parsed JSON response from API.
+            translations: Path translation configuration.
+
+        Returns:
+            GenericChatBotResponse with the JSON data translated.
+        """
+        async def events():
+            yield f"data: {json.dumps(data)}"
+            yield "[DONE]"
+        return cls(events(), translations)
+
     async def _translate_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
         Translate an event using configured path translations.

@@ -7,10 +7,12 @@ Requirements:
     Set environment variables:
         ANTHROPIC_COMPATIBLE_BASE_URL: Base URL of Anthropic-compatible API endpoint
         ANTHROPIC_COMPATIBLE_MODEL: Model identifier (e.g., "claude-3-opus")
+        USE_STREAMING: "true" (default) or "false" for non-streaming mode
 
 Example with local endpoint:
     ANTHROPIC_COMPATIBLE_BASE_URL=http://localhost:8000 \\
     ANTHROPIC_COMPATIBLE_MODEL=claude-3-opus \\
+    USE_STREAMING=true \\
     python examples/anthropic_chatbot.py
 
 API Protocol: Anthropic-compatible
@@ -30,9 +32,12 @@ async def main():
     # Configuration from environment
     base_url = os.getenv("ANTHROPIC_COMPATIBLE_BASE_URL", "http://localhost:8000")
     model = os.getenv("ANTHROPIC_COMPATIBLE_MODEL", "claude-3-opus")
+    use_streaming = os.getenv("USE_STREAMING", "true").lower() == "true"
 
     print(f"Connecting to {base_url} with model {model}")
-    print("Note: Models that stream reasoning may take 30+ seconds before text appears.")
+    print(f"Streaming mode: {use_streaming}")
+    if use_streaming:
+        print("Note: Models that stream reasoning may take 30+ seconds before text appears.")
 
     # Create HTTP client with timeout
     http_client = HTTPClient(timeout=60.0)
@@ -49,9 +54,10 @@ async def main():
     history.append_message(Message(content={"role": "system", "content": "You are a helpful assistant."}))
     history.append_message(Message(content={"role": "user", "content": "Explain how photosynthesis works step by step."}))
 
-    # Send message with streaming
-    print("\nRequesting response...\n")
-    response = await chatbot.send_message(history, streaming=True)
+    # Send message
+    streaming_mode = "streaming" if use_streaming else "non-streaming"
+    print(f"\nRequesting response... ({streaming_mode})\n")
+    response = await chatbot.send_message(history, streaming=use_streaming)
 
     # Collect streaming response
     accumulated = []

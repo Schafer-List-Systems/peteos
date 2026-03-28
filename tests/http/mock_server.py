@@ -84,11 +84,12 @@ class MockLLMServer:
                 return web.json_response({
                     "id": "msg-123",
                     "model": "test-model",
-                    "content": [{"type": "text", "text": full_content}],
                     "role": "assistant",
+                    "content": [{"type": "text", "text": full_content}],
                     "stop_reason": "end_turn",
                     "stop_sequence": None,
-                    "type": "message"
+                    "type": "message",
+                    "usage": {"input_tokens": 10, "output_tokens": 20}
                 })
             else:
                 # OpenAI format
@@ -101,7 +102,7 @@ class MockLLMServer:
                                 full_content += choice["delta"].get("content", "")
                 return web.json_response({
                     "choices": [{
-                        "delta": {
+                        "message": {
                             "role": "assistant",
                             "content": full_content
                         }

@@ -126,11 +126,7 @@ class GenericChatBot(ChatBot):
             return GenericChatBotResponse(stream, self._translations)
         else:
             response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            # For non-streaming, convert to a simple stream of one event
-            async def events():
-                yield f"data: {json.dumps(response_data)}"
-                yield "[DONE]"
-            return GenericChatBotResponse(events(), self._translations)
+            return GenericChatBotResponse.from_json(response_data, self._translations)
 
     def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
         """Build request body from chat history and defaults."""
@@ -191,6 +187,9 @@ class OpenAIChatBot(GenericChatBot):
                 "choices[*].delta.content": "text_content",
                 "choices[*].delta.reasoning": "thinking_content",
                 "choices[*].delta.thinking": "thinking_content",
+                "choices[*].message.content": "text_content",
+                "choices[*].message.reasoning": "thinking_content",
+                "choices[*].message.thinking": "thinking_content",
             }
         )
         # Store base_url for backward compatibility with _build_request_body calls
@@ -210,10 +209,7 @@ class OpenAIChatBot(GenericChatBot):
             return GenericChatBotResponse(stream, self._translations)
         else:
             response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            async def events():
-                yield f"data: {json.dumps(response_data)}"
-                yield "[DONE]"
-            return GenericChatBotResponse(events(), self._translations)
+            return GenericChatBotResponse.from_json(response_data, self._translations)
 
     def list_available_models(self) -> List[str]:
         """List OpenAI models."""
@@ -249,6 +245,9 @@ class AnthropicChatBot(GenericChatBot):
                 "message_start.message.content[*].text": "text_content",
                 "message_start.message.reasoning": "thinking_content",
                 "message_start.message.thinking": "thinking_content",
+                "content[*].text": "text_content",
+                "content[*].reasoning": "thinking_content",
+                "content[*].thinking": "thinking_content",
             },
             max_tokens=max_tokens
         )
@@ -269,23 +268,7 @@ class AnthropicChatBot(GenericChatBot):
             return GenericChatBotResponse(stream, self._translations)
         else:
             response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            async def events():
-                for block in response_data.get("content", []):
-                    if block.get("type") == "text":
-                        yield f"data: {json.dumps({
-                            "type": "content_block_start",
-                            "content_block": {"type": "text", "text": block.get("text", "")}
-                        })}"
-                        yield f"data: {json.dumps({
-                            "type": "content_block_delta",
-                            "delta": {"type": "text_delta", "text": block.get("text", "")}
-                        })}"
-                        yield f"data: {json.dumps({
-                            "type": "content_block_stop",
-                            "content_block": {"type": "text"}
-                        })}"
-                yield "[DONE]"
-            return GenericChatBotResponse(events(), self._translations)
+            return GenericChatBotResponse.from_json(response_data, self._translations)
 
     def list_available_models(self) -> List[str]:
         """List Anthropic models."""
