@@ -83,8 +83,11 @@ class TestREPLRunBasicConversation:
 
         class MockResponse:
             def __init__(self):
-                self.thinking_content = ""
-                self.text_content = "Hello! How can I help?"
+                self._data = {"text": "Hello! How can I help?", "reasoning": ""}
+
+            @property
+            def data(self):
+                return self._data
 
             def __aiter__(self):
                 return self
@@ -114,7 +117,7 @@ class TestREPLRunBasicConversation:
 
     @pytest.mark.asyncio
     async def test_run_with_thinking_content(self):
-        """Test response with thinking content."""
+        """Test response with reasoning content."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
@@ -122,13 +125,16 @@ class TestREPLRunBasicConversation:
             Message(content={"role": "user", "content": "Solve 2+2"})
         )
 
-        thinking_content = "Let me calculate this step by step..."
+        reasoning_content = "Let me calculate this step by step..."
         text_content = "4"
 
         class MockResponse:
             def __init__(self):
-                self.thinking_content = thinking_content
-                self.text_content = text_content
+                self._data = {"reasoning": reasoning_content, "text": text_content}
+
+            @property
+            def data(self):
+                return self._data
 
             def __aiter__(self):
                 return self
@@ -146,17 +152,17 @@ class TestREPLRunBasicConversation:
 
         await env.run()
 
-        # Should have: user, assistant (thinking), assistant (answer)
+        # Should have: user, assistant (reasoning), assistant (answer)
         assert len(chat_history.messages) == 3
         assert chat_history.messages[0].content["role"] == "user"
         assert chat_history.messages[1].content["role"] == "assistant"
-        assert "[Thinking]" in chat_history.messages[1].content["content"]
-        assert chat_history.messages[1].content["content"].endswith(thinking_content)
+        assert "[Reasoning]" in chat_history.messages[1].content["content"]
+        assert chat_history.messages[1].content["content"].endswith(reasoning_content)
         assert chat_history.messages[2].content["content"] == text_content
 
     @pytest.mark.asyncio
     async def test_run_loop_terminates_on_final_answer(self):
-        """Test that loop terminates when no tool calls in response."""
+        """Test that loop terminates when no tool_calls in response."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
@@ -168,8 +174,11 @@ class TestREPLRunBasicConversation:
 
         class MockResponse:
             def __init__(self):
-                self.thinking_content = ""
-                self.text_content = "Final answer"
+                self._data = {"text": "Final answer", "reasoning": ""}
+
+            @property
+            def data(self):
+                return self._data
 
             def __aiter__(self):
                 return self
@@ -197,7 +206,7 @@ class TestREPLRunWithToolCalls:
 
     @pytest.mark.asyncio
     async def test_run_tool_call_detected(self):
-        """Test that tool calls are correctly parsed from response."""
+        """Test that tool calls in response.data['tool_calls'] are executed."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
@@ -211,14 +220,17 @@ class TestREPLRunWithToolCalls:
             Message(content={"role": "user", "content": "What's the weather?"})
         )
 
-        # Tool call as direct JSON in text_content
-        tool_call_json = '{"name": "get_weather", "arguments": {"city": "London"}}'
         final_answer = "It's sunny in London."
 
+        call_count = [0]
+
         class MockResponse:
-            def __init__(self, text_content):
-                self.thinking_content = ""
-                self.text_content = text_content
+            def __init__(self, data):
+                self._data = data
+
+            @property
+            def data(self):
+                return self._data
 
             def __aiter__(self):
                 return self
@@ -226,16 +238,18 @@ class TestREPLRunWithToolCalls:
             async def __anext__(self):
                 raise StopAsyncIteration
 
-        response_order = [tool_call_json, final_answer]
+        # First call: tool_calls in data
+        # Second call: final answer
+        responses = [
+            {"text": "", "reasoning": "", "tool_calls": [{"name": "get_weather", "arguments": {"city": "London"}}]},
+            {"text": final_answer, "reasoning": ""}
+        ]
         response_idx = [0]
 
         async def mock_send_message(history, streaming=True):
             idx = response_idx[0]
             response_idx[0] += 1
-            if idx < len(response_order):
-                return MockResponse(response_order[idx])
-            else:
-                return MockResponse(final_answer)
+            return MockResponse(responses[idx])
 
         chatbot = MagicMock(spec=ChatBot)
         chatbot.send_message = mock_send_message
@@ -244,15 +258,17 @@ class TestREPLRunWithToolCalls:
 
         await env.run()
 
-        # Should have: user, assistant (tool call), tool (result), assistant (final)
-        # send_message called twice: tool call then final answer
+        # Should have: user, assistant (reasoning + tool response), tool (result), assistant (final)
         assert len(chat_history.messages) == 4
         assert chat_history.messages[0].content["role"] == "user"
+        # Message 1 is assistant response (empty reasoning, mentions tool call)
         assert chat_history.messages[1].content["role"] == "assistant"
-        assert "get_weather" in chat_history.messages[1].content["content"]
+        # Message 2 is tool result
         assert chat_history.messages[2].content["role"] == "tool"
         assert chat_history.messages[2].content["name"] == "get_weather"
+        # Message 3 is final answer
         assert chat_history.messages[3].content["role"] == "assistant"
+        assert final_answer in chat_history.messages[3].content["content"]
 
     @pytest.mark.asyncio
     async def test_run_tool_call_loop_continues(self):
@@ -269,10 +285,15 @@ class TestREPLRunWithToolCalls:
             Message(content={"role": "user", "content": "Add 2+2"})
         )
 
+        call_count = [0]
+
         class MockResponse:
-            def __init__(self, text_content):
-                self.text_content = text_content
-                self.thinking_content = ""
+            def __init__(self, data):
+                self._data = data
+
+            @property
+            def data(self):
+                return self._data
 
             def __aiter__(self):
                 return self
@@ -281,18 +302,15 @@ class TestREPLRunWithToolCalls:
                 raise StopAsyncIteration
 
         responses = [
-            '{"name": "add", "arguments": {"a": 2, "b": 2}}',  # First: tool call
-            "The answer is 4",  # Second: final answer
+            {"text": "", "reasoning": "", "tool_calls": [{"name": "add", "arguments": {"a": 2, "b": 2}}]},  # First: tool call
+            {"text": "The answer is 4", "reasoning": ""}  # Second: final answer
         ]
         response_idx = [0]
 
         async def mock_send_message(history, streaming=True):
             idx = response_idx[0]
             response_idx[0] += 1
-            if idx < len(responses):
-                return MockResponse(responses[idx])
-            else:
-                return MockResponse(responses[-1])  # Default to last
+            return MockResponse(responses[idx])
 
         chatbot = MagicMock(spec=ChatBot)
         chatbot.send_message = mock_send_message
@@ -322,8 +340,11 @@ class TestREPLRunInterrupt:
 
         class MockResponse:
             def __init__(self):
-                self.thinking_content = ""
-                self.text_content = "Final answer"
+                self._data = {"text": "Final answer", "reasoning": ""}
+
+            @property
+            def data(self):
+                return self._data
 
             def __aiter__(self):
                 return self
@@ -349,7 +370,7 @@ class TestREPLRunInterrupt:
 
 
 class TestParseToolCalls:
-    """Test _parse_tool_calls method."""
+    """Test _parse_tool_calls_from_text method."""
 
     def setup_method(self):
         """Set up test fixtures."""
@@ -362,7 +383,7 @@ class TestParseToolCalls:
         """Test parsing direct JSON tool call."""
         content = '{"name": "get_weather", "arguments": {"city": "London"}}'
 
-        tool_calls = self.env._parse_tool_calls(content)
+        tool_calls = self.env._parse_tool_calls_from_text(content)
 
         assert len(tool_calls) == 1
         assert tool_calls[0]["name"] == "get_weather"
@@ -372,7 +393,7 @@ class TestParseToolCalls:
         """Test parsing tool_calls array format."""
         content = '{"tool_calls": [{"name": "get_weather", "arguments": {"city": "London"}}]}'
 
-        tool_calls = self.env._parse_tool_calls(content)
+        tool_calls = self.env._parse_tool_calls_from_text(content)
 
         assert len(tool_calls) == 1
         assert tool_calls[0]["name"] == "get_weather"
@@ -381,7 +402,7 @@ class TestParseToolCalls:
         """Test parsing list of tool calls."""
         content = '[{"name": "tool1", "arguments": {}}, {"name": "tool2", "arguments": {}}]'
 
-        tool_calls = self.env._parse_tool_calls(content)
+        tool_calls = self.env._parse_tool_calls_from_text(content)
 
         assert len(tool_calls) == 2
         assert tool_calls[0]["name"] == "tool1"
@@ -391,7 +412,7 @@ class TestParseToolCalls:
         """Test parsing JSON embedded in text response."""
         content = 'Here is the tool: {"name": "add", "arguments": {"a": 1, "b": 2}} more text'
 
-        tool_calls = self.env._parse_tool_calls(content)
+        tool_calls = self.env._parse_tool_calls_from_text(content)
 
         assert len(tool_calls) == 1
         assert tool_calls[0]["name"] == "add"
@@ -402,7 +423,7 @@ class TestParseToolCalls:
         """Test parsing JSON with nested objects."""
         content = '{"name": "search", "arguments": {"query": "weather", "location": {"city": "NYC"}}}'
 
-        tool_calls = self.env._parse_tool_calls(content)
+        tool_calls = self.env._parse_tool_calls_from_text(content)
 
         assert len(tool_calls) == 1
         assert tool_calls[0]["name"] == "search"
@@ -412,7 +433,7 @@ class TestParseToolCalls:
         """Test parsing response without tool calls."""
         content = "This is just a normal response without any tool calls."
 
-        tool_calls = self.env._parse_tool_calls(content)
+        tool_calls = self.env._parse_tool_calls_from_text(content)
 
         assert tool_calls == []
 
@@ -420,7 +441,7 @@ class TestParseToolCalls:
         """Test parsing invalid JSON."""
         content = "not valid json"
 
-        tool_calls = self.env._parse_tool_calls(content)
+        tool_calls = self.env._parse_tool_calls_from_text(content)
 
         assert tool_calls == []
 
@@ -428,6 +449,6 @@ class TestParseToolCalls:
         """Test parsing empty string."""
         content = ""
 
-        tool_calls = self.env._parse_tool_calls(content)
+        tool_calls = self.env._parse_tool_calls_from_text(content)
 
         assert tool_calls == []

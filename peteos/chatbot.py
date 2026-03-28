@@ -134,19 +134,20 @@ class GenericChatBot(ChatBot):
         body["model"] = self._model
         body["stream"] = streaming
 
-        # Build messages array
+        # Build messages array - use message content as-is
         messages = []
         system_content = None
 
         for msg in chat_history.messages:
-            content = msg.content.get("content", "")
-            role = msg.content.get("role", "user")
+            # Get the full message dict (e.g., {"role": "user", "content": "..."})
+            msg_data = msg.content
+            role = msg_data.get("role", "user")
 
             if role == "system":
-                # Extract system message separately
-                system_content = content
+                # Extract system content separately
+                system_content = msg_data.get("content", msg_data)
             else:
-                messages.append({"role": role, "content": content})
+                messages.append(msg_data)
 
         body["messages"] = messages
 

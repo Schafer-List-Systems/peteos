@@ -20,41 +20,23 @@ class TestOpenAIChatBotResponse:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify streaming accumulation
+        # Each SSE yields (key, delta_chunk) - delta not accumulated
         assert len(accumulated) == 2
-        assert accumulated[0] == "Hello"
-        assert accumulated[1] == "Hello World"
+        assert accumulated[0] == ("text", "Hello")
+        assert accumulated[1] == ("text", " World")
 
-        # Verify final content
-        assert response.text_content == "Hello World"
-        assert response.thinking_content == ""
+        # Verify final content using data dict
+        assert response.data["text"] == "Hello World"
+        assert response.data.get("reasoning", "") == ""
 
     @pytest.mark.asyncio
     async def test_openai_with_thinking_content(self):
         """Test OpenAI response with thinking content."""
         async def mock_stream():
-            yield 'data: {"choices": [{"delta": {"thinking": "Let me think...", "content": ""}}]}'
-            yield 'data: {"choices": [{"delta": {"thinking": "", "content": "Hello"}}]}'
-            yield 'data: {"choices": [{"delta": {"thinking": "", "content": " World"}}]}'
-            yield "[DONE]"
-
-        response = OpenAIChatBotResponse(mock_stream())
-        async for _ in response:
-            pass
-
-        # Verify both thinking and text content
-        assert response.thinking_content == "Let me think..."
-        assert response.text_content == "Hello World"
-
-    @pytest.mark.asyncio
-    async def test_openai_with_reasoning(self):
-        """Test OpenAI response with reasoning (Qwen-style)."""
-        async def mock_stream():
-            # Reasoning streamed incrementally like content
-            yield 'data: {"choices": [{"delta": {"reasoning": "Thinking", "content": ""}}]}'
-            yield 'data: {"choices": [{"delta": {"reasoning": " step by step", "content": ""}}]}'
-            yield 'data: {"choices": [{"delta": {"reasoning": "", "content": "Hello"}}]}'
-            yield 'data: {"choices": [{"delta": {"reasoning": "", "content": " World"}}]}'
+            # Reasoning first (separate event from content per API behavior)
+            yield 'data: {"choices": [{"delta": {"thinking": "Let me think..."}}]}'
+            yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
+            yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
             yield "[DONE]"
 
         response = OpenAIChatBotResponse(mock_stream())
@@ -62,16 +44,42 @@ class TestOpenAIChatBotResponse:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify streaming accumulation - yields accumulated text after every SSE event
+        # Each SSE yields (key, delta_chunk) - delta not accumulated
+        assert len(accumulated) == 3
+        assert accumulated[0] == ("reasoning", "Let me think...")
+        assert accumulated[1] == ("text", "Hello")
+        assert accumulated[2] == ("text", " World")
+
+        # Verify both fields extracted
+        assert response.data["reasoning"] == "Let me think..."
+        assert response.data["text"] == "Hello World"
+
+    @pytest.mark.asyncio
+    async def test_openai_with_reasoning(self):
+        """Test OpenAI response with reasoning (Qwen-style)."""
+        async def mock_stream():
+            # Reasoning streamed incrementally (one field per event)
+            yield 'data: {"choices": [{"delta": {"reasoning": "Thinking"}}]}'
+            yield 'data: {"choices": [{"delta": {"reasoning": " step by step"}}]}'
+            yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
+            yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
+            yield "[DONE]"
+
+        response = OpenAIChatBotResponse(mock_stream())
+        accumulated = []
+        async for chunk in response:
+            accumulated.append(chunk)
+
+        # Each SSE yields (key, delta_chunk) - delta not accumulated
         assert len(accumulated) == 4
-        assert accumulated[0] == ""  # First reasoning chunk (empty text)
-        assert accumulated[1] == ""  # Second reasoning chunk (empty text)
-        assert accumulated[2] == "Hello"  # Accumulated text
-        assert accumulated[3] == "Hello World"  # Final accumulated text
+        assert accumulated[0] == ("reasoning", "Thinking")
+        assert accumulated[1] == ("reasoning", " step by step")
+        assert accumulated[2] == ("text", "Hello")
+        assert accumulated[3] == ("text", " World")
 
         # Verify both reasoning and text content extracted
-        assert response.thinking_content == "Thinking step by step"
-        assert response.text_content == "Hello World"
+        assert response.data["reasoning"] == "Thinking step by step"
+        assert response.data["text"] == "Hello World"
 
     @pytest.mark.asyncio
     async def test_openai_non_streaming(self):
@@ -88,8 +96,8 @@ class TestOpenAIChatBotResponse:
 
         # Non-streaming yields all content at once
         assert len(accumulated) == 1
-        assert accumulated[0] == "Complete response"
-        assert response.text_content == "Complete response"
+        assert accumulated[0] == ("text", "Complete response")
+        assert response.data["text"] == "Complete response"
 
 
 class TestAnthropicChatBotResponse:
@@ -99,7 +107,6 @@ class TestAnthropicChatBotResponse:
     async def test_anthropic_streaming_response(self):
         """Test streaming Anthropic response with reasoning."""
         async def mock_stream():
-            # Content block start with reasoning
             yield 'data: {"type": "content_block_start", "content_block": {"type": "text", "reasoning": "Thinking step by step..."}}'
             yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
             yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " World"}}'
@@ -111,18 +118,15 @@ class TestAnthropicChatBotResponse:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify streaming accumulation - yields accumulated text after every SSE event
+        # Each SSE yields (key, delta_chunk) - delta not accumulated
         assert len(accumulated) >= 3
-        # Event 1: reasoning event adds to thinking but no text
-        assert accumulated[0] == ""
-        # Event 2: accumulated "Hello" text
-        assert accumulated[1] == "Hello"
-        # Event 3: accumulated "Hello World" text
-        assert "Hello World" in accumulated[2] or accumulated[2] == "Hello World"
+        assert accumulated[0] == ("reasoning", "Thinking step by step...")
+        assert accumulated[1] == ("text", "Hello")
+        assert accumulated[2] == ("text", " World")
 
-        # Verify reasoning content is extracted
-        assert response.thinking_content == "Thinking step by step..."
-        assert response.text_content == "Hello World"
+        # Verify reasoning and text content extracted
+        assert response.data["reasoning"] == "Thinking step by step..."
+        assert response.data["text"] == "Hello World"
 
     @pytest.mark.asyncio
     async def test_anthropic_message_start(self):
@@ -137,11 +141,12 @@ class TestAnthropicChatBotResponse:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify message_start is processed
-        assert accumulated[0] == "Hello"
-        assert accumulated[1] == "Hello World"
-        assert response.thinking_content == "Initial reasoning"
-        assert response.text_content == "Hello World"
+        # Verify message_start yields all keys from same event (dict order)
+        assert accumulated[0] == ("text", "Hello")
+        assert accumulated[1] == ("reasoning", "Initial reasoning")
+        assert accumulated[2] == ("text", " World")
+        assert response.data["reasoning"] == "Initial reasoning"
+        assert response.data["text"] == "Hello World"
 
     @pytest.mark.asyncio
     async def test_anthropic_compatible_thinking(self):
@@ -150,7 +155,7 @@ class TestAnthropicChatBotResponse:
             yield 'data: {"type": "content_block_start", "content_block": {"type": "thinking", "thinking": ""}}'
             yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "Thinking"}}'
             yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": " Process"}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": ":", "text": ""}}'
+            yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": ":"}}'
             yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
             yield "[DONE]"
 
@@ -159,9 +164,9 @@ class TestAnthropicChatBotResponse:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify thinking content is extracted from thinking_delta
-        assert response.thinking_content == "Thinking Process:"
-        assert "Hello" in response.text_content
+        # Verify reasoning content is extracted from thinking_delta
+        assert response.data["reasoning"] == "Thinking Process:"
+        assert response.data["text"] == "Hello"
 
     @pytest.mark.asyncio
     async def test_anthropic_non_streaming(self):
@@ -177,25 +182,49 @@ class TestAnthropicChatBotResponse:
 
         # Non-streaming yields all content at once
         assert len(accumulated) == 1
-        assert accumulated[0] == "Complete response"
-        assert response.text_content == "Complete response"
+        assert accumulated[0] == ("text", "Complete response")
+        assert response.data["text"] == "Complete response"
 
 
 class TestChatBotResponseProperties:
     """Tests for ChatBotResponse common properties."""
 
     @pytest.mark.asyncio
-    async def test_thinking_content_isolation(self):
-        """Test that thinking content doesn't mix with text content."""
+    async def test_reasoning_content_isolation(self):
+        """Test that reasoning content doesn't mix with text content."""
         async def mock_stream():
-            yield 'data: {"choices": [{"delta": {"thinking": "Reasoning", "content": "Text"}}]}'
+            # Each field in separate event (API behavior)
+            yield 'data: {"choices": [{"delta": {"thinking": "Reasoning"}}]}'
+            yield 'data: {"choices": [{"delta": {"content": "Text"}}]}'
+            yield "[DONE]"
+
+        response = OpenAIChatBotResponse(mock_stream())
+        accumulated = []
+        async for chunk in response:
+            accumulated.append(chunk)
+
+        assert response.data["reasoning"] == "Reasoning"
+        assert response.data["text"] == "Text"
+        assert "Reasoning" not in response.data["text"]
+        assert "Text" not in response.data["reasoning"]
+
+    @pytest.mark.asyncio
+    async def test_response_data_access(self):
+        """Test dict-like access to response data."""
+        async def mock_stream():
+            yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
             yield "[DONE]"
 
         response = OpenAIChatBotResponse(mock_stream())
         async for _ in response:
             pass
 
-        assert response.thinking_content == "Reasoning"
-        assert response.text_content == "Text"
-        assert "Reasoning" not in response.text_content
-        assert "Text" not in response.thinking_content
+        # Test __getitem__
+        assert response["text"] == "Hello"
+
+        # Test __contains__
+        assert "text" in response
+        assert "reasoning" not in response
+
+        # Test data property
+        assert response.data["text"] == "Hello"

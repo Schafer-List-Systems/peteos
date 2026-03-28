@@ -58,23 +58,34 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             if self._interrupt:
                 break
 
-            # Extract thinking and text content
-            thinking_content = response.thinking_content
-            text_content = response.text_content
+            # Extract response data
+            response_data = response.data
+            text_content = response_data.get("text", "")
+            reasoning_content = response_data.get("reasoning", "")
+            tool_calls = response_data.get("tool_calls")
 
-            # Append thinking content if present
-            if thinking_content:
+            # Append reasoning content if present
+            if reasoning_content:
                 self.chat_history.append_message(
                     Message(content={
                         "role": "assistant",
-                        "content": f"[Thinking]\n{thinking_content}"
+                        "content": f"[Reasoning]\n{reasoning_content}"
                     })
                 )
 
-            # Parse response for tool calls
-            tool_calls = self._parse_tool_calls(text_content)
-
+            # Parse tool_calls if present (can be string or list)
             if tool_calls:
+                # Handle tool_calls as string (JSON) or list
+                if isinstance(tool_calls, str):
+                    tool_calls_list = self._parse_tool_calls_from_text(tool_calls)
+                elif isinstance(tool_calls, list):
+                    tool_calls_list = tool_calls
+                else:
+                    tool_calls_list = []
+            else:
+                tool_calls_list = []
+
+            if tool_calls_list:
                 # Append the response containing tool calls as assistant message
                 self.chat_history.append_message(
                     Message(content={
@@ -83,21 +94,22 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     })
                 )
                 # Execute tool calls
-                for tool_call in tool_calls:
-                    tool_name = tool_call.get("name")
-                    args = tool_call.get("arguments", {})
+                for tool_call in tool_calls_list:
+                    if isinstance(tool_call, dict):
+                        tool_name = tool_call.get("name")
+                        args = tool_call.get("arguments", {})
 
-                    tool = self.tool_manager.get_tool(tool_name)
-                    if tool:
-                        result = tool.execute(**args)
-                        # Append tool result
-                        self.chat_history.append_message(
-                            Message(content={
-                                "role": "tool",
-                                "name": tool_name,
-                                "content": str(result)
-                            })
-                        )
+                        tool = self.tool_manager.get_tool(tool_name)
+                        if tool:
+                            result = tool.execute(**args)
+                            # Append tool result
+                            self.chat_history.append_message(
+                                Message(content={
+                                    "role": "tool",
+                                    "name": tool_name,
+                                    "content": str(result)
+                                })
+                            )
                 # Loop continues - sends history with tool results back to LLM
             else:
                 # Final answer - append and exit loop
@@ -109,7 +121,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 )
                 break
 
-    def _parse_tool_calls(self, content: str) -> List[Dict[str, Any]]:
+    def _parse_tool_calls_from_text(self, content: str) -> List[Dict[str, Any]]:
         """
         Parse tool calls from response content.
 
