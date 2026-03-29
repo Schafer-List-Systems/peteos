@@ -1,5 +1,3 @@
-import json
-import re
 from typing import Any, Dict, List
 
 from peteos.chatbot import ChatBot
@@ -73,17 +71,8 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     })
                 )
 
-            # Parse tool_calls if present (can be string or list)
-            if tool_calls:
-                # Handle tool_calls as string (JSON) or list
-                if isinstance(tool_calls, str):
-                    tool_calls_list = self._parse_tool_calls_from_text(tool_calls)
-                elif isinstance(tool_calls, list):
-                    tool_calls_list = tool_calls
-                else:
-                    tool_calls_list = []
-            else:
-                tool_calls_list = []
+            # tool_calls is already a list from response.data["tool_calls"]
+            tool_calls_list = tool_calls if isinstance(tool_calls, list) else []
 
             if tool_calls_list:
                 # Append the response containing tool calls as assistant message
@@ -120,70 +109,6 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     })
                 )
                 break
-
-    def _parse_tool_calls_from_text(self, content: str) -> List[Dict[str, Any]]:
-        """
-        Parse tool calls from response content.
-
-        Looks for OpenAI-style tool_calls JSON object.
-
-        Args:
-            content: Response text content to parse.
-
-        Returns:
-            List of tool call dicts with name and arguments.
-        """
-        # Try direct JSON object without code fence
-        try:
-            obj = json.loads(content.strip())
-            if isinstance(obj, dict) and "name" in obj:
-                return [obj]
-            elif isinstance(obj, dict) and "tool_calls" in obj:
-                return obj["tool_calls"]
-            elif isinstance(obj, list):
-                return obj
-        except json.JSONDecodeError:
-            pass
-
-        # Find JSON object with nested braces
-        start = content.find('{')
-        if start != -1:
-            brace_count = 0
-            end = start
-            for i, c in enumerate(content[start:]):
-                if c == '{':
-                    brace_count += 1
-                elif c == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end = start + i
-                        break
-
-            json_str = content[start:end + 1]
-            try:
-                tool_call = json.loads(json_str)
-                if isinstance(tool_call, dict) and "name" in tool_call:
-                    return [tool_call]
-            except json.JSONDecodeError:
-                pass
-
-        # Search for tool_calls JSON pattern in code fences
-        pattern = r'```(?:tool_calls)?\n?\s*(\{[^}]+\})\s*```'
-        match = re.search(pattern, content)
-
-        if match:
-            try:
-                tool_call_json = match.group(1)
-                tool_call = json.loads(tool_call_json)
-                # Normalize to list format
-                if isinstance(tool_call, dict) and "name" in tool_call:
-                    return [tool_call]
-                elif isinstance(tool_call, dict) and "tool_calls" in tool_call:
-                    return tool_call["tool_calls"]
-            except json.JSONDecodeError:
-                pass
-
-        return []
 
     def set_interrupt(self) -> None:
         """Set the interrupt flag to request loop termination."""
