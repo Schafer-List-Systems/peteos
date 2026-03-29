@@ -78,7 +78,7 @@ class GenericChatBot(ChatBot):
         chat_endpoint: API endpoint for chat (e.g., "/v1/chat/completions").
         models_endpoint: API endpoint for listing models (e.g., "/v1/models").
         response_translations: Dict mapping source path -> target field.
-            Paths use notation like "choices[*].delta.content" -> "text_content".
+            Paths use notation like "choices[*].delta.content" -> "text".
             If no translation matches, events are passed through unchanged.
         **defaults: Additional request body parameters (e.g., max_tokens=4096).
 
@@ -89,8 +89,8 @@ class GenericChatBot(ChatBot):
             chat_endpoint="/v1/chat/completions",
             models_endpoint="/v1/models",
             response_translations={
-                "choices[*].delta.content": "text_content",
-                "choices[*].delta.reasoning": "thinking_content"
+                "choices[*].delta.content": "text",
+                "choices[*].delta.reasoning": "reasoning"
             },
             max_tokens=4096
         )

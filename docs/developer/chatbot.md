@@ -36,8 +36,8 @@ GenericChatBot(
     chat_endpoint="/v1/chat/completions",
     models_endpoint="/v1/models",
     response_translations={
-        "choices[*].delta.content": "text_content",
-        "choices[*].delta.reasoning": "thinking_content"
+        "choices[*].delta.content": "text",
+        "choices[*].delta.reasoning": "reasoning"
     }
 )
 ```
@@ -103,14 +103,14 @@ Configurable base class that handles request building and response wrapping:
 **Translation Config:**
 ```python
 {
-    "choices[*].delta.content": "text_content",
-    "choices[*].delta.reasoning": "thinking_content",
-    "choices[*].delta.thinking": "thinking_content"
+    "choices[*].delta.content": "text",
+    "choices[*].delta.reasoning": "reasoning",
+    "choices[*].delta.thinking": "reasoning"
 }
 ```
 
 **Key Behavior:**
-- Maps `reasoning` key to `thinking_content` property
+- Maps `reasoning`/`thinking` key to `reasoning` field
 - Supports incremental reasoning streaming
 
 ### AnthropicChatBot
@@ -137,12 +137,12 @@ Configurable base class that handles request building and response wrapping:
 **Translation Config:**
 ```python
 {
-    "content_block_delta.delta.text": "text_content",
-    "content_block_delta.delta.reasoning": "thinking_content",
-    "content_block_delta.delta.thinking": "thinking_content",
-    "content_block_start.content_block.text": "text_content",
-    "content_block_start.content_block.reasoning": "thinking_content",
-    "message_start.message.content[*].text": "text_content"
+    "content_block_delta.delta.text": "text",
+    "content_block_delta.delta.reasoning": "reasoning",
+    "content_block_delta.delta.thinking": "reasoning",
+    "content_block_start.content_block.text": "text",
+    "content_block_start.content_block.reasoning": "reasoning",
+    "message_start.message.content[*].text": "text"
 }
 ```
 
@@ -184,14 +184,14 @@ GenericChatBotResponse(stream, translations: Dict[str, str])
 ```
 
 Where `translations` maps source path -> target field. All accumulated fields are accessible via `response.data`:
-- `response.data["text_content"]`
-- `response.data["thinking_content"]`
+- `response.data["text"]`
+- `response.data["reasoning"]`
 - `response.data["tool_calls"]`
 
 **Async Iteration:**
 ```python
 async for key, chunk in response:
-    # key: "text_content", "thinking_content", etc.
+    # key: "text", "reasoning", etc.
     # chunk: actual delta (not accumulated)
     print(f"{key}: {chunk}")
 ```
@@ -200,7 +200,7 @@ async for key, chunk in response:
 ```python
 response = OpenAIChatBotResponse(stream)
 async for key, chunk in response:
-    if key == "text_content":
+    if key == "text":
         yield chunk  # stream text to user
 # After iteration:
 response.data["text"]  # accumulated full response
@@ -232,12 +232,12 @@ Each iteration yields a **(key, chunk)** pair:
 ```python
 # Simple streaming
 async for key, chunk in response:
-    if key == "text_content":
+    if key == "text":
         print(chunk, end="")  # "H", "e", "l", "l", "o"
 
 # Multi-field event
 data: {"type": "message_start", "message": {"content": [...], "reasoning": "R"}}
-# Yields: ("text_content", "..."), ("reasoning", "R")
+# Yields: ("text", "..."), ("reasoning", "R")
 ```
 
 **Key Points:**
@@ -263,7 +263,7 @@ Different APIs expose reasoning differently:
 | Anthropic-compatible | `thinking` | Incremental (`thinking_delta`) |
 | Anthropic-compatible | `reasoning` | Incremental (`reasoning_delta`) |
 
-All are normalized to `response.thinking_content`.
+All are normalized to `response.data["reasoning"]`.
 
 ## Testing
 
@@ -351,12 +351,12 @@ async def main():
 
     # Stream text content to user
     async for key, chunk in response:
-        if key == "text_content":
+        if key == "text":
             print(chunk, end="", flush=True)
 
     # Access accumulated values after iteration
-    print("\nThinking:", response.data.get("thinking_content", ""))
-    print("Full text:", response.data.get("text_content", ""))
+    print("\nReasoning:", response.data.get("reasoning", ""))
+    print("Full text:", response.data.get("text", ""))
 ```
 
 See `examples/openai_chatbot.py` and `examples/anthropic_chatbot.py` for complete working examples.

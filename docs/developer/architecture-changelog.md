@@ -5,6 +5,7 @@
 - `response.data` contains all accumulated fields: `text`, `reasoning`, `tool_calls`
 - `_build_body()` now passes full message dict (supports multi-part content)
 - Updated chatbot.md with async generator behavior and yield examples
+- Renamed response keys: `text_content` -> `text`, `thinking_content` -> `reasoning`
 - All 51 tests pass
 
 ## [2026-03-27] - GenericChatBot Refactoring
@@ -29,7 +30,7 @@
 ## [2026-03-27] - Anthropic API Support
 - Updated `AnthropicChatBotResponse` to support Anthropic-compatible format
 - Handles `thinking`/`thinking_delta` keys (Anthropic-compatible) in addition to `reasoning`/`reasoning_delta`
-- Response translation: `thinking` → `thinking_content`, `text` → `text_content`
+- Response translation: `thinking` → `reasoning`, `text` → `text`
 - Both OpenAI and Anthropic endpoints now supported on the same host/port
 - Added test: `test_anthropic_compatible_thinking`
 
@@ -39,8 +40,8 @@
 - Created `ChatBotResponse` abstract base class for streaming responses
 - Created `OpenAIChatBotResponse` and `AnthropicChatBotResponse` implementations
 - Response classes translate API-specific schemas to common format:
-  - OpenAI/Qwen: `reasoning`/`thinking` → `thinking_content`, `content` → `text_content`
-  - Anthropic: `reasoning`/`reasoning_delta` → `thinking_content`, `thinking`/`thinking_delta` → `thinking_content`, `text`/`text_delta` → `text_content`
+  - OpenAI/Qwen: `reasoning`/`thinking` → `reasoning`, `content` → `text`
+  - Anthropic: `reasoning`/`reasoning_delta` → `reasoning`, `thinking`/`thinking_delta` → `reasoning`, `text`/`text_delta` → `text`
 - `send_message()` supports streaming mode (default) and non-streaming mode via `streaming: bool = True`
 - `ChatBotResponse` is async iterable, yields accumulated text as it arrives
 - HTTPClient can be mocked for testing

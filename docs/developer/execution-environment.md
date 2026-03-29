@@ -106,16 +106,16 @@ async def run(self) -> None:
 
         # 4. Extract content from response.data dict
         response_data = response.data
-        reasoning_content = response_data.get("reasoning", "")
-        text_content = response_data.get("text", "")
+        reasoning = response_data.get("reasoning", "")
+        text = response_data.get("text", "")
         tool_calls = response_data.get("tool_calls")  # Pre-parsed list
 
         # 5. Append reasoning (if present)
-        if reasoning_content:
+        if reasoning:
             self.chat_history.append_message(
                 Message(content={
                     "role": "assistant",
-                    "content": f"[Reasoning]\n{reasoning_content}"
+                    "content": f"[Reasoning]\n{reasoning}"
                 })
             )
 
@@ -138,7 +138,7 @@ async def run(self) -> None:
             self.chat_history.append_message(
                 Message(content={
                     "role": "assistant",
-                    "content": text_content
+                    "content": text
                 })
             )
             break

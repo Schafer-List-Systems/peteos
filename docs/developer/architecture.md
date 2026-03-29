@@ -55,11 +55,11 @@ peteos/
 
 - **ChatBotResponse** (abstract): Abstract base class for LLM responses with streaming support
 
-  - Contains: `_stream` (raw SSE generator), `_thinking_content` (str), `_text_content` (str)
-  - Async iterable: yields accumulated text chunks as they arrive
-  - Properties: `thinking_content`, `text_content`
+  - Contains: `_stream` (raw SSE generator), `_data` (dict)
+  - Async iterable: yields (key, chunk) tuples
+  - Properties: `data` - accumulated response fields
   - Subclasses: `OpenAIChatBotResponse`, `AnthropicChatBotResponse`
-  - Translation: normalizes "reasoning" (Anthropic) and "thinking" (OpenAI) to `thinking_content`
+  - Translation: normalizes `reasoning`/`thinking` to `reasoning`, `content`/`text` to `text`
 
 - **ExecutionEnvironment**: Abstract base class for agent execution environments
 
@@ -163,13 +163,11 @@ classDiagram
     class ChatBotResponse {
         <<Abstract>>
         +AsyncGenerator _stream
-        +str _thinking_content
-        +str _text_content
+        +Dict[str, Any] _data
         +__init__(stream: AsyncGenerator)
         +__aiter__()
-        +__anext__() str
-        +thinking_content str {get}
-        +text_content str {get}
+        +__getitem__(key: str) Any
+        +data Dict[str, Any] {get}
     }
 
     class OpenAIChatBotResponse {

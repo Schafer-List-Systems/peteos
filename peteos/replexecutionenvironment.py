@@ -58,16 +58,16 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
             # Extract response data
             response_data = response.data
-            text_content = response_data.get("text", "")
-            reasoning_content = response_data.get("reasoning", "")
+            text = response_data.get("text", "")
+            reasoning = response_data.get("reasoning", "")
             tool_calls = response_data.get("tool_calls")
 
-            # Append reasoning content if present
-            if reasoning_content:
+            # Append reasoning if present
+            if reasoning:
                 self.chat_history.append_message(
                     Message(content={
                         "role": "assistant",
-                        "content": f"[Reasoning]\n{reasoning_content}"
+                        "content": f"[Reasoning]\n{reasoning}"
                     })
                 )
 
@@ -79,7 +79,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 self.chat_history.append_message(
                     Message(content={
                         "role": "assistant",
-                        "content": text_content
+                        "content": text
                     })
                 )
                 # Execute tool calls
@@ -105,7 +105,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 self.chat_history.append_message(
                     Message(content={
                         "role": "assistant",
-                        "content": text_content
+                        "content": text
                     })
                 )
                 break

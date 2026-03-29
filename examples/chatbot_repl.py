@@ -91,6 +91,14 @@ async def main():
         # Run the REPL loop
         await env.run()
 
+        # Print accumulated response
+        from peteos.message import Message
+        # Find the last assistant message in chat history
+        last_msg = chat_history.messages[-1]
+        if last_msg.content.get("role") == "assistant":
+            content = last_msg.content.get("content", "")
+            print(content)
+
         # Clear interrupt flag for next turn
         env.clear_interrupt()
 
