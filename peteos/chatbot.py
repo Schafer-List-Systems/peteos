@@ -185,12 +185,12 @@ class OpenAIChatBot(GenericChatBot):
             chat_endpoint="/v1/chat/completions",
             models_endpoint="/v1/models",
             response_translations={
-                "choices[*].delta.content": "text_content",
-                "choices[*].delta.reasoning": "thinking_content",
-                "choices[*].delta.thinking": "thinking_content",
                 "choices[*].message.content": "text_content",
                 "choices[*].message.reasoning": "thinking_content",
                 "choices[*].message.thinking": "thinking_content",
+                "choices[*].delta.content": "text_content",
+                "choices[*].delta.reasoning": "thinking_content",
+                "choices[*].delta.thinking": "thinking_content",
             }
         )
         # Store base_url for backward compatibility with _build_request_body calls
@@ -237,6 +237,9 @@ class AnthropicChatBot(GenericChatBot):
             chat_endpoint="/v1/messages",
             models_endpoint="/v1/models",
             response_translations={
+                "content[*].text": "text_content",
+                "content[*].reasoning": "thinking_content",
+                "content[*].thinking": "thinking_content",
                 "content_block_delta.delta.text": "text_content",
                 "content_block_delta.delta.reasoning": "thinking_content",
                 "content_block_delta.delta.thinking": "thinking_content",
@@ -246,9 +249,6 @@ class AnthropicChatBot(GenericChatBot):
                 "message_start.message.content[*].text": "text_content",
                 "message_start.message.reasoning": "thinking_content",
                 "message_start.message.thinking": "thinking_content",
-                "content[*].text": "text_content",
-                "content[*].reasoning": "thinking_content",
-                "content[*].thinking": "thinking_content",
             },
             max_tokens=max_tokens
         )

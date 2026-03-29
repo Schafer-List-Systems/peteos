@@ -50,12 +50,14 @@ Communicates with the LLM API. Handles:
 
 Streams LLM responses with support for:
 - Server-Sent Events (SSE) parsing
-- Accumulating text and thinking content
+- Accumulating all response fields into `response.data` dict
 - Path-based translation of API-specific schemas
+- Async iteration yielding `(key, chunk)` tuples
 
 **Key Properties:**
-- `text_content` - accumulated response text
-- `thinking_content` - accumulated reasoning/thinking content
+- `response.data["text"]` - accumulated response text
+- `response.data["reasoning"]` - accumulated reasoning/thinking content
+- `response.data["tool_calls"]` - list of tool call dicts (pre-parsed)
 
 ### ToolManager
 
@@ -94,29 +96,30 @@ async def run(self) -> None:
         )
 
         # 2. Collect accumulated response
-        async for _ in response:
+        # Yields (key, chunk) tuples: ("text", "Hello"), ("reasoning", "Thinking...")
+        async for key, chunk in response:
             pass  # Streaming iteration
 
         # 3. Check for interrupt
         if self._interrupt:
             break
 
-        # 4. Extract thinking and text content
-        thinking_content = response.thinking_content
-        text_content = response.text_content
+        # 4. Extract content from response.data dict
+        response_data = response.data
+        reasoning_content = response_data.get("reasoning", "")
+        text_content = response_data.get("text", "")
+        tool_calls = response_data.get("tool_calls")  # Pre-parsed list
 
-        # 5. Append thinking (if present)
-        if thinking_content:
+        # 5. Append reasoning (if present)
+        if reasoning_content:
             self.chat_history.append_message(
                 Message(content={
                     "role": "assistant",
-                    "content": f"[Thinking]\n{thinking_content}"
+                    "content": f"[Reasoning]\n{reasoning_content}"
                 })
             )
 
-        # 6. Parse for tool calls
-        tool_calls = self._parse_tool_calls(text_content)
-
+        # 6. Execute tool calls (already parsed from API response)
         if tool_calls:
             # 7a. Execute each tool call
             for tool_call in tool_calls:
@@ -143,32 +146,17 @@ async def run(self) -> None:
 
 ### Tool Call Format
 
-Tool calls are expected in OpenAI-compatible JSON format:
+Tool calls come pre-parsed in `response.data["tool_calls"]` as a list of dicts:
 
-**Direct JSON:**
-```json
-{"name": "get_weather", "arguments": {"city": "London"}}
-```
-
-**Wrapped in text:**
-```
-I need to check the weather: {"name": "get_weather", "arguments": {"city": "London"}}
+```python
+tool_calls = response.data.get("tool_calls")
+# [
+#   {"name": "get_weather", "arguments": {"city": "London"}},
+#   {"name": "search", "arguments": {"query": "weather"}}
+# ]
 ```
 
-**Code fence:**
-```
-```tool_calls
-{"name": "get_weather", "arguments": {"city": "London"}}
-```
-```
-
-**Multiple calls (array):**
-```json
-[
-  {"name": "tool1", "arguments": {}},
-  {"name": "tool2", "arguments": {}}
-]
-```
+The API is responsible for returning tool calls in this structured format. The response parser extracts tool_calls from the JSON response and makes them available directly.
 
 ### Interrupt Control
 
@@ -314,20 +302,20 @@ Streaming allows:
 - Lower latency perception
 - Ability to interrupt mid-stream
 
-### Why JSON-Based Tool Calls?
+### Why Pre-Parsed Tool Calls?
 
-JSON provides:
-- Structured, parseable format
-- No need for special delimiters
-- Flexible argument handling
-- Easy to extend with metadata
+Tool calls come pre-parsed in `response.data["tool_calls"]`:
+- API response parsing handles JSON extraction
+- REPL doesn't need to parse text for embedded JSON
+- Consistent format across all responses
+- Eliminates need for `_parse_tool_calls_from_text()`
 
-### Why Accumulate Before Parse?
+### Why Accumulate Response First?
 
-Accumulating `ChatBotResponse` before parsing:
-- Simplifies parsing logic (full response available)
-- Avoids incremental JSON parsing complexity
-- Handles streaming artifacts cleanly
+Accumulating `ChatBotResponse` before processing:
+- All fields available in `response.data` dict
+- Supports multi-field events (reasoning + tool_calls)
+- Clean separation between streaming and processing
 - Works with both streaming and non-streaming modes
 
 ### Why Separate Thinking Content?
