@@ -1,28 +1,30 @@
-"""Example: Using AnthropicChatBot with a streaming response.
+"""Example: ChatBot with streaming response.
 
-This example demonstrates how to use AnthropicChatBot to send a message
-and receive a streaming response with thinking/reasoning content.
+This example demonstrates how to use ChatBot to send a message
+and receive a streaming response with reasoning/thinking content.
 
 Requirements:
     Set environment variables:
-        ANTHROPIC_COMPATIBLE_BASE_URL: Base URL of Anthropic-compatible API endpoint
-        ANTHROPIC_COMPATIBLE_MODEL: Model identifier (e.g., "claude-3-opus")
+        BASE_URL: Base URL of API endpoint
+        MODEL: Model identifier (e.g., "qwen/qwen3.5-35b")
+        CHAT_PROTOCOL: "openai" or "anthropic" (default: "anthropic")
         USE_STREAMING: "true" (default) or "false" for non-streaming mode
 
-Example with local endpoint:
-    ANTHROPIC_COMPATIBLE_BASE_URL=http://localhost:8000 \\
-    ANTHROPIC_COMPATIBLE_MODEL=claude-3-opus \\
-    USE_STREAMING=true \\
-    python examples/anthropic_chatbot.py
+Example:
+    BASE_URL=http://192.168.255.10:8123 \
+    MODEL=qwen/qwen3.5-35b-a3b \
+    CHAT_PROTOCOL=anthropic \
+    USE_STREAMING=true \
+    python examples/chatbot.py
 
-API Protocol: Anthropic-compatible
-    Responses use "thinking" or "reasoning" keys for thinking/reasoning content
+API Protocol: Configurable (OpenAI or Anthropic)
+    Responses use "reasoning"/"thinking" key for thinking content
 """
 
 import asyncio
 import os
 
-from peteos.chatbot import AnthropicChatBot
+from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
 from peteos.httpclient import HTTPClient
 from peteos.chathistory import ChatHistory
 from peteos.message import Message
@@ -30,11 +32,13 @@ from peteos.message import Message
 
 async def main():
     # Configuration from environment
-    base_url = os.getenv("ANTHROPIC_COMPATIBLE_BASE_URL", "http://localhost:8000")
-    model = os.getenv("ANTHROPIC_COMPATIBLE_MODEL", "claude-3-opus")
+    base_url = os.getenv("BASE_URL", "http://localhost:8000")
+    model = os.getenv("MODEL", "qwen3.5-35b")
+    chat_protocol = os.getenv("CHAT_PROTOCOL", "anthropic").lower()
     use_streaming = os.getenv("USE_STREAMING", "true").lower() == "true"
 
     print(f"Connecting to {base_url} with model {model}")
+    print(f"Protocol: {chat_protocol}")
     print(f"Streaming mode: {use_streaming}")
     if use_streaming:
         print("Note: Models that stream reasoning may take 30+ seconds before text appears.")
@@ -42,12 +46,19 @@ async def main():
     # Create HTTP client with timeout
     http_client = HTTPClient(timeout=60.0)
 
-    # Create ChatBot instance
-    chatbot = AnthropicChatBot(
-        http_client=http_client,
-        model=model,
-        base_url=base_url
-    )
+    # Create ChatBot instance based on protocol
+    if chat_protocol == "openai":
+        chatbot = OpenAIChatBot(
+            http_client=http_client,
+            model=model,
+            base_url=base_url
+        )
+    else:  # default to anthropic
+        chatbot = AnthropicChatBot(
+            http_client=http_client,
+            model=model,
+            base_url=base_url
+        )
 
     # Build chat history with system prompt
     history = ChatHistory()
