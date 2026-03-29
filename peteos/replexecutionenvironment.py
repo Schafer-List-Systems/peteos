@@ -93,13 +93,32 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
                             tool = self.tool_manager.get_tool(tool_name)
                             if tool:
-                                result = tool.execute(**args)
-                                # Append tool result
+                                try:
+                                    result = tool.execute(**args)
+                                    self.chat_history.append_message(
+                                        Message(content={
+                                            "role": "tool",
+                                            "name": tool_name,
+                                            "content": str(result),
+                                            "success": True
+                                        })
+                                    )
+                                except Exception as e:
+                                    self.chat_history.append_message(
+                                        Message(content={
+                                            "role": "tool",
+                                            "name": tool_name,
+                                            "content": f"Error: {type(e).__name__}: {str(e)}",
+                                            "success": False
+                                        })
+                                    )
+                            else:
                                 self.chat_history.append_message(
                                     Message(content={
                                         "role": "tool",
                                         "name": tool_name,
-                                        "content": str(result)
+                                        "content": f"Error: Tool '{tool_name}' not found",
+                                        "success": False
                                     })
                                 )
                     # Loop continues - sends history with tool results back to LLM
