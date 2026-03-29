@@ -1,5 +1,3 @@
-from typing import Any, Dict, List
-
 from peteos.chatbot import ChatBot
 from peteos.chathistory import ChatHistory
 from peteos.executionenvironment import ExecutionEnvironment
@@ -25,8 +23,6 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             tool_manager: The ToolManager instance to use.
         """
         super().__init__(chatbot=chatbot, chat_history=chat_history, tool_manager=tool_manager)
-        self._interrupt = False
-        self._running = False
 
     async def run(self) -> None:
         """
@@ -133,16 +129,3 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     break
         finally:
             self._running = False
-
-    @property
-    def is_running(self) -> bool:
-        """Check if the REPL loop is currently running."""
-        return self._running
-
-    def set_interrupt(self) -> None:
-        """Set the interrupt flag to request loop termination."""
-        self._interrupt = True
-
-    def clear_interrupt(self) -> None:
-        """Clear the interrupt flag."""
-        self._interrupt = False

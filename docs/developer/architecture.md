@@ -63,14 +63,14 @@ peteos/
 
 - **ExecutionEnvironment**: Abstract base class for agent execution environments
 
-  - Contains: `ChatHistory`, `ToolManager`, `ChatBot`, message queue
-  - Methods: `queue_message(Message)` - adds message to queue, `get_chat_history()` - returns ChatHistory
+  - Contains: `ChatHistory`, `ToolManager`, `ChatBot`
+  - Methods: `set_interrupt()` - request interrupt, `clear_interrupt()` - clear interrupt, `is_running` - check if running, `get_chat_history()` - returns ChatHistory
   - Abstract Methods: `run()` - runs agentic loop until LLM responds with final answer or interrupted (must be overridden)
 
 - **REPLExecutionEnvironment**: Concrete implementation of ExecutionEnvironment for REPL
 
   - Inherits from: `ExecutionEnvironment`
-  - Methods: `run()` - REPL loop that reads input, processes via chatbot, appends output to ChatHistory
+  - Methods: `run()` - REPL loop that processes chat history via chatbot, appends output to ChatHistory
 
 - **Session**: Container for execution environment
 
@@ -104,7 +104,8 @@ classDiagram
     class Message {
         +dict content
         +datetime creation_timestamp
-        +__init__(content: dict, creation_timestamp: datetime=None)
+        +str id
+        +__init__(content: dict, creation_timestamp: datetime=None, message_id: str=None)
     }
 
     class ChatHistory {
@@ -184,9 +185,12 @@ classDiagram
         +ToolManager tool_manager
         +ChatHistory chat_history
         +ChatBot chatbot
-        +deque _message_queue
+        +bool _interrupt
+        +bool _running
         +__init__(chatbot: ChatBot, chat_history: ChatHistory, tool_manager: ToolManager)
-        +queue_message(message: Message)
+        +is_running bool {get}
+        +set_interrupt()
+        +clear_interrupt()
         +get_chat_history() ChatHistory
         +run() #abstract
     }

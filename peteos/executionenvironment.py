@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
-from collections import deque
 
 from peteos.chatbot import ChatBot
 from peteos.chathistory import ChatHistory
-from peteos.message import Message
 from peteos.toolmanager import ToolManager
 
 
@@ -27,24 +25,24 @@ class ExecutionEnvironment(ABC):
         self.tool_manager = tool_manager
         self.chat_history = chat_history
         self.chatbot = chatbot
-        self._message_queue = deque()
+        self._interrupt = False
+        self._running = False
 
-    def queue_message(self, message: Message) -> None:
-        """
-        Add a message to the internal queue.
+    @property
+    def is_running(self) -> bool:
+        """Check if the execution environment is currently running."""
+        return self._running
 
-        Args:
-            message: The message to queue.
-        """
-        self._message_queue.append(message)
+    def set_interrupt(self) -> None:
+        """Request interruption of the execution loop."""
+        self._interrupt = True
+
+    def clear_interrupt(self) -> None:
+        """Clear the interrupt flag."""
+        self._interrupt = False
 
     def get_chat_history(self) -> ChatHistory:
-        """
-        Get the internal chat history.
-
-        Returns:
-            The ChatHistory instance.
-        """
+        """Get the internal chat history."""
         return self.chat_history
 
     @abstractmethod
