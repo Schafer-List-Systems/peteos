@@ -110,12 +110,12 @@ async def run(self) -> None:
         text = response_data.get("text", "")
         tool_calls = response_data.get("tool_calls")  # Pre-parsed list
 
-        # 5. Append reasoning (if present)
+        # 5. Append reasoning as separate field (if present)
         if reasoning:
             self.chat_history.append_message(
                 Message(content={
                     "role": "assistant",
-                    "content": f"[Reasoning]\n{reasoning}"
+                    "reasoning": reasoning
                 })
             )
 

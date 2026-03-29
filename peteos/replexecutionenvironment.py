@@ -65,12 +65,12 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 reasoning = response_data.get("reasoning", "")
                 tool_calls = response_data.get("tool_calls")
 
-                # Append reasoning if present
+                # Append reasoning as separate field if present
                 if reasoning:
                     self.chat_history.append_message(
                         Message(content={
                             "role": "assistant",
-                            "content": f"[Reasoning]\n{reasoning}"
+                            "reasoning": reasoning
                         })
                     )
 

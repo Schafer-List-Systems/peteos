@@ -156,8 +156,7 @@ class TestREPLRunBasicConversation:
         assert len(chat_history.messages) == 3
         assert chat_history.messages[0].content["role"] == "user"
         assert chat_history.messages[1].content["role"] == "assistant"
-        assert "[Reasoning]" in chat_history.messages[1].content["content"]
-        assert chat_history.messages[1].content["content"].endswith(reasoning_content)
+        assert chat_history.messages[1].content.get("reasoning") == reasoning_content
         assert chat_history.messages[2].content["content"] == text_content
 
     @pytest.mark.asyncio
