@@ -46,7 +46,7 @@ class TestOpenAIChatBotIntegration:
 
             assert len(accumulated) > 0
             assert "Mock response from test server" in accumulated[-1]
-            assert "This is mock reasoning" in response.data["thinking_content"]
+            assert "This is mock reasoning" in response.data["reasoning"]
         finally:
             await server.stop()
 
@@ -115,7 +115,7 @@ class TestAnthropicChatBotIntegration:
 
             assert len(accumulated) > 0
             assert "Mock response from Anthropic test server" in accumulated[-1]
-            assert "This is mock thinking" in response.data["thinking_content"]
+            assert "This is mock thinking" in response.data["reasoning"]
         finally:
             await server.stop()
 

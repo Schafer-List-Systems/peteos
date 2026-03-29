@@ -73,14 +73,14 @@ async def main():
     # Collect streaming response - yields (key, chunk) tuples
     async for key, chunk in response:
         # Print only text chunks (skip reasoning)
-        if key == "text_content":
+        if key == "text":
             print(chunk, end="", flush=True)
 
     print("\n" + "=" * 60)
     print("Final accumulated response:")
-    print(response.data.get("text_content", ""))
+    print(response.data.get("text", ""))
     print("\nThinking/Reasoning content:")
-    print(response.data.get("thinking_content", ""))
+    print(response.data.get("reasoning", ""))
 
 
 if __name__ == "__main__":

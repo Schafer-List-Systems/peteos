@@ -104,6 +104,7 @@ class GenericChatBot(ChatBot):
         chat_endpoint: str = "/v1/chat/completions",
         models_endpoint: str = "/v1/models",
         response_translations: Optional[Dict[str, str]] = None,
+        request_translations: Optional[Dict[str, str]] = None,
         **defaults
     ):
         super().__init__(http_client, model)
@@ -111,6 +112,7 @@ class GenericChatBot(ChatBot):
         self._chat_endpoint = chat_endpoint
         self._models_endpoint = models_endpoint
         self._translations = response_translations or {}
+        self._request_translations = request_translations or {}
         self._defaults = defaults
 
     async def send_message(
@@ -128,19 +130,40 @@ class GenericChatBot(ChatBot):
             response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
             return GenericChatBotResponse.from_json(response_data, self._translations)
 
+    def _translate_message_fields(self, msg_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Translate message content keys from uniform API to API-specific format.
+
+        Generic implementation: keys in request_translations are translated,
+        keys not in the table are forwarded as-is.
+
+        Args:
+            msg_data: Message content dict with uniform keys.
+
+        Returns:
+            Message content dict with API-specific keys.
+        """
+        translated: Dict[str, Any] = {}
+        for key, value in msg_data.items():
+            if key in self._request_translations:
+                translated[self._request_translations[key]] = value
+            else:
+                translated[key] = value
+        return translated
+
     def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
         """Build request body from chat history and defaults."""
         body = dict(self._defaults)
         body["model"] = self._model
         body["stream"] = streaming
 
-        # Build messages array - use message content as-is
+        # Build messages array - translate uniform keys to API keys
         messages = []
         system_content = None
 
         for msg in chat_history.messages:
-            # Get the full message dict (e.g., {"role": "user", "content": "..."})
-            msg_data = msg.content
+            # Translate message content keys
+            msg_data = self._translate_message_fields(msg.content)
             role = msg_data.get("role", "user")
 
             if role == "system":
@@ -181,19 +204,26 @@ class OpenAIChatBot(GenericChatBot):
         super().__init__(
             http_client=http_client,
             model=model,
-            base_url=base_url,  # This is not used by GenericChatBot
+            base_url=base_url,
             chat_endpoint="/v1/chat/completions",
             models_endpoint="/v1/models",
             response_translations={
-                "choices[*].message.content": "text_content",
-                "choices[*].message.reasoning": "thinking_content",
-                "choices[*].message.thinking": "thinking_content",
-                "choices[*].delta.content": "text_content",
-                "choices[*].delta.reasoning": "thinking_content",
-                "choices[*].delta.thinking": "thinking_content",
+                "choices[*].message.content": "text",
+                "choices[*].message.reasoning": "reasoning",
+                "choices[*].message.thinking": "reasoning",
+                "choices[*].delta.content": "text",
+                "choices[*].delta.reasoning": "reasoning",
+                "choices[*].delta.thinking": "reasoning",
+                "choices[*].delta.tool_calls": "tool_calls",
+                "choices[*].message.tool_calls": "tool_calls",
+            },
+            request_translations={
+                "text": "content",
+                "reasoning": "reasoning",
+                "tool_calls": "tool_calls",
             }
         )
-        # Store base_url for backward compatibility with _build_request_body calls
+        # Store base_url for backward compatibility
         # that might be inherited from parent
         self._base_url = base_url
 
@@ -237,18 +267,23 @@ class AnthropicChatBot(GenericChatBot):
             chat_endpoint="/v1/messages",
             models_endpoint="/v1/models",
             response_translations={
-                "content[*].text": "text_content",
-                "content[*].reasoning": "thinking_content",
-                "content[*].thinking": "thinking_content",
-                "content_block_delta.delta.text": "text_content",
-                "content_block_delta.delta.reasoning": "thinking_content",
-                "content_block_delta.delta.thinking": "thinking_content",
-                "content_block_start.content_block.text": "text_content",
-                "content_block_start.content_block.reasoning": "thinking_content",
-                "content_block_start.content_block.thinking": "thinking_content",
-                "message_start.message.content[*].text": "text_content",
-                "message_start.message.reasoning": "thinking_content",
-                "message_start.message.thinking": "thinking_content",
+                "content[*].text": "text",
+                "content[*].reasoning": "reasoning",
+                "content[*].thinking": "reasoning",
+                "content_block_delta.delta.text": "text",
+                "content_block_delta.delta.reasoning": "reasoning",
+                "content_block_delta.delta.thinking": "reasoning",
+                "content_block_start.content_block.text": "text",
+                "content_block_start.content_block.reasoning": "reasoning",
+                "content_block_start.content_block.thinking": "reasoning",
+                "message_start.message.content[*].text": "text",
+                "message_start.message.reasoning": "reasoning",
+                "message_start.message.thinking": "reasoning",
+            },
+            request_translations={
+                "text": "content",
+                "reasoning": "reasoning",
+                "tool_calls": "tool_calls",
             },
             max_tokens=max_tokens
         )
