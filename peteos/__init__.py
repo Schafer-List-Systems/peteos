@@ -10,6 +10,7 @@ from peteos.httpclient import HTTPClient
 from peteos.message import Message
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
+from peteos.rolemanager import RoleManager
 from peteos.session import Session
 from peteos.toolmanager import ToolManager
 
@@ -29,6 +30,7 @@ __all__ = [
     "OpenAIChatBot",
     "REPLExecutionEnvironment",
     "Role",
+    "RoleManager",
     "Session",
     "ToolManager"
 ]
