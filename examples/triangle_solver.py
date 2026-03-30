@@ -158,8 +158,13 @@ Use the trigonometric tools available to you."""
     print("="*60)
     for msg in chat_history.messages:
         if msg.content.get("role") == "assistant":
-            print(msg.content.get("content", ""))
-            print()
+            if msg.content.get("reasoning"):
+                print("--- Reasoning ---")
+                print(msg.content.get("reasoning"))
+                print()
+            if msg.content.get("text"):
+                print(msg.content.get("text"))
+                print()
     print("Solution complete!")
     print("="*60)
 

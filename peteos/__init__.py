@@ -2,7 +2,7 @@
 
 from peteos.agent import Agent
 from peteos.chatbot import ChatBot, OpenAIChatBot, AnthropicChatBot, GenericChatBot
-from peteos.chatbotresponse import ChatBotResponse, OpenAIChatBotResponse, AnthropicChatBotResponse, GenericChatBotResponse
+from peteos.chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from peteos.chathistory import ChatHistory
 from peteos.executionenvironment import ExecutionEnvironment
 from peteos.httpclient import HTTPClient
@@ -23,9 +23,7 @@ __all__ = [
     "HTTPClient",
     "Message",
     "OpenAIChatBot",
-    "OpenAIChatBotResponse",
     "AnthropicChatBot",
-    "AnthropicChatBotResponse",
     "REPLExecutionEnvironment",
     "Role",
     "Session",

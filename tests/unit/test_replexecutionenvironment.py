@@ -83,7 +83,7 @@ class TestREPLRunBasicConversation:
 
         class MockResponse:
             def __init__(self):
-                self._data = {"text": "Hello! How can I help?", "reasoning": ""}
+                self._data = {"role": "assistant", "text": "Hello! How can I help?", "reasoning": ""}
 
             @property
             def data(self):
@@ -112,7 +112,7 @@ class TestREPLRunBasicConversation:
         assert len(chat_history.messages) == 2
         assert chat_history.messages[0].content["role"] == "user"
         assert chat_history.messages[1].content["role"] == "assistant"
-        assert chat_history.messages[1].content["content"] == "Hello! How can I help?"
+        assert chat_history.messages[1].content.get("text") == "Hello! How can I help?"
         assert call_count[0] == 1
 
     @pytest.mark.asyncio
@@ -130,7 +130,7 @@ class TestREPLRunBasicConversation:
 
         class MockResponse:
             def __init__(self):
-                self._data = {"reasoning": reasoning_content, "text": text_content}
+                self._data = {"role": "assistant", "reasoning": reasoning_content, "text": text_content}
 
             @property
             def data(self):
@@ -152,12 +152,12 @@ class TestREPLRunBasicConversation:
 
         await env.run()
 
-        # Should have: user, assistant (reasoning), assistant (answer)
-        assert len(chat_history.messages) == 3
+        # Should have: user, assistant (with reasoning and text in one message)
+        assert len(chat_history.messages) == 2
         assert chat_history.messages[0].content["role"] == "user"
         assert chat_history.messages[1].content["role"] == "assistant"
         assert chat_history.messages[1].content.get("reasoning") == reasoning_content
-        assert chat_history.messages[2].content["content"] == text_content
+        assert chat_history.messages[1].content.get("text") == text_content
 
     @pytest.mark.asyncio
     async def test_run_loop_terminates_on_final_answer(self):
@@ -173,7 +173,7 @@ class TestREPLRunBasicConversation:
 
         class MockResponse:
             def __init__(self):
-                self._data = {"text": "Final answer", "reasoning": ""}
+                self._data = {"role": "assistant", "text": "Final answer", "reasoning": ""}
 
             @property
             def data(self):
@@ -240,8 +240,8 @@ class TestREPLRunWithToolCalls:
         # First call: tool_calls in data
         # Second call: final answer
         responses = [
-            {"text": "", "reasoning": "", "tool_calls": [{"name": "get_weather", "arguments": {"city": "London"}}]},
-            {"text": final_answer, "reasoning": ""}
+            {"role": "assistant", "text": "", "reasoning": "", "tool_calls": [{"name": "get_weather", "arguments": {"city": "London"}}]},
+            {"role": "assistant", "text": final_answer, "reasoning": ""}
         ]
         response_idx = [0]
 
@@ -257,17 +257,18 @@ class TestREPLRunWithToolCalls:
 
         await env.run()
 
-        # Should have: user, assistant (reasoning + tool response), tool (result), assistant (final)
+        # Should have: user, assistant (with tool_calls), tool (result), assistant (final answer)
         assert len(chat_history.messages) == 4
         assert chat_history.messages[0].content["role"] == "user"
-        # Message 1 is assistant response (empty reasoning, mentions tool call)
+        # Message 1 is assistant response with role, text, reasoning, and tool_calls
         assert chat_history.messages[1].content["role"] == "assistant"
+        assert chat_history.messages[1].content.get("tool_calls") is not None
         # Message 2 is tool result
         assert chat_history.messages[2].content["role"] == "tool"
         assert chat_history.messages[2].content["name"] == "get_weather"
         # Message 3 is final answer
         assert chat_history.messages[3].content["role"] == "assistant"
-        assert final_answer in chat_history.messages[3].content["content"]
+        assert final_answer in chat_history.messages[3].content.get("text", "")
 
     @pytest.mark.asyncio
     async def test_run_tool_call_loop_continues(self):
@@ -339,7 +340,7 @@ class TestREPLRunInterrupt:
 
         class MockResponse:
             def __init__(self):
-                self._data = {"text": "Final answer", "reasoning": ""}
+                self._data = {"role": "assistant", "text": "Final answer", "reasoning": ""}
 
             @property
             def data(self):

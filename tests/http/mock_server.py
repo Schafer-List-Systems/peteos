@@ -55,6 +55,7 @@ class MockLLMServer:
         # Check request body for stream parameter
         body = await request.json()
         is_streaming = body.get("stream", True)
+        is_anthropic = "/v1/messages" in self.endpoint
 
         if is_streaming:
             # Return SSE stream
@@ -68,43 +69,64 @@ class MockLLMServer:
             )
             await response.prepare(request)
             for data in self.responses:
-                await response.write(data.encode())
+                # Anthropic API uses "event:" prefix, OpenAI uses just "data:"
+                if is_anthropic:
+                    if data == "[DONE]\n":
+                        await response.write(b"data: [DONE]\n\n")
+                    else:
+                        await response.write(f"data: {data[6:]}".encode())  # Remove 'data: ' prefix
+                        await response.write(b"\n\n")
+                else:
+                    await response.write(data.encode())
                 await asyncio.sleep(0.01)
             await response.write_eof()
             return response
         else:
             # Return JSON (non-streaming)
-            if "/v1/messages" in self.endpoint:
-                # Anthropic format
+            if is_anthropic:
+                # Anthropic non-streaming format - actual API response structure
+                # Example: {"type": "message", "role": "assistant", "content": [{"type": "text", "text": "..."}], ...}
                 full_content = ""
+                full_reasoning = ""
                 for resp in self.json_response:
                     data = json.loads(resp)
                     if "delta" in data:
                         full_content += data["delta"].get("text", "")
+                        full_reasoning += data["delta"].get("thinking", "")
+
+                content_array = []
+                if full_reasoning:
+                    content_array.append({"type": "thinking", "thinking": full_reasoning})
+                if full_content:
+                    content_array.append({"type": "text", "text": full_content})
+
                 return web.json_response({
                     "id": "msg-123",
-                    "model": "test-model",
+                    "type": "message",
                     "role": "assistant",
-                    "content": [{"type": "text", "text": full_content}],
+                    "content": content_array,
+                    "model": "test-model",
                     "stop_reason": "end_turn",
                     "stop_sequence": None,
-                    "type": "message",
                     "usage": {"input_tokens": 10, "output_tokens": 20}
                 })
             else:
                 # OpenAI format
                 full_content = ""
+                full_reasoning = ""
                 for resp in self.json_response:
                     data = json.loads(resp)
                     if "choices" in data:
                         for choice in data["choices"]:
                             if "delta" in choice:
                                 full_content += choice["delta"].get("content", "")
+                                full_reasoning += choice["delta"].get("reasoning", "")
                 return web.json_response({
                     "choices": [{
                         "message": {
                             "role": "assistant",
-                            "content": full_content
+                            "content": full_content,
+                            "reasoning": full_reasoning
                         }
                     }]
                 })
@@ -118,8 +140,10 @@ class MockLLMServer:
 def create_openai_mock_server(reasoning: str = "", response: str = "Hello from mock LLM", port: int = 8765, enable_streaming: bool = True):
     """Create a mock server for OpenAI-compatible responses."""
     responses = []
+    # Streaming mode: separate events for role, reasoning, content
+    responses.append(json.dumps({"choices": [{"delta": {"role": "assistant", "content": ""}}]}))
     if reasoning:
-        responses.append(json.dumps({"choices": [{"delta": {"reasoning": reasoning, "content": ""}}]}))
+        responses.append(json.dumps({"choices": [{"delta": {"reasoning": reasoning}}]}))
     responses.append(json.dumps({"choices": [{"delta": {"content": response}}]}))
     responses.append("[DONE]")
 
@@ -129,18 +153,27 @@ def create_openai_mock_server(reasoning: str = "", response: str = "Hello from m
 def create_anthropic_mock_server(thinking: str = "Thinking step by step", response: str = "Hello", port: int = 8765, enable_streaming: bool = True):
     """Create a mock server for Anthropic-compatible responses."""
     responses = [
+        # message_start event (with event: prefix handled in server)
+        json.dumps({
+            "type": "message_start",
+            "message": {"role": "assistant", "content": []}
+        }),
+        # content_block_start for thinking
         json.dumps({
             "type": "content_block_start",
             "content_block": {"type": "thinking", "thinking": ""}
         }),
+        # content_block_delta for thinking
         json.dumps({
             "type": "content_block_delta",
             "delta": {"type": "thinking_delta", "thinking": thinking}
         }),
+        # content_block_delta for text
         json.dumps({
             "type": "content_block_delta",
             "delta": {"type": "text_delta", "text": response}
         }),
+        # content_block_stop
         json.dumps({
             "type": "content_block_stop",
             "content_block": {"type": "text"}

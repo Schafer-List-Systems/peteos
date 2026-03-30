@@ -96,8 +96,8 @@ async def main():
         # Find the last assistant message in chat history
         last_msg = chat_history.messages[-1]
         if last_msg.content.get("role") == "assistant":
-            content = last_msg.content.get("content", "")
-            print(content)
+            text = last_msg.content.get("text", "")
+            print(text)
 
         # Clear interrupt flag for next turn
         env.clear_interrupt()

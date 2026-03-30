@@ -130,11 +130,10 @@ class GenericChatBotResponse(ChatBotResponse):
                     if data.strip():
                         try:
                             event = json.loads(data)
-                            translated = await self._translate_event(event)
-                            for key, value in translated.items():
-                                if value is not None:
-                                    self._accumulate_event({key: value})
-                                    yield (key, value)
+                            for key, chunk in self._process_event(event).items():
+                                if chunk is not None:
+                                    self._accumulate_event({key: chunk})
+                                    yield (key, chunk)
                         except json.JSONDecodeError:
                             pass
 
@@ -144,7 +143,15 @@ class GenericChatBotResponse(ChatBotResponse):
         """Async iterable that yields translated event key-value pairs."""
         return self._event_generator()
 
-    async def _translate_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process an event and return translated fields.
+
+        Override in subclasses to customize event processing logic.
+        """
+        return self._translate_event(event)
+
+    def _translate_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
         Translate an event using configured path translations.
 
@@ -169,37 +176,27 @@ class GenericChatBotResponse(ChatBotResponse):
         return translated
 
 
-class OpenAIChatBotResponse(GenericChatBotResponse):
-    """Response wrapper for OpenAI API using standard translations."""
-
-    def __init__(self, stream: AsyncGenerator[str, None]):
-        super().__init__(stream, {
-            "choices[*].delta.content": "text",
-            "choices[*].delta.reasoning": "reasoning",
-            "choices[*].delta.thinking": "reasoning",
-            "choices[*].message.content": "text",
-            "choices[*].message.reasoning": "reasoning",
-            "choices[*].message.thinking": "reasoning",
-            "choices[*].delta.tool_calls": "tool_calls",
-            "choices[*].message.tool_calls": "tool_calls",
-        })
-
-
 class AnthropicChatBotResponse(GenericChatBotResponse):
-    """Response wrapper for Anthropic API using standard translations."""
+    """Response wrapper for Anthropic API using standard translations.
 
-    def __init__(self, stream: AsyncGenerator[str, None]):
-        super().__init__(stream, {
-            "content_block_delta.delta.text": "text",
-            "content_block_delta.delta.reasoning": "reasoning",
-            "content_block_delta.delta.thinking": "reasoning",
-            "content_block_start.content_block.text": "text",
-            "content_block_start.content_block.reasoning": "reasoning",
-            "content_block_start.content_block.thinking": "reasoning",
-            "message_start.message.content[*].text": "text",
-            "message_start.message.reasoning": "reasoning",
-            "message_start.message.thinking": "reasoning",
-            "content[*].text": "text",
-            "content[*].reasoning": "reasoning",
-            "content[*].thinking": "reasoning",
-        })
+    The Anthropic API `/v1/messages` endpoint includes role in message_start.
+    However, some LLM backends (non-compliant implementations) skip the role field.
+
+    This class overrides _process_event to default role to 'assistant' when missing from
+    message_start, handling non-compliant backends that omit the role field.
+    """
+
+    def __init__(self, stream: AsyncGenerator[str, None], translations: Dict[str, str]):
+        super().__init__(stream, translations)
+
+    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process an Anthropic event, defaulting role to 'assistant' if missing from message_start.
+
+        The Anthropic API includes role in message_start. This fallback handles
+        non-compliant backends that omit the role field entirely.
+        """
+        if event.get("type") == "message_start" and "role" not in event.get("message", {}):
+            self._data["role"] = "assistant"
+
+        return self._translate_event(event)

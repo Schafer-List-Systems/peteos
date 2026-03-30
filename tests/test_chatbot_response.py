@@ -1,11 +1,12 @@
 """Tests for ChatBotResponse classes."""
 
 import pytest
-from peteos.chatbotresponse import OpenAIChatBotResponse, AnthropicChatBotResponse
+from peteos.chatbotresponse import GenericChatBotResponse, AnthropicChatBotResponse
+from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
 
 
-class TestOpenAIChatBotResponse:
-    """Tests for OpenAIChatBotResponse."""
+class TestGenericChatBotResponseOpenAI:
+    """Tests for GenericChatBotResponse with OpenAI translation configuration."""
 
     @pytest.mark.asyncio
     async def test_openai_streaming_response(self):
@@ -15,17 +16,15 @@ class TestOpenAIChatBotResponse:
             yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
             yield "[DONE]"
 
-        response = OpenAIChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Each SSE yields (key, delta_chunk) - delta not accumulated
         assert len(accumulated) == 2
         assert accumulated[0] == ("text", "Hello")
         assert accumulated[1] == ("text", " World")
 
-        # Verify final content using data dict
         assert response.data["text"] == "Hello World"
         assert response.data.get("reasoning", "") == ""
 
@@ -39,7 +38,7 @@ class TestOpenAIChatBotResponse:
             yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
             yield "[DONE]"
 
-        response = OpenAIChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
@@ -65,7 +64,7 @@ class TestOpenAIChatBotResponse:
             yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
             yield "[DONE]"
 
-        response = OpenAIChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
@@ -88,7 +87,7 @@ class TestOpenAIChatBotResponse:
             yield 'data: {"choices": [{"delta": {"content": "Complete response"}}]}'
             yield "[DONE]"
 
-        response = OpenAIChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
         # Collect all chunks
         accumulated = []
         async for chunk in response:
@@ -100,8 +99,8 @@ class TestOpenAIChatBotResponse:
         assert response.data["text"] == "Complete response"
 
 
-class TestAnthropicChatBotResponse:
-    """Tests for AnthropicChatBotResponse."""
+class TestGenericChatBotResponseAnthropic:
+    """Tests for GenericChatBotResponse with Anthropic translation configuration."""
 
     @pytest.mark.asyncio
     async def test_anthropic_streaming_response(self):
@@ -113,18 +112,16 @@ class TestAnthropicChatBotResponse:
             yield 'data: {"type": "content_block_stop", "content_block": {"type": "text"}}'
             yield "[DONE]"
 
-        response = AnthropicChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Each SSE yields (key, delta_chunk) - delta not accumulated
         assert len(accumulated) >= 3
         assert accumulated[0] == ("reasoning", "Thinking step by step...")
         assert accumulated[1] == ("text", "Hello")
         assert accumulated[2] == ("text", " World")
 
-        # Verify reasoning and text content extracted
         assert response.data["reasoning"] == "Thinking step by step..."
         assert response.data["text"] == "Hello World"
 
@@ -132,20 +129,21 @@ class TestAnthropicChatBotResponse:
     async def test_anthropic_message_start(self):
         """Test Anthropic message_start event."""
         async def mock_stream():
-            yield 'data: {"type": "message_start", "message": {"content": [{"type": "text", "text": "Hello"}], "reasoning": "Initial reasoning"}}'
+            # message_start has nested content array, not inline text/thinking
+            yield 'data: {"type": "message_start", "message": {"role": "assistant", "content": []}}'
+            yield 'data: {"type": "content_block_start", "content_block": {"type": "thinking", "thinking": ""}}'
+            yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "Initial reasoning"}}'
+            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
             yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " World"}}'
             yield "[DONE]"
 
-        response = AnthropicChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify message_start yields all keys from same event (dict order)
-        assert accumulated[0] == ("text", "Hello")
-        assert accumulated[1] == ("reasoning", "Initial reasoning")
-        assert accumulated[2] == ("text", " World")
-        assert response.data["reasoning"] == "Initial reasoning"
+        # Verify reasoning and text extracted from content_block events
+        assert "Initial reasoning" in response.data["reasoning"]
         assert response.data["text"] == "Hello World"
 
     @pytest.mark.asyncio
@@ -159,7 +157,7 @@ class TestAnthropicChatBotResponse:
             yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
             yield "[DONE]"
 
-        response = AnthropicChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
@@ -175,7 +173,7 @@ class TestAnthropicChatBotResponse:
             yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Complete response"}}'
             yield "[DONE]"
 
-        response = AnthropicChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
@@ -184,6 +182,47 @@ class TestAnthropicChatBotResponse:
         assert len(accumulated) == 1
         assert accumulated[0] == ("text", "Complete response")
         assert response.data["text"] == "Complete response"
+
+
+class TestAnthropicChatBotResponseRole:
+    """Tests for AnthropicChatBotResponse role defaulting."""
+
+    @pytest.mark.asyncio
+    async def test_anthropic_message_start_no_role(self):
+        """Test Anthropic message_start with missing role field (broken backend)."""
+        async def mock_stream():
+            yield 'data: {"type": "message_start", "message": {"content": []}}'
+            yield 'data: {"type": "content_block_start", "content_block": {"type": "text", "text": ""}}'
+            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
+            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " World"}}'
+            yield "[DONE]"
+
+        response = AnthropicChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
+        accumulated = []
+        async for chunk in response:
+            accumulated.append(chunk)
+
+        assert response.data["role"] == "assistant"
+        assert response.data["text"] == "Hello World"
+
+    @pytest.mark.asyncio
+    async def test_anthropic_message_start_with_role(self):
+        """Test Anthropic message_start with role field present (bot, not assistant)."""
+        async def mock_stream():
+            yield 'data: {"type": "message_start", "message": {"role": "bot", "content": []}}'
+            yield 'data: {"type": "content_block_start", "content_block": {"type": "text", "text": ""}}'
+            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
+            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " World"}}'
+            yield "[DONE]"
+
+        response = AnthropicChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
+        accumulated = []
+        async for chunk in response:
+            accumulated.append(chunk)
+
+        # Role extracted from message_start.message.role
+        assert response.data["role"] == "bot"
+        assert response.data["text"] == "Hello World"
 
 
 class TestChatBotResponseProperties:
@@ -198,7 +237,7 @@ class TestChatBotResponseProperties:
             yield 'data: {"choices": [{"delta": {"content": "Text"}}]}'
             yield "[DONE]"
 
-        response = OpenAIChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
@@ -215,7 +254,7 @@ class TestChatBotResponseProperties:
             yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
             yield "[DONE]"
 
-        response = OpenAIChatBotResponse(mock_stream())
+        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
         async for _ in response:
             pass
 

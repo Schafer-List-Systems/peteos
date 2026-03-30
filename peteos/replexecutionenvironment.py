@@ -55,32 +55,14 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 if self._interrupt:
                     break
 
-                # Extract response data
-                response_data = response.data
-                text = response_data.get("text", "")
-                reasoning = response_data.get("reasoning", "")
-                tool_calls = response_data.get("tool_calls")
+                # Append the full response as a Message to ChatHistory
+                self.chat_history.append_message(Message(content=response.data))
 
-                # Append reasoning as separate field if present
-                if reasoning:
-                    self.chat_history.append_message(
-                        Message(content={
-                            "role": "assistant",
-                            "reasoning": reasoning
-                        })
-                    )
-
-                # tool_calls is already a list from response.data["tool_calls"]
+                # Check if response contains tool calls
+                tool_calls = response.data.get("tool_calls")
                 tool_calls_list = tool_calls if isinstance(tool_calls, list) else []
 
                 if tool_calls_list:
-                    # Append the response containing tool calls as assistant message
-                    self.chat_history.append_message(
-                        Message(content={
-                            "role": "assistant",
-                            "content": text
-                        })
-                    )
                     # Execute tool calls
                     for tool_call in tool_calls_list:
                         if isinstance(tool_call, dict):
@@ -119,13 +101,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                                 )
                     # Loop continues - sends history with tool results back to LLM
                 else:
-                    # Final answer - append and exit loop
-                    self.chat_history.append_message(
-                        Message(content={
-                            "role": "assistant",
-                            "content": text
-                        })
-                    )
+                    # Final answer - exit loop
                     break
         finally:
             self._running = False

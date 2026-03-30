@@ -5,7 +5,7 @@ import json
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
 from peteos.httpclient import HTTPClient
-from peteos.chatbotresponse import ChatBotResponse, GenericChatBotResponse
+from peteos.chatbotresponse import ChatBotResponse, GenericChatBotResponse, AnthropicChatBotResponse
 from peteos.chathistory import ChatHistory
 from peteos.message import Message
 
@@ -192,6 +192,25 @@ class GenericChatBot(ChatBot):
 class OpenAIChatBot(GenericChatBot):
     """ChatBot implementation for OpenAI-compatible API."""
 
+    # Default translation configuration for OpenAI API
+    RESPONSE_TRANSLATIONS = {
+        "choices[*].delta.role": "role",
+        "choices[*].message.content": "text",
+        "choices[*].message.reasoning": "reasoning",
+        "choices[*].message.thinking": "reasoning",
+        "choices[*].delta.content": "text",
+        "choices[*].delta.reasoning": "reasoning",
+        "choices[*].delta.thinking": "reasoning",
+        "choices[*].delta.tool_calls": "tool_calls",
+        "choices[*].message.tool_calls": "tool_calls",
+    }
+
+    REQUEST_TRANSLATIONS = {
+        "text": "content",
+        "reasoning": "reasoning",
+        "tool_calls": "tool_calls",
+    }
+
     def __init__(self, http_client: HTTPClient, model: str, base_url: str):
         """
         Initialize OpenAIChatBot.
@@ -207,24 +226,9 @@ class OpenAIChatBot(GenericChatBot):
             base_url=base_url,
             chat_endpoint="/v1/chat/completions",
             models_endpoint="/v1/models",
-            response_translations={
-                "choices[*].message.content": "text",
-                "choices[*].message.reasoning": "reasoning",
-                "choices[*].message.thinking": "reasoning",
-                "choices[*].delta.content": "text",
-                "choices[*].delta.reasoning": "reasoning",
-                "choices[*].delta.thinking": "reasoning",
-                "choices[*].delta.tool_calls": "tool_calls",
-                "choices[*].message.tool_calls": "tool_calls",
-            },
-            request_translations={
-                "text": "content",
-                "reasoning": "reasoning",
-                "tool_calls": "tool_calls",
-            }
+            response_translations=self.RESPONSE_TRANSLATIONS,
+            request_translations=self.REQUEST_TRANSLATIONS,
         )
-        # Store base_url for backward compatibility
-        # that might be inherited from parent
         self._base_url = base_url
 
     async def send_message(
@@ -250,6 +254,31 @@ class OpenAIChatBot(GenericChatBot):
 class AnthropicChatBot(GenericChatBot):
     """ChatBot implementation for Anthropic-compatible API."""
 
+    # Default translation configuration for Anthropic API
+    # stream=True (streaming): content via content_block_start/content_block_delta events
+    # stream=False (non-streaming): role, content array at top level
+    # Real Anthropic API: {"role": "assistant", "content": [{"type": "text", "text": "..."}], ...}
+    # Qwen local API:      {"type": "message", "role": "assistant", "content": [...], ...}
+    RESPONSE_TRANSLATIONS = {
+        # stream=True entries (streaming mode)
+        "message_start.message.role": "role",              # role in message_start event
+        "content_block_delta.delta.text": "text",          # text chunks
+        "content_block_delta.delta.thinking": "reasoning", # reasoning chunks
+        "content_block_start.content_block.text": "text",  # text block start
+        "content_block_start.content_block.thinking": "reasoning",  # thinking block start
+        "content_block_start.content_block.reasoning": "reasoning",  # reasoning block start
+        # stream=False entries (non-streaming mode)
+        "role": "role",                                    # role at top level
+        "content[*].text": "text",                         # content array at top level
+        "content[*].thinking": "reasoning",                # content array with thinking
+    }
+
+    REQUEST_TRANSLATIONS = {
+        "text": "content",
+        "reasoning": "reasoning",
+        "tool_calls": "tool_calls",
+    }
+
     def __init__(self, http_client: HTTPClient, model: str, base_url: str, max_tokens: int = 4096):
         """
         Initialize AnthropicChatBot.
@@ -266,28 +295,11 @@ class AnthropicChatBot(GenericChatBot):
             base_url=base_url,
             chat_endpoint="/v1/messages",
             models_endpoint="/v1/models",
-            response_translations={
-                "content[*].text": "text",
-                "content[*].reasoning": "reasoning",
-                "content[*].thinking": "reasoning",
-                "content_block_delta.delta.text": "text",
-                "content_block_delta.delta.reasoning": "reasoning",
-                "content_block_delta.delta.thinking": "reasoning",
-                "content_block_start.content_block.text": "text",
-                "content_block_start.content_block.reasoning": "reasoning",
-                "content_block_start.content_block.thinking": "reasoning",
-                "message_start.message.content[*].text": "text",
-                "message_start.message.reasoning": "reasoning",
-                "message_start.message.thinking": "reasoning",
-            },
-            request_translations={
-                "text": "content",
-                "reasoning": "reasoning",
-                "tool_calls": "tool_calls",
-            },
-            max_tokens=max_tokens
+            response_translations=self.RESPONSE_TRANSLATIONS,
+            request_translations=self.REQUEST_TRANSLATIONS,
         )
         self._base_url = base_url
+        self._max_tokens = max_tokens
 
     async def send_message(
         self,
@@ -301,10 +313,17 @@ class AnthropicChatBot(GenericChatBot):
 
         if streaming:
             stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
-            return GenericChatBotResponse(stream, self._translations)
+            return AnthropicChatBotResponse(stream, self._translations)
         else:
             response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            return GenericChatBotResponse.from_json(response_data, self._translations)
+            return AnthropicChatBotResponse.from_json(response_data, self._translations)
+
+    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
+        """Build request body from chat history and defaults."""
+        body = super()._build_body(chat_history, streaming)
+        if not streaming:
+            body["max_tokens"] = self._max_tokens
+        return body
 
     def list_available_models(self) -> List[str]:
         """List Anthropic models."""

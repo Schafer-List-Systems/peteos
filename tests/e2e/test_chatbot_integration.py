@@ -78,7 +78,9 @@ class TestOpenAIChatBotIntegration:
                 accumulated.append(chunk)
 
             assert len(accumulated) >= 1
-            assert "Complete non-streaming response" in accumulated[-1]
+            # Non-streaming may have role/reasoning events first, then content
+            full_text = "".join(chunk for key, chunk in accumulated if key == "text")
+            assert "Complete non-streaming response" in full_text
         finally:
             await server.stop()
 
