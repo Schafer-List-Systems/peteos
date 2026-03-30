@@ -50,15 +50,19 @@ tests/
 │   └── mock_server.py      # Mock HTTP servers for testing
 ├── unit/
 │   ├── __init__.py
-│   └── test_replexecutionenvironment.py  # REPLExecutionEnvironment tests
-├── e2e/
-│   ├── __init__.py
-│   └── test_chatbot_integration.py       # ChatBot integration tests
-├── mock_httpclient.py           # Mock HTTP client
-├── test_chathistory.py          # ChatHistory tests
-├── test_httpclient.py           # HTTPClient tests
-├── test_role.py                 # Role tests
-└── test_toolmanager.py          # ToolManager tests
+│   ├── mock_httpclient.py          # Mock HTTP client
+│   ├── test_chatbot_manager.py     # ChatBotManager tests
+│   ├── test_chatbot_response.py    # ChatBotResponse tests
+│   ├── test_chathistory.py         # ChatHistory tests
+│   ├── test_httpclient.py          # HTTPClient tests
+│   ├── test_replexecutionenvironment.py  # REPLExecutionEnvironment tests
+│   ├── test_role.py                # Role tests
+│   ├── test_rolemanager.py         # RoleManager tests
+│   ├── test_session.py             # Session tests
+│   └── test_toolmanager.py         # ToolManager tests
+└── e2e/
+    ├── __init__.py
+    └── test_chatbot_integration.py       # ChatBot integration tests
 ```
 
 ## Mock Infrastructure
@@ -135,10 +139,13 @@ Tests for the REPL agentic loop:
 
 ### Other Unit Tests
 
-- `tests/test_chathistory.py`: ChatHistory message management
-- `tests/test_httpclient.py`: HTTPClient streaming and non-streaming
-- `tests/test_role.py`: Role loading from dict and path
-- `tests/test_toolmanager.py`: Tool registration and execution
+- `tests/unit/test_chathistory.py`: ChatHistory message management
+- `tests/unit/test_httpclient.py`: HTTPClient streaming and non-streaming
+- `tests/unit/test_role.py`: Role loading from dict and path
+- `tests/unit/test_rolemanager.py`: RoleManager registration, directory loading, and lookup
+- `tests/unit/test_session.py`: Session initialization, load_from_json, load_from_file
+- `tests/unit/test_chatbot_manager.py`: ChatBotManager backend management, model discovery
+- `tests/unit/test_toolmanager.py`: Tool registration and execution
 
 ## Writing New Tests
 

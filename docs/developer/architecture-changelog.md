@@ -1,3 +1,9 @@
+## [2026-03-30] - RoleManager Added
+- Added `RoleManager` class: manages role registration and lookup
+- Methods: `register_role()`, `load_from_dir()`, `get_role()`, `list_roles()`
+- `load_from_dir()`: Loads roles from subdirectories (role name = directory name)
+- Updated `architecture.md`: Added RoleManager documentation and diagrams
+
 ## [2026-03-30] - Session ChatBotManager Integration
 - Added `model` field to `Role`: regex pattern for ChatBot selection (default: `".*"`)
 - Updated `ExecutionEnvironment` to accept `ChatBotManager` and `Role` instead of `ChatBot`

@@ -341,27 +341,31 @@ Container for role, execution environment, and chat history.
 - `role` (Role): The role for this session
 - `chat_history` (ChatHistory): Chat history (created if None provided)
 - `chatbot_manager` (ChatBotManager): Manager for ChatBot instances
-- `execution_environment` (ExecutionEnvironment): The execution environment
+- `execution_environment` (REPLExecutionEnvironment): The execution environment (REPL by default)
 
 **Constructor:**
 ```python
 Session(
-    role: Role,                    # obligatory
-    tool_manager: ToolManager,     # obligatory
-    chatbot_manager: ChatBotManager,  # obligatory
+    role: Role,                                    # obligatory
+    tool_manager: ToolManager,                     # obligatory
+    chatbot_manager: ChatBotManager,               # obligatory
     chat_history: Optional[ChatHistory] = None,
-    session_uuid: Optional[UUID] = None
+    session_uuid: Optional[UUID] = None,
+    execution_environment: Optional[REPLExecutionEnvironment] = None
 )
 ```
+
+**Note:** Use `load_from_json()` or `load_from_file()` to create Session instances. The constructor is intended for internal use with custom execution environment instances.
 
 **Behavior:**
 - Session stores `ChatBotManager` and passes it to `ExecutionEnvironment` along with `Role`
 - `ExecutionEnvironment` selects a `ChatBot` from the manager using `role.model` regex pattern
 - Model regex defaults to `".*"` (matches any model)
+- By default, creates a `REPLExecutionEnvironment` for the agentic loop
 
 **Static Methods:**
-- `load_from_string(data: str, chatbot_manager, role_manager, tool_manager)`: Creates session from JSON string. Expects JSON with `uuid`, `role` (name), and `chat_history` fields. Looks up Role from RoleManager, validates required tools exist in tool_manager, reconstructs ChatHistory from message data, returns new Session.
-- `load_from_file(file_path: str, chatbot_manager, role_manager, tool_manager)`: Creates session from JSON file. Reads file, then delegates to `load_from_string`.
+- `load_from_json(json_data: dict, chatbot_manager, role_manager, tool_manager)`: Creates session from JSON dict. Expects JSON with `uuid`, `role` (name), and `chat_history` fields. Looks up Role from RoleManager, validates required tools exist in tool_manager, reconstructs ChatHistory from message data, creates REPLExecutionEnvironment, returns new Session.
+- `load_from_file(file_path: str, chatbot_manager, role_manager, tool_manager)`: Creates session from JSON file. Reads file, parses JSON, then delegates to `load_from_json`.
 
 ### Role
 
@@ -388,7 +392,7 @@ Role(
 ```
 
 **Static Methods:**
-- `load_from_dict(data: dict) -> Role`: Creates role from dict with 'name', 'description', optional 'system_prompt', 'required_tools', 'execution_environment', and 'model' keys
+- `load_from_dict(data: dict) -> Role`: Creates role from dict. Required keys: 'name', 'description'. Optional keys: 'system_prompt', 'required_tools' (default: []), 'execution_environment' (default: "REPL"), 'model' (default: ".*")
 - `load_from_path(path: str) -> Role`: Creates role from directory
   - Name derived from path suffix
   - `description.md` contains description (or `config.json.description` as fallback)
@@ -834,6 +838,36 @@ classDiagram
     ChatBot --> ChatBotResponse : returns
     ChatBotResponse --> AsyncGenerator : consumes
     ChatHistory --> Message : contains
+```
+
+## ChatBotManager API Reference
+
+```python
+class ChatBotManager:
+    def __init__()
+        """Initialize empty manager."""
+
+    async def add_backend(name: str, url: str) -> BackendInfo
+        """Add backend, detect API type, discover models."""
+
+    def remove_backend(name: str) -> bool
+        """Remove backend by name."""
+
+    def list_chatbots(model_regex: str) -> List[Tuple[str, Any]]
+        """List all ChatBots matching regex pattern."""
+
+    async def load_from_json(json_obj: dict) -> None
+        """Load backends from JSON object (API auto-detected). Clears current state first."""
+
+    async def load_from_file(filepath: str) -> None
+        """Load backends from JSON file (async)."""
+
+@dataclass
+class BackendInfo:
+    name: str
+    url: str
+    api_type: str  # "openai" or "anthropic"
+    models: Dict[str, Any]  # model_id -> ChatBot instance
 ```
 
 ## Component Diagram

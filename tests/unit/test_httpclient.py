@@ -19,7 +19,7 @@ class TestHTTPClientStreaming:
     @pytest.mark.asyncio
     async def test_stream_post_with_mock(self):
         """Test stream_post using mock HTTPClient."""
-        from tests.mock_httpclient import MockHTTPClient
+        from tests.unit.mock_httpclient import MockHTTPClient
 
         mock_client = MockHTTPClient()
         mock_client.set_stream_response([
@@ -41,7 +41,7 @@ class TestHTTPClientPost:
     @pytest.mark.asyncio
     async def test_post_with_mock(self):
         """Test post using mock HTTPClient."""
-        from tests.mock_httpclient import MockHTTPClient
+        from tests.unit.mock_httpclient import MockHTTPClient
 
         expected_response = {"result": "success", "data": [1, 2, 3]}
         mock_client = MockHTTPClient()

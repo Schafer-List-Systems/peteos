@@ -503,6 +503,9 @@ async def main():
         ]
     })
 
+    # Load from file (async)
+    await manager.load_from_file("backends.json")
+
 asyncio.run(main())
 ```
 
@@ -537,7 +540,7 @@ manager.load_from_file("backends.json")
 
 ```python
 class ChatBotManager:
-    def __init__(self)
+    def __init__()
 
     async def add_backend(name: str, url: str) -> BackendInfo
         """Add backend, detect API type, discover models."""
@@ -549,10 +552,10 @@ class ChatBotManager:
         """List all ChatBots matching regex pattern."""
 
     async def load_from_json(json_obj: dict) -> None
-        """Load backends from JSON object (API auto-detected)."""
+        """Load backends from JSON object (API auto-detected). Clears current state first."""
 
     async def load_from_file(filepath: str) -> None
-        """Load backends from JSON file."""
+        """Load backends from JSON file (async)."""
 ```
 
 ### BackendInfo
