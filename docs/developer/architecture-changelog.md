@@ -1,3 +1,10 @@
+## [2026-03-30] - Documentation Updates
+- Updated `execution-environment.md`: Fixed REPL loop behavior to match current code (stores full `response.data` dict, not separate fields)
+- Updated `chatbot.md`: Fixed Anthropic API behavior, added request/response format differences, removed sensitive IP addresses
+- Updated `architecture.md`: Added all class documentation, utility functions, and implementation details
+- Created `tests.md`: New documentation for testing infrastructure, test coverage, and writing new tests
+- Added "Key Implementation Details" section to architecture.md: streaming behavior, error handling, thread safety, message format evolution
+
 ## [2026-03-29] - ChatBotResponse Refactoring
 - Converted `GenericChatBotResponse` from async iterator to async generator
 - `__anext__` now yields all **(key, chunk)** pairs per SSE event (not just first field)

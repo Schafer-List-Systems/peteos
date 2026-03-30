@@ -2,35 +2,32 @@
 
 ## Overview
 
-The Execution Environment provides the runtime context for agent interactions. It encapsulates the agentic loop that sends chat history to the LLM, processes responses, handles tool calls, and maintains conversation state.
+The Execution Environment provides the runtime context for agent interactions. It encapsulates the agentic loop that sends chat history to the LLM, processes responses, and maintains conversation state.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Agent                                │
-│              (manages concurrent sessions)                   │
-└───────────────────────┬─────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                        Agent                               │
+│              (manages concurrent sessions)                 │
+└───────────────────────┬────────────────────────────────────┘
                         │
                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        Session                              │
-│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐ │
-│  │     Role     │  │  ChatHistory     │  │    UUID      │ │
-│  └──────────────┘  └──────────────────┘  └──────────────┘ │
-│                           │                                 │
-│              ┌────────────▼────────────┐                   │
-│              │  ExecutionEnvironment  │                   │
-│              │  ┌──────────────────┐  │                   │
-│              │  │    ChatBot       │  │                   │
-│              │  ├──────────────────┤  │                   │
-│              │  │  ToolManager     │  │                   │
-│              │  ├──────────────────┤  │                   │
-│              │  │  MessageQueue    │  │                   │
-│              │  │  InterruptFlag   │  │                   │
-│              │  └──────────────────┘  │                   │
-│              └─────────────────────────┘                   │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                        Session                             │
+│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐  │
+│  │     Role     │  │  ChatHistory     │  │    UUID      │  │
+│  └──────────────┘  └──────────────────┘  └──────────────┘  │
+│                           │                                │
+│              ┌────────────▼───────────┐                    │
+│              │  ExecutionEnvironment  │                    │
+│              │  ┌──────────────────┐  │                    │
+│              │  │    ChatBot       │  │                    │
+│              │  ├──────────────────┤  │                    │
+│              │  │  ToolManager     │  │                    │
+│              │  └──────────────────┘  │                    │
+│              └────────────────────────┘                    │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ## Components
@@ -58,6 +55,7 @@ Streams LLM responses with support for:
 - `response.data["text"]` - accumulated response text
 - `response.data["reasoning"]` - accumulated reasoning/thinking content
 - `response.data["tool_calls"]` - list of tool call dicts (pre-parsed)
+- `response.data["role"]` - accumulated role field (if present)
 
 ### ToolManager
 
@@ -82,67 +80,22 @@ The `REPLExecutionEnvironment` implements the core agentic loop. It's a "Read-Ev
 2. **Tool-Use Support**: Automatically detects and executes tool calls
 3. **Stateful**: Maintains conversation history throughout the loop
 4. **Interruptible**: Can be terminated gracefully from other threads
+5. **Response Accumulation**: Accumulates complete response before appending to history
 
 ### The REPL Loop
 
-```python
-async def run(self) -> None:
-    """Main agentic loop."""
-    while not self._interrupt:
-        # 1. Send chat history to LLM
-        response = await self.chatbot.send_message(
-            self.chat_history,
-            streaming=True
-        )
+The REPLExecutionEnvironment implements a stateful agentic loop:
 
-        # 2. Collect accumulated response
-        # Yields (key, chunk) tuples: ("text", "Hello"), ("reasoning", "Thinking...")
-        async for key, chunk in response:
-            pass  # Streaming iteration
+1. **Request**: Sends accumulated chat history to the LLM via ChatBot (streaming mode)
+2. **Accumulate**: Collects the complete response, accumulating all fields (text, reasoning, tool_calls) into `response.data`
+3. **Store**: Appends the full `response.data` dict as a single Message to ChatHistory
+4. **Check Tools**: If `response.data` contains `tool_calls`:
+   - Execute each tool via ToolManager
+   - Append tool result with `success` field (True/False)
+   - **Loop continues** with updated history
+5. **Exit**: If no tool calls, the response is the final answer - loop terminates
 
-        # 3. Check for interrupt
-        if self._interrupt:
-            break
-
-        # 4. Extract content from response.data dict
-        response_data = response.data
-        reasoning = response_data.get("reasoning", "")
-        text = response_data.get("text", "")
-        tool_calls = response_data.get("tool_calls")  # Pre-parsed list
-
-        # 5. Append reasoning as separate field (if present)
-        if reasoning:
-            self.chat_history.append_message(
-                Message(content={
-                    "role": "assistant",
-                    "reasoning": reasoning
-                })
-            )
-
-        # 6. Execute tool calls (already parsed from API response)
-        if tool_calls:
-            # 7a. Execute each tool call
-            for tool_call in tool_calls:
-                tool = self.tool_manager.get_tool(tool_call["name"])
-                result = tool.execute(**tool_call["arguments"])
-                self.chat_history.append_message(
-                    Message(content={
-                        "role": "tool",
-                        "name": tool_call["name"],
-                        "content": str(result)
-                    })
-                )
-            # Loop continues with updated history
-        else:
-            # 7b. Final answer - append and exit
-            self.chat_history.append_message(
-                Message(content={
-                    "role": "assistant",
-                    "content": text
-                })
-            )
-            break
-```
+The loop handles interrupts gracefully via the `_interrupt` flag, which can be set from any thread.
 
 ### Tool Call Format
 
@@ -158,6 +111,36 @@ tool_calls = response.data.get("tool_calls")
 
 The API is responsible for returning tool calls in this structured format. The response parser extracts tool_calls from the JSON response and makes them available directly.
 
+### Tool Response Format
+
+Tool results appended to chat history include a `success` field:
+
+```python
+# Successful tool execution
+Message(content={
+    "role": "tool",
+    "name": "get_weather",
+    "content": "Sunny in London",
+    "success": True
+})
+
+# Failed tool execution
+Message(content={
+    "role": "tool",
+    "name": "get_weather",
+    "content": "Error: TypeError: 'NoneType' object is not subscriptable",
+    "success": False
+})
+
+# Tool not found
+Message(content={
+    "role": "tool",
+    "name": "unknown_tool",
+    "content": "Error: Tool 'unknown_tool' not found",
+    "success": False
+})
+```
+
 ### Interrupt Control
 
 Thread-safe interrupt mechanism for graceful shutdown:
@@ -168,6 +151,9 @@ env.set_interrupt()
 
 # Check and clear
 env.clear_interrupt()
+
+# Check running state
+env.is_running  # Returns True while run() is executing
 ```
 
 **Usage Pattern:**
@@ -186,55 +172,52 @@ async def run_with_timeout(env, timeout_seconds):
     )
 ```
 
+## Message Format
+
+Messages stored in ChatHistory contain the full `response.data` dict:
+
+```python
+# Assistant response with reasoning and tool_calls
+Message(content={
+    "role": "assistant",
+    "text": "The weather in London is sunny.",
+    "reasoning": "I need to call get_weather to find the current conditions...",
+    "tool_calls": [
+        {"name": "get_weather", "arguments": {"city": "London"}}
+    ]
+})
+
+# Tool result
+Message(content={
+    "role": "tool",
+    "name": "get_weather",
+    "content": "Sunny in London",
+    "success": True
+})
+```
+
 ## Message Flow
 
-```
-User Input
-    │
-    ▼
-┌─────────────────┐
-│  ChatHistory    │ (user message appended)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   ChatBot       │ (send_message)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ ChatBotResponse │ (streaming)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ REPLExecution   │
-│  Environment    │
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    │         │
-    ▼         ▼
-Thinking    Tool Call?
-Content     │
-    │       ▼
-    │    Yes ────┐    No ────┐
-    │             │           │
-    │             ▼           ▼
-    │      ┌──────────┐  ┌──────────┐
-    │      │ Execute  │  │Append to │
-    │      │ Tool     │  │History   │
-    │      │ Result   │  │& Exit    │
-    │      └────┬─────┘  └──────────┘
-    │           │
-    └───────────┼──────────┐
-                ▼          │
-         ┌──────────┐      │
-         │Append to │      │
-         │History   │      │
-         └────┬─────┘      │
-              │            │
-              └──── Loop ──┘
+```mermaid
+flowchart TD
+    A[User Input] --> B[Append to ChatHistory]
+    B --> C[Send History to ChatBot]
+    C --> D[ChatBotResponse<br/>Streaming]
+    D --> E[Accumulate<br/>response.data]
+    E --> F[Store as Message<br/>in ChatHistory]
+
+    F --> G{Tool<br/>Calls?}
+
+    G -->|Yes| H[Execute Each Tool]
+    H --> I{Tool<br/>Success?}
+    I -->|Yes| J[Append Tool Result<br/>success: true]
+    I -->|No| K[Append Error<br/>success: false]
+    J --> L[Loop Back<br/>to ChatBot]
+    K --> L
+    L --> C
+
+    G -->|No| M[Final Answer]
+    M --> N[Exit Loop]
 ```
 
 ## Usage Example
@@ -325,3 +308,10 @@ Separating thinking from response text:
 - Useful for debugging/auditing
 - Allows different handling of reasoning vs. answers
 - Supports models with explicit thinking phases
+
+### Why Success Field in Tool Responses?
+
+The `success` field in tool responses:
+- Enables downstream processing to distinguish errors from tool output
+- Helps the LLM understand when a tool failed vs. returned invalid data
+- Supports debugging and logging of tool execution
