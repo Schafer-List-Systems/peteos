@@ -355,24 +355,35 @@ Session(
 
 ### Role
 
-Represents a role with identity and context.
+Represents a role with identity, context, and configuration.
 
 **Attributes:**
 - `name` (str): The name of the role
 - `description` (str): Description of the role
 - `system_prompt` (Optional[str]): Optional system prompt
+- `required_tools` (list[str]): List of tool names required by this role (default: empty list)
+- `execution_environment` (str): Name of the execution environment to use (default: "REPL")
 
 **Constructor:**
 ```python
-Role(name: str, description: str, system_prompt: Optional[str] = None)
+Role(
+    name: str,
+    description: str,
+    system_prompt: Optional[str] = None,
+    required_tools: Optional[list[str]] = None,
+    execution_environment: str = "REPL"
+)
 ```
 
 **Static Methods:**
-- `load_from_dict(data: dict) -> Role`: Creates role from dict with 'name', 'description', optional 'system_prompt' keys
+- `load_from_dict(data: dict) -> Role`: Creates role from dict with 'name', 'description', optional 'system_prompt', 'required_tools', and 'execution_environment' keys
 - `load_from_path(path: str) -> Role`: Creates role from directory
   - Name derived from path suffix
-  - `description.md` contains description
-  - `system_prompt.md` (optional) contains system prompt
+  - `description.md` contains description (or `config.json.description` as fallback)
+  - `system_prompt.md` (optional) contains system prompt (or `config.json.system_prompt` as fallback)
+  - `config.json` (optional) contains `required_tools` and `execution_environment`
+  - Markdown files take precedence over config.json entries
+- `load_config_from_path(role_path: str) -> dict`: Loads optional config.json from role directory, returns empty dict if file doesn't exist
 
 ### Agent
 
@@ -728,9 +739,12 @@ classDiagram
         +str name
         +str description
         +Optional[str] system_prompt
-        +__init__(name, description, system_prompt=None)
+        +list[str] required_tools
+        +str execution_environment
+        +__init__(name, description, system_prompt=None, required_tools=None, execution_environment="REPL")
         +load_from_dict(data: dict) static
         +load_from_path(path: str) static
+        +load_config_from_path(role_path: str) static
     }
 
     class Agent {
