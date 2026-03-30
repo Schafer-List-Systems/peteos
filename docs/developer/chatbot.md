@@ -462,3 +462,113 @@ async def main():
 ```
 
 See `examples/chatbot.py` and `examples/chatbot_repl.py` for complete working examples.
+
+## ChatBotManager
+
+The `ChatBotManager` provides a centralized registry for managing multiple LLM backend providers. It auto-detects API types and discovers models at startup.
+
+### Features
+
+- **Auto-detection**: Probes `/v1/models` endpoint to detect OpenAI vs Anthropic format
+- **Model discovery**: Lists all available models per backend and creates ChatBot instances
+- **Regex filtering**: Query ChatBots by model name pattern
+- **Configuration persistence**: Load/restore backend configs from JSON
+
+### Usage
+
+```python
+import asyncio
+from peteos.chatbotmanager import ChatBotManager
+
+async def main():
+    manager = ChatBotManager()
+
+    # Add a backend - auto-detects API type and models
+    backend = await manager.add_backend("local-llm", "http://localhost:8000")
+    print(f"Detected API: {backend.api_type}")  # "openai" or "anthropic"
+    print(f"Models: {list(backend.models.keys())}")
+
+    # List all ChatBots matching a pattern
+    for model_id, chatbot in manager.list_chatbots("qwen.*"):
+        print(f"  {model_id} -> {chatbot.__class__.__name__}")
+
+    # Remove a backend
+    manager.remove_backend("local-llm")
+
+    # Load from JSON (API type and models auto-detected)
+    await manager.load_from_json({
+        "backends": [
+            {"name": "backend1", "url": "http://backend1:8000"},
+            {"name": "backend2", "url": "http://backend2:8000"}
+        ]
+    })
+
+asyncio.run(main())
+```
+
+### JSON Configuration
+
+Save backends to a JSON file for later restoration:
+
+```json
+{
+  "backends": [
+    {
+      "name": "local-llm",
+      "url": "http://localhost:8000"
+    },
+    {
+      "name": "remote-llm",
+      "url": "https://api.example.com"
+    }
+  ]
+}
+```
+
+Load from file:
+
+```python
+manager.load_from_file("backends.json")
+```
+
+**Note**: The JSON only contains `name` and `url`. The `api_type` and `models` are auto-detected at runtime by probing each backend's `/v1/models` endpoint.
+
+### API Reference
+
+```python
+class ChatBotManager:
+    def __init__(self)
+
+    async def add_backend(name: str, url: str) -> BackendInfo
+        """Add backend, detect API type, discover models."""
+
+    def remove_backend(name: str) -> bool
+        """Remove backend by name."""
+
+    def list_chatbots(model_regex: str) -> List[Tuple[str, ChatBot]]
+        """List all ChatBots matching regex pattern."""
+
+    async def load_from_json(json_obj: dict) -> None
+        """Load backends from JSON object (API auto-detected)."""
+
+    async def load_from_file(filepath: str) -> None
+        """Load backends from JSON file."""
+```
+
+### BackendInfo
+
+```python
+@dataclass
+class BackendInfo:
+    name: str
+    url: str
+    api_type: str  # "openai" or "anthropic"
+    models: Dict[str, ChatBot]
+```
+
+### Testing
+
+```bash
+# Unit tests
+pytest tests/test_chatbot_manager.py -v
+```
