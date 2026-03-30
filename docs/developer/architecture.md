@@ -2,7 +2,7 @@
 
 ## Overview
 
-Project includes Message, ChatHistory, Tool, ToolManager, ExecutionEnvironment, REPLExecutionEnvironment, Session, Role, Agent, HTTPClient, ChatBot (abstract), ChatBotResponse (abstract), GenericChatBot, OpenAIChatBot, AnthropicChatBot, GenericChatBotResponse, AnthropicChatBotResponse classes.
+Project includes Message, ChatHistory, Tool, ToolManager, ExecutionEnvironment, REPLExecutionEnvironment, Session, Role, RoleManager, Agent, HTTPClient, ChatBot (abstract), ChatBotResponse (abstract), GenericChatBot, OpenAIChatBot, AnthropicChatBot, GenericChatBotResponse, AnthropicChatBotResponse classes.
 
 ## Structure
 
@@ -20,6 +20,7 @@ peteos/
 ├── replexecutionenvironment.py
 ├── session.py
 ├── role.py
+├── rolemanager.py
 └── utils.py
 ```
 
@@ -359,8 +360,8 @@ Session(
 - Model regex defaults to `".*"` (matches any model)
 
 **Static Methods:**
-- `load_from_string(data: str)`: Creates session from string (stub - not implemented)
-- `load_from_file(file_path: str)`: Creates session from file (stub - not implemented)
+- `load_from_string(data: str, chatbot_manager, role_manager, tool_manager)`: Creates session from JSON string. Expects JSON with `uuid`, `role` (name), and `chat_history` fields. Looks up Role from RoleManager, validates required tools exist in tool_manager, reconstructs ChatHistory from message data, returns new Session.
+- `load_from_file(file_path: str, chatbot_manager, role_manager, tool_manager)`: Creates session from JSON file. Reads file, then delegates to `load_from_string`.
 
 ### Role
 
@@ -394,7 +395,38 @@ Role(
   - `system_prompt.md` (optional) contains system prompt (or `config.json.system_prompt` as fallback)
   - `config.json` (optional) contains `required_tools`, `execution_environment`, and `model`
   - Markdown files take precedence over config.json entries
+  - Raises `FileNotFoundError` if description is not found in either source
 - `load_config_from_path(role_path: str) -> dict`: Loads optional config.json from role directory, returns empty dict if file doesn't exist
+
+### RoleManager
+
+Manages role registration and lookup.
+
+**Attributes:**
+- `_roles` (Dict[str, Role]): Dictionary of registered roles
+
+**Methods:**
+- `register_role(role: Role) -> None`: Registers a role by name
+- `load_from_dir(directory: str) -> List[str]`: Loads all roles from subdirectories
+  - Each subdirectory is treated as a role
+  - Uses `Role.load_from_path()` for each subdirectory
+  - Returns list of successfully loaded role names
+- `get_role(name: str) -> Optional[Role]`: Retrieves role by name
+- `list_roles() -> List[Tuple[str, Role]]`: Lists all registered (name, role) pairs
+
+**Example:**
+```python
+manager = RoleManager()
+
+# Manual registration
+manager.register_role(Role(name="assistant", description="Helpful assistant"))
+
+# Load from directory
+loaded = manager.load_from_dir("./roles")  # ["assistant", "coder", etc.]
+
+# Get role
+role = manager.get_role("assistant")
+```
 
 ### Agent
 
@@ -758,6 +790,15 @@ classDiagram
         +load_config_from_path(role_path: str) static
     }
 
+    class RoleManager {
+        +Dict[str, Role] _roles
+        +__init__()
+        +register_role(role: Role)
+        +load_from_dir(directory: str) List[str]
+        +get_role(name: str) Role
+        +list_roles() List[Tuple]
+    }
+
     class Agent {
         +ChatBot _chatbot
         +Dict[str, Session] _sessions
@@ -784,8 +825,10 @@ classDiagram
     Session --> Role : has
     Session --> ChatBot : has
     Session --> ToolManager : has
+    Session --> RoleManager : has
     Agent --> Session : manages
     Agent --> ChatBot : has
+    RoleManager --> Role : manages
     ChatBot --> HTTPClient : uses
     ChatBot --> ChatHistory : accepts
     ChatBot --> ChatBotResponse : returns
@@ -808,6 +851,7 @@ graph TD
     A --> J[replexecutionenvironment.py]
     A --> K[session.py]
     A --> L[role.py]
+    A --> O[rolemanager.py]
     A --> M[httpclient.py]
     A --> N[utils.py]
 
@@ -825,6 +869,7 @@ graph TD
     K -->|imports| D
     K -->|imports| L
     L -->|imports| I
+    O -->|imports| L
     C -->|imports| D
     C -->|imports| K
     D -->|imports| G
@@ -842,5 +887,6 @@ graph TD
     B -->|imports| J
     B -->|imports| K
     B -->|imports| L
+    B -->|imports| O
     B -->|imports| M
 ```

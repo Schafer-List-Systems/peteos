@@ -103,8 +103,13 @@ class Role:
         description_path = path_obj / "description.md"
         if description_path.exists():
             description = description_path.read_text()
+        elif "description" in config:
+            description = config["description"]
         else:
-            description = config.get("description", "")
+            raise FileNotFoundError(
+                f"Description not found in {path}. "
+                "Expected either description.md or config.json with 'description' key"
+            )
 
         system_prompt_path = path_obj / "system_prompt.md"
         if system_prompt_path.exists():
