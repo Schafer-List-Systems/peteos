@@ -43,6 +43,9 @@ htmlcov/
 # Claude instructions
 CLAUDE.md
 
+# Claude Code
+.claude/
+
 # HTTP client notes
 http_client.md
 

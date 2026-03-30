@@ -286,18 +286,22 @@ Abstract base class for agent execution environments.
 **Attributes:**
 - `tool_manager` (ToolManager): Tool manager for the environment
 - `chat_history` (ChatHistory): Chat history for the environment
-- `chatbot` (ChatBot): ChatBot instance
+- `chatbot_manager` (ChatBotManager): Manager for ChatBot instances
+- `role` (Role): Role with model regex for ChatBot selection
+- `_chatbot` (ChatBot): Selected ChatBot instance
 - `_interrupt` (bool): Interrupt flag
 - `_running` (bool): Running state flag
 
 **Properties:**
 - `is_running` (bool): Check if the execution environment is currently running
+- `chatbot` (ChatBot): Returns the selected ChatBot
 
 **Methods:**
 - `set_interrupt()`: Request interruption of the execution loop
 - `clear_interrupt()`: Clear the interrupt flag
 - `get_chat_history() -> ChatHistory`: Get the internal chat history
 - `run()`: Abstract method - runs the agentic loop (must be overridden)
+- `_select_chatbot() -> ChatBot`: Selects a ChatBot from manager using `role.model` regex
 
 ### REPLExecutionEnvironment
 
@@ -306,9 +310,10 @@ Concrete implementation of ExecutionEnvironment for REPL (Read-Eval-Print Loop).
 **Constructor:**
 ```python
 REPLExecutionEnvironment(
-    chatbot: ChatBot,
+    chatbot_manager: ChatBotManager,
     chat_history: ChatHistory,
-    tool_manager: ToolManager
+    tool_manager: ToolManager,
+    role: Role
 )
 ```
 
@@ -334,6 +339,7 @@ Container for role, execution environment, and chat history.
 - `uuid` (UUID): Session UUID (generated if not provided)
 - `role` (Role): The role for this session
 - `chat_history` (ChatHistory): Chat history (created if None provided)
+- `chatbot_manager` (ChatBotManager): Manager for ChatBot instances
 - `execution_environment` (ExecutionEnvironment): The execution environment
 
 **Constructor:**
@@ -341,13 +347,16 @@ Container for role, execution environment, and chat history.
 Session(
     role: Role,                    # obligatory
     tool_manager: ToolManager,     # obligatory
-    chatbot: ChatBot,              # obligatory
+    chatbot_manager: ChatBotManager,  # obligatory
     chat_history: Optional[ChatHistory] = None,
     session_uuid: Optional[UUID] = None
 )
 ```
 
-**Note:** Session does NOT create ExecutionEnvironment - passes existing instances to its constructor.
+**Behavior:**
+- Session stores `ChatBotManager` and passes it to `ExecutionEnvironment` along with `Role`
+- `ExecutionEnvironment` selects a `ChatBot` from the manager using `role.model` regex pattern
+- Model regex defaults to `".*"` (matches any model)
 
 **Static Methods:**
 - `load_from_string(data: str)`: Creates session from string (stub - not implemented)
@@ -363,6 +372,7 @@ Represents a role with identity, context, and configuration.
 - `system_prompt` (Optional[str]): Optional system prompt
 - `required_tools` (list[str]): List of tool names required by this role (default: empty list)
 - `execution_environment` (str): Name of the execution environment to use (default: "REPL")
+- `model` (str): Regex pattern to match model IDs for ChatBot selection (default: `".*"`)
 
 **Constructor:**
 ```python
@@ -371,17 +381,18 @@ Role(
     description: str,
     system_prompt: Optional[str] = None,
     required_tools: Optional[list[str]] = None,
-    execution_environment: str = "REPL"
+    execution_environment: str = "REPL",
+    model: str = ".*"
 )
 ```
 
 **Static Methods:**
-- `load_from_dict(data: dict) -> Role`: Creates role from dict with 'name', 'description', optional 'system_prompt', 'required_tools', and 'execution_environment' keys
+- `load_from_dict(data: dict) -> Role`: Creates role from dict with 'name', 'description', optional 'system_prompt', 'required_tools', 'execution_environment', and 'model' keys
 - `load_from_path(path: str) -> Role`: Creates role from directory
   - Name derived from path suffix
   - `description.md` contains description (or `config.json.description` as fallback)
   - `system_prompt.md` (optional) contains system prompt (or `config.json.system_prompt` as fallback)
-  - `config.json` (optional) contains `required_tools` and `execution_environment`
+  - `config.json` (optional) contains `required_tools`, `execution_environment`, and `model`
   - Markdown files take precedence over config.json entries
 - `load_config_from_path(role_path: str) -> dict`: Loads optional config.json from role directory, returns empty dict if file doesn't exist
 

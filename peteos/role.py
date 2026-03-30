@@ -12,7 +12,8 @@ class Role:
         description: str,
         system_prompt: Optional[str] = None,
         required_tools: Optional[list[str]] = None,
-        execution_environment: str = "REPL"
+        execution_environment: str = "REPL",
+        model: str = ".*"
     ):
         """
         Initialize Role.
@@ -23,12 +24,14 @@ class Role:
             system_prompt: Optional system prompt.
             required_tools: Optional list of tool names required by this role.
             execution_environment: Name of the execution environment (default: "REPL").
+            model: Regex pattern to match model IDs (default: ".*" matches any model).
         """
         self.name = name
         self.description = description
         self.system_prompt = system_prompt
         self.required_tools = required_tools if required_tools is not None else []
         self.execution_environment = execution_environment
+        self.model = model
 
     @staticmethod
     def load_from_dict(data: dict) -> "Role":
@@ -37,7 +40,7 @@ class Role:
 
         Args:
             data: Dictionary with 'name', 'description', and optional 'system_prompt',
-                  'required_tools', 'execution_environment' keys.
+                  'required_tools', 'execution_environment', 'model' keys.
 
         Returns:
             A new Role instance.
@@ -47,12 +50,14 @@ class Role:
         system_prompt = data.get("system_prompt")
         required_tools = data.get("required_tools", [])
         execution_environment = data.get("execution_environment", "REPL")
+        model = data.get("model", ".*")
         return Role(
             name=name,
             description=description,
             system_prompt=system_prompt,
             required_tools=required_tools,
-            execution_environment=execution_environment
+            execution_environment=execution_environment,
+            model=model
         )
 
     @staticmethod
@@ -109,11 +114,13 @@ class Role:
 
         required_tools = config.get("required_tools", [])
         execution_environment = config.get("execution_environment", "REPL")
+        model = config.get("model", ".*")
 
         return Role(
             name=name,
             description=description,
             system_prompt=system_prompt,
             required_tools=required_tools,
-            execution_environment=execution_environment
+            execution_environment=execution_environment,
+            model=model
         )

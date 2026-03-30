@@ -1,7 +1,8 @@
-from peteos.chatbot import ChatBot
+from peteos.chatbotmanager import ChatBotManager
 from peteos.chathistory import ChatHistory
 from peteos.executionenvironment import ExecutionEnvironment
 from peteos.message import Message
+from peteos.role import Role
 from peteos.toolmanager import ToolManager
 
 
@@ -10,19 +11,26 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
     def __init__(
         self,
-        chatbot: ChatBot,
+        chatbot_manager: ChatBotManager,
         chat_history: ChatHistory,
-        tool_manager: ToolManager
+        tool_manager: ToolManager,
+        role: Role
     ):
         """
         Initialize REPLExecutionEnvironment.
 
         Args:
-            chatbot: The ChatBot instance to use.
+            chatbot_manager: The ChatBotManager instance to use.
             chat_history: The ChatHistory instance to use.
             tool_manager: The ToolManager instance to use.
+            role: The Role instance to use.
         """
-        super().__init__(chatbot=chatbot, chat_history=chat_history, tool_manager=tool_manager)
+        super().__init__(
+            chatbot_manager=chatbot_manager,
+            chat_history=chat_history,
+            tool_manager=tool_manager,
+            role=role
+        )
 
     async def run(self) -> None:
         """

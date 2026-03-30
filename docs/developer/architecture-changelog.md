@@ -1,3 +1,12 @@
+## [2026-03-30] - Session ChatBotManager Integration
+- Added `model` field to `Role`: regex pattern for ChatBot selection (default: `".*"`)
+- Updated `ExecutionEnvironment` to accept `ChatBotManager` and `Role` instead of `ChatBot`
+- Added `_select_chatbot()` method: selects ChatBot using `role.model` regex pattern
+- Updated `REPLExecutionEnvironment` constructor to accept `chatbot_manager` and `role`
+- Updated `Session` to store `ChatBotManager` and pass it with `role` to execution environment
+- Changed mock model name from `"qwen"` to `"mock_model"` in tests for security
+- Updated `architecture.md`: Role, ExecutionEnvironment, and Session documentation
+
 ## [2026-03-30] - Documentation Updates
 - Updated `execution-environment.md`: Fixed REPL loop behavior to match current code (stores full `response.data` dict, not separate fields)
 - Updated `chatbot.md`: Fixed Anthropic API behavior, added request/response format differences, removed sensitive IP addresses

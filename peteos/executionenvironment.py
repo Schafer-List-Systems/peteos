@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 
 from peteos.chatbot import ChatBot
+from peteos.chatbotmanager import ChatBotManager
 from peteos.chathistory import ChatHistory
+from peteos.role import Role
 from peteos.toolmanager import ToolManager
 
 
@@ -10,23 +12,42 @@ class ExecutionEnvironment(ABC):
 
     def __init__(
         self,
-        chatbot: ChatBot,
+        chatbot_manager: ChatBotManager,
         chat_history: ChatHistory,
-        tool_manager: ToolManager
+        tool_manager: ToolManager,
+        role: Role
     ):
         """
         Initialize ExecutionEnvironment.
 
         Args:
-            chatbot: The ChatBot instance to use (obligatory).
+            chatbot_manager: The ChatBotManager instance to use (obligatory).
             chat_history: The ChatHistory instance to use (obligatory).
-            tool_manager: The ToolManager instance to use.
+            tool_manager: The ToolManager instance to use (obligatory).
+            role: The Role instance to use (for model_regex and future properties).
         """
         self.tool_manager = tool_manager
         self.chat_history = chat_history
-        self.chatbot = chatbot
+        self.chatbot_manager = chatbot_manager
+        self.role = role
+        self._chatbot: ChatBot = self._select_chatbot()
         self._interrupt = False
         self._running = False
+
+    @property
+    def chatbot(self) -> ChatBot:
+        """Get current ChatBot, selecting from manager if available."""
+        return self._chatbot
+
+    def _select_chatbot(self) -> ChatBot:
+        """Select a ChatBot from the manager based on role.model."""
+        chatbots = self.chatbot_manager.list_chatbots(self.role.model)
+        if not chatbots:
+            raise ValueError(
+                f"No ChatBot found matching model pattern '{self.role.model}' "
+                f"for role '{self.role.name}'"
+            )
+        return chatbots[0][1]
 
     @property
     def is_running(self) -> bool:

@@ -6,35 +6,61 @@ from unittest.mock import MagicMock
 import pytest
 
 from peteos.chatbot import ChatBot
+from peteos.chatbotmanager import ChatBotManager
 from peteos.chathistory import ChatHistory
 from peteos.message import Message
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
+from peteos.role import Role
 from peteos.toolmanager import ToolManager
+
+
+@pytest.fixture
+def mock_role():
+    """Create a mock Role with default model regex."""
+    return Role(name="test", description="Test role")
+
+
+@pytest.fixture
+def mock_chatbot_manager():
+    """Create a mock ChatBotManager with a default ChatBot."""
+    manager = MagicMock(spec=ChatBotManager)
+    mock_chatbot = MagicMock(spec=ChatBot)
+    manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
+    return manager
+
+
+@pytest.fixture
+def mock_chatbot():
+    """Create a mock ChatBot for direct assignment."""
+    return MagicMock(spec=ChatBot)
 
 
 class TestREPLExecutionEnvironmentInit:
     """Test REPLExecutionEnvironment initialization."""
 
-    def test_init(self):
+    def test_init(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test basic initialization."""
-        chatbot = MagicMock(spec=ChatBot)
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
-        assert env.chatbot == chatbot
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+
+        assert env.chatbot == mock_chatbot
         assert env.chat_history == chat_history
         assert env.tool_manager == tool_manager
+        assert env.role == mock_role
         assert env._interrupt is False
 
-    def test_interset_flag_default_false(self):
+    def test_interset_flag_default_false(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test interrupt flag is False by default."""
-        chatbot = MagicMock(spec=ChatBot)
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
+
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
 
         assert env._interrupt is False
 
@@ -42,25 +68,27 @@ class TestREPLExecutionEnvironmentInit:
 class TestSetInterruptClearInterrupt:
     """Test interrupt flag methods."""
 
-    def test_set_interrupt(self):
+    def test_set_interrupt(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test set_interrupt sets flag to True."""
-        chatbot = MagicMock(spec=ChatBot)
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
+
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
 
         env.set_interrupt()
 
         assert env._interrupt is True
 
-    def test_clear_interrupt(self):
+    def test_clear_interrupt(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test clear_interrupt sets flag to False."""
-        chatbot = MagicMock(spec=ChatBot)
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
+
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
         env.set_interrupt()
 
         env.clear_interrupt()
@@ -72,7 +100,7 @@ class TestREPLRunBasicConversation:
     """Test basic REPL loop without tool calls."""
 
     @pytest.mark.asyncio
-    async def test_run_basic_conversation(self):
+    async def test_run_basic_conversation(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test single turn conversation with final answer."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
@@ -101,10 +129,10 @@ class TestREPLRunBasicConversation:
             call_count[0] += 1
             return MockResponse()
 
-        chatbot = MagicMock(spec=ChatBot)
-        chatbot.send_message = mock_send_message
+        mock_chatbot.send_message = mock_send_message
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
 
         await env.run()
 
@@ -116,7 +144,7 @@ class TestREPLRunBasicConversation:
         assert call_count[0] == 1
 
     @pytest.mark.asyncio
-    async def test_run_with_thinking_content(self):
+    async def test_run_with_thinking_content(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test response with reasoning content."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
@@ -145,10 +173,10 @@ class TestREPLRunBasicConversation:
         async def mock_send_message(history, streaming=True):
             return MockResponse()
 
-        chatbot = MagicMock(spec=ChatBot)
-        chatbot.send_message = mock_send_message
+        mock_chatbot.send_message = mock_send_message
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
 
         await env.run()
 
@@ -160,7 +188,7 @@ class TestREPLRunBasicConversation:
         assert chat_history.messages[1].content.get("text") == text_content
 
     @pytest.mark.asyncio
-    async def test_run_loop_terminates_on_final_answer(self):
+    async def test_run_loop_terminates_on_final_answer(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test that loop terminates when no tool_calls in response."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
@@ -189,10 +217,10 @@ class TestREPLRunBasicConversation:
             call_count[0] += 1
             return MockResponse()
 
-        chatbot = MagicMock(spec=ChatBot)
-        chatbot.send_message = mock_send_message
+        mock_chatbot.send_message = mock_send_message
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
 
         await env.run()
 
@@ -204,7 +232,7 @@ class TestREPLRunWithToolCalls:
     """Test REPL loop with tool calls."""
 
     @pytest.mark.asyncio
-    async def test_run_tool_call_detected(self):
+    async def test_run_tool_call_detected(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test that tool calls in response.data['tool_calls'] are executed."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
@@ -250,10 +278,10 @@ class TestREPLRunWithToolCalls:
             response_idx[0] += 1
             return MockResponse(responses[idx])
 
-        chatbot = MagicMock(spec=ChatBot)
-        chatbot.send_message = mock_send_message
+        mock_chatbot.send_message = mock_send_message
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
 
         await env.run()
 
@@ -271,7 +299,7 @@ class TestREPLRunWithToolCalls:
         assert final_answer in chat_history.messages[3].content.get("text", "")
 
     @pytest.mark.asyncio
-    async def test_run_tool_call_loop_continues(self):
+    async def test_run_tool_call_loop_continues(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test that loop continues after tool call with new response."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
@@ -312,10 +340,10 @@ class TestREPLRunWithToolCalls:
             response_idx[0] += 1
             return MockResponse(responses[idx])
 
-        chatbot = MagicMock(spec=ChatBot)
-        chatbot.send_message = mock_send_message
+        mock_chatbot.send_message = mock_send_message
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
 
         await env.run()
 
@@ -329,7 +357,7 @@ class TestREPLRunInterrupt:
     """Test interrupt functionality."""
 
     @pytest.mark.asyncio
-    async def test_run_interrupt_immediately(self):
+    async def test_run_interrupt_immediately(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test that interrupt stops the loop before processing."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
@@ -355,10 +383,10 @@ class TestREPLRunInterrupt:
         async def mock_send_message(history, streaming=True):
             return MockResponse()
 
-        chatbot = MagicMock(spec=ChatBot)
-        chatbot.send_message = mock_send_message
+        mock_chatbot.send_message = mock_send_message
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
-        env = REPLExecutionEnvironment(chatbot, chat_history, tool_manager)
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
 
         # Set interrupt immediately
         env.set_interrupt()
