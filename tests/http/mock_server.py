@@ -69,13 +69,20 @@ class MockLLMServer:
             )
             await response.prepare(request)
             for data in self.responses:
-                # Anthropic API uses "event:" prefix, OpenAI uses just "data:"
+                # Anthropic API uses "event:" prefix before "data:", OpenAI uses just "data:"
                 if is_anthropic:
-                    if data == "[DONE]\n":
+                    if data == "[DONE]":
                         await response.write(b"data: [DONE]\n\n")
                     else:
-                        await response.write(f"data: {data[6:]}".encode())  # Remove 'data: ' prefix
-                        await response.write(b"\n\n")
+                        # Parse JSON to get the event type, then output with proper SSE format
+                        try:
+                            event_data = json.loads(data.strip())
+                            event_type = event_data.get("type", "")
+                            # Anthropic sends: event: <type>\ndata: <json>\n\n
+                            await response.write(f"event: {event_type}\n".encode())
+                            await response.write(f"data: {data}\n\n".encode())
+                        except json.JSONDecodeError:
+                            await response.write(data.encode())
                 else:
                     await response.write(data.encode())
                 await asyncio.sleep(0.01)

@@ -229,27 +229,6 @@ class OpenAIChatBot(GenericChatBot):
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
         )
-        self._base_url = base_url
-
-    async def send_message(
-        self,
-        chat_history: ChatHistory,
-        streaming: bool = True
-    ) -> ChatBotResponse:
-        """Send a chat history to OpenAI-compatible API."""
-        body = self._build_body(chat_history, streaming)
-
-        if streaming:
-            stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
-            return GenericChatBotResponse(stream, self._translations)
-        else:
-            response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            return GenericChatBotResponse.from_json(response_data, self._translations)
-
-    def list_available_models(self) -> List[str]:
-        """List OpenAI models."""
-        return [self._model]
-
 
 class AnthropicChatBot(GenericChatBot):
     """ChatBot implementation for Anthropic-compatible API."""
@@ -298,7 +277,6 @@ class AnthropicChatBot(GenericChatBot):
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
         )
-        self._base_url = base_url
         self._max_tokens = max_tokens
 
     async def send_message(
@@ -321,10 +299,5 @@ class AnthropicChatBot(GenericChatBot):
     def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
         """Build request body from chat history and defaults."""
         body = super()._build_body(chat_history, streaming)
-        if not streaming:
-            body["max_tokens"] = self._max_tokens
+        body["max_tokens"] = self._max_tokens
         return body
-
-    def list_available_models(self) -> List[str]:
-        """List Anthropic models."""
-        return [self._model]
