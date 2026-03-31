@@ -291,18 +291,20 @@ Abstract base class for agent execution environments.
 - `role` (Role): Role with model regex for ChatBot selection
 - `_chatbot` (ChatBot): Selected ChatBot instance
 - `_interrupt` (bool): Interrupt flag
-- `_running` (bool): Running state flag
+- `_completion_signal` (asyncio.Event): Completion signaling - set() when idle, clear() when running
 
 **Properties:**
-- `is_running` (bool): Check if the execution environment is currently running
+- `is_running` (bool): Check if the execution environment is currently running (returns not `_completion_signal.is_set()`)
 - `chatbot` (ChatBot): Returns the selected ChatBot
 
 **Methods:**
 - `set_interrupt()`: Request interruption of the execution loop
 - `clear_interrupt()`: Clear the interrupt flag
 - `get_chat_history() -> ChatHistory`: Get the internal chat history
-- `run()`: Abstract method - runs the agentic loop (must be overridden)
+- `run() -> None`: Wrapper around abstract `_run_impl()` that manages completion signaling
+- `_run_impl() -> None`: Abstract method - actual implementation of the agentic loop (must be overridden)
 - `_select_chatbot() -> ChatBot`: Selects a ChatBot from manager using `role.model` regex
+- `wait_for_stop() -> None`: Blocks until the execution loop completes
 
 ### REPLExecutionEnvironment
 
@@ -319,7 +321,7 @@ REPLExecutionEnvironment(
 ```
 
 **Methods:**
-- `run() -> None`: Main agentic loop that:
+- `_run_impl() -> None`: Main agentic loop that:
   1. Sends chat history to chatbot (streaming)
   2. Collects accumulated response with interrupt checks
   3. Appends full `response.data` dict as Message to ChatHistory
@@ -342,6 +344,8 @@ Container for role, execution environment, and chat history.
 - `chat_history` (ChatHistory): Chat history (created if None provided)
 - `chatbot_manager` (ChatBotManager): Manager for ChatBot instances
 - `execution_environment` (REPLExecutionEnvironment): The execution environment (REPL by default)
+- `_message_queue` (deque[Message]): Queue for pending messages
+- `_queue_lock` (asyncio.Lock): Lock for thread-safe message enqueuing
 
 **Constructor:**
 ```python
@@ -366,6 +370,12 @@ Session(
 **Static Methods:**
 - `load_from_json(json_data: dict, chatbot_manager, role_manager, tool_manager)`: Creates session from JSON dict. Expects JSON with `uuid`, `role` (name), and `chat_history` fields. Looks up Role from RoleManager, validates required tools exist in tool_manager, reconstructs ChatHistory from message data, creates REPLExecutionEnvironment, returns new Session.
 - `load_from_file(file_path: str, chatbot_manager, role_manager, tool_manager)`: Creates session from JSON file. Reads file, parses JSON, then delegates to `load_from_json`.
+
+**Instance Methods:**
+- `async def queue_message(message: Message) -> None`: Queue a message for processing
+  - If execution env is running: interrupts, waits for stop via `wait_for_stop()`, drains all queued messages to chat_history, restarts execution env
+  - If execution env is not running: drains messages, starts execution env
+  - Thread-safe via `asyncio.Lock` to prevent race conditions on concurrent enqueues
 
 ### Role
 
@@ -758,18 +768,20 @@ classDiagram
         +ChatHistory chat_history
         +ChatBot chatbot
         +bool _interrupt
-        +bool _running
+        +asyncio.Event _completion_signal
         +__init__(chatbot, chat_history, tool_manager)
         +is_running bool {get}
         +set_interrupt()
         +clear_interrupt()
         +get_chat_history() ChatHistory
-        +run() #abstract
+        +run()
+        +_run_impl() #abstract
+        +wait_for_stop()
     }
 
     class REPLExecutionEnvironment {
         +__init__(chatbot, chat_history, tool_manager)
-        +run()
+        +_run_impl()
     }
 
     class Session {
@@ -777,9 +789,12 @@ classDiagram
         +Role role
         +ChatHistory chat_history
         +ExecutionEnvironment execution_environment
+        +deque[Message] _message_queue
+        +asyncio.Lock _queue_lock
         +__init__(role, tool_manager, chatbot, chat_history=None, session_uuid=None)
-        +load_from_string(data: str) static
-        +load_from_file(file_path: str) static
+        +load_from_json(data: dict, chatbot_manager, role_manager, tool_manager) static
+        +load_from_file(file_path: str, chatbot_manager, role_manager, tool_manager) static
+        +queue_message(message: Message) async
     }
 
     class Role {
