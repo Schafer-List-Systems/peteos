@@ -47,18 +47,12 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             )
 
             # Collect accumulated response with interrupt checks
-            interrupted = False
             async for _ in response:
                 if self._interrupt:
-                    interrupted = True
                     break
 
-            if interrupted:
-                # Request dropped mid-stream, exit loop
-                break
-
-            # Check if we're interrupted
             if self._interrupt:
+                # Request dropped mid-stream, exit loop
                 break
 
             # Append the full response as a Message to ChatHistory
