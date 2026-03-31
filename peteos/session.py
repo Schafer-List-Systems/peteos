@@ -1,4 +1,6 @@
+import asyncio
 import json
+from collections import deque
 from datetime import datetime
 import uuid
 from typing import Optional
@@ -49,6 +51,44 @@ class Session:
             tool_manager=tool_manager,
             role=role
         )
+
+        self._message_queue: deque[Message] = deque()
+        self._queue_lock = asyncio.Lock()
+
+    async def queue_message(self, message: Message) -> None:
+        """
+        Queue a message for processing.
+
+        If the execution environment is running, this function:
+        1. Adds the message to the queue
+        2. Interrupts the execution environment
+        3. Waits for it to stop
+        4. Drains ALL queued messages to chat_history
+        5. Restarts the execution environment
+
+        If the execution environment is NOT running, the message is added
+        directly to chat_history and the env is started.
+
+        Uses a lock to ensure thread-safe concurrent enqueues.
+
+        Args:
+            message: The message to queue.
+        """
+        async with self._queue_lock:
+            # Add message to queue
+            self._message_queue.append(message)
+
+            if self.execution_environment.is_running:
+                # Interrupt
+                self.execution_environment.set_interrupt()
+
+            # Drain ALL queued messages to chat_history
+            while self._message_queue:
+                msg = self._message_queue.popleft()
+                self.chat_history.append_message(msg)
+
+            # Start/restart execution env
+            await self.execution_environment.run()
 
     @staticmethod
     def load_from_json(

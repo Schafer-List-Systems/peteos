@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 
 from peteos.chatbot import ChatBot
@@ -33,6 +34,8 @@ class ExecutionEnvironment(ABC):
         self._chatbot: ChatBot = self._select_chatbot()
         self._interrupt = False
         self._running = False
+        self._completion_signal: asyncio.Event = asyncio.Event()
+        self._completion_signal.set()  # Start as signaled (not running)
 
     @property
     def chatbot(self) -> ChatBot:
@@ -66,11 +69,34 @@ class ExecutionEnvironment(ABC):
         """Get the internal chat history."""
         return self.chat_history
 
-    @abstractmethod
-    def run(self) -> None:
+    async def run(self) -> None:
         """
         Run the agentic loop until the LLM responds with a final answer or the loop is interrupted.
 
-        This method is abstract and must be overridden by derived classes.
+        This is a concrete implementation that wraps the abstract _run_impl() method
+        to provide completion signaling. Derived classes should override _run_impl().
+        """
+        self._running = True
+        self._completion_signal.clear()
+        try:
+            await self._run_impl()
+        finally:
+            self._running = False
+            self._completion_signal.set()
+
+    @abstractmethod
+    async def _run_impl(self) -> None:
+        """
+        Actual implementation of the agentic loop.
+
+        This method must be overridden by derived classes.
         """
         pass
+
+    async def wait_for_stop(self) -> None:
+        """
+        Wait for the execution loop to complete.
+
+        This blocks until the loop finishes (either naturally or via interruption).
+        """
+        await self._completion_signal.wait()

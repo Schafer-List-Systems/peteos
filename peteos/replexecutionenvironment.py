@@ -32,84 +32,80 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             role=role
         )
 
-    async def run(self) -> None:
+    async def _run_impl(self) -> None:
         """
         Run the REPL loop.
 
         Reads input, processes it through the chatbot, and appends output to ChatHistory.
         Loops until final answer is received or interrupt flag is set.
         """
-        self._running = True
-        try:
-            while not self._interrupt:
-                # Send chat history to chatbot
-                response = await self.chatbot.send_message(
-                    self.chat_history,
-                    streaming=True
-                )
+        while not self._interrupt:
+            # Send chat history to chatbot
+            response = await self.chatbot.send_message(
+                self.chat_history,
+                streaming=True
+            )
 
-                # Collect accumulated response with interrupt checks
-                interrupted = False
-                async for _ in response:
-                    if self._interrupt:
-                        interrupted = True
-                        break
-
-                if interrupted:
-                    # Request dropped mid-stream, exit loop
-                    break
-
-                # Check if we're interrupted
+            # Collect accumulated response with interrupt checks
+            interrupted = False
+            async for _ in response:
                 if self._interrupt:
+                    interrupted = True
                     break
 
-                # Append the full response as a Message to ChatHistory
-                self.chat_history.append_message(Message(content=response.data))
+            if interrupted:
+                # Request dropped mid-stream, exit loop
+                break
 
-                # Check if response contains tool calls
-                tool_calls = response.data.get("tool_calls")
-                tool_calls_list = tool_calls if isinstance(tool_calls, list) else []
+            # Check if we're interrupted
+            if self._interrupt:
+                break
 
-                if tool_calls_list:
-                    # Execute tool calls
-                    for tool_call in tool_calls_list:
-                        if isinstance(tool_call, dict):
-                            tool_name = tool_call.get("name")
-                            args = tool_call.get("arguments", {})
+            # Append the full response as a Message to ChatHistory
+            self.chat_history.append_message(Message(content=response.data))
 
-                            tool = self.tool_manager.get_tool(tool_name)
-                            if tool:
-                                try:
-                                    result = tool.execute(**args)
-                                    self.chat_history.append_message(
-                                        Message(content={
-                                            "role": "tool",
-                                            "name": tool_name,
-                                            "content": str(result),
-                                            "success": True
-                                        })
-                                    )
-                                except Exception as e:
-                                    self.chat_history.append_message(
-                                        Message(content={
-                                            "role": "tool",
-                                            "name": tool_name,
-                                            "content": f"Error: {type(e).__name__}: {str(e)}",
-                                            "success": False
-                                        })
-                                    )
-                            else:
+            # Check if response contains tool calls
+            tool_calls = response.data.get("tool_calls")
+            tool_calls_list = tool_calls if isinstance(tool_calls, list) else []
+
+            if tool_calls_list:
+                # Execute tool calls
+                for tool_call in tool_calls_list:
+                    if isinstance(tool_call, dict):
+                        tool_name = tool_call.get("name")
+                        args = tool_call.get("arguments", {})
+
+                        tool = self.tool_manager.get_tool(tool_name)
+                        if tool:
+                            try:
+                                result = tool.execute(**args)
                                 self.chat_history.append_message(
                                     Message(content={
                                         "role": "tool",
                                         "name": tool_name,
-                                        "content": f"Error: Tool '{tool_name}' not found",
+                                        "content": str(result),
+                                        "success": True
+                                    })
+                                )
+                            except Exception as e:
+                                self.chat_history.append_message(
+                                    Message(content={
+                                        "role": "tool",
+                                        "name": tool_name,
+                                        "content": f"Error: {type(e).__name__}: {str(e)}",
                                         "success": False
                                     })
                                 )
-                    # Loop continues - sends history with tool results back to LLM
-                else:
-                    # Final answer - exit loop
-                    break
-        finally:
-            self._running = False
+                        else:
+                            self.chat_history.append_message(
+                                Message(content={
+                                    "role": "tool",
+                                    "name": tool_name,
+                                    "content": f"Error: Tool '{tool_name}' not found",
+                                    "success": False
+                                })
+                            )
+                # Loop continues - sends history with tool results back to LLM
+            else:
+                # Final answer - exit loop
+                break
