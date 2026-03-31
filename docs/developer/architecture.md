@@ -21,7 +21,10 @@ peteos/
 ├── session.py
 ├── role.py
 ├── rolemanager.py
-└── utils.py
+└── utils/
+    ├── __init__.py
+    ├── dict_path.py
+    └── tiktoken.py
 ```
 
 ## Components
@@ -460,7 +463,7 @@ Agent(chatbot: ChatBot)
 
 ## Utilities
 
-### get_value_at_path
+### get_value_at_path (peteos/utils/dict_path.py)
 
 Utility function for extracting values from nested dictionaries using path notation.
 
@@ -528,6 +531,7 @@ get_value_at_path(event, "message_start.message.role", type_discriminator=True)
 - Python >= 3.10
 - `httpx` - async HTTP client
 - `pytest`, `pytest-asyncio`, `aiohttp` - dev dependencies for testing
+- `tiktoken` (optional) - token counting, install with `pip install peteos[tiktoken]`
 
 ## Key Implementation Details
 
@@ -902,7 +906,7 @@ graph TD
     A --> L[role.py]
     A --> O[rolemanager.py]
     A --> M[httpclient.py]
-    A --> N[utils.py]
+    A --> N[utils/ (dict_path.py, tiktoken.py)]
 
     G -->|imports| F
     H -->|imports| H

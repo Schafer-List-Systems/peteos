@@ -1,3 +1,10 @@
+## [2026-03-31] - Token Counter Added
+- Added `peteos/tokencounter.py` module with `count_tiktoken()` function
+- Added optional `tiktoken` dependency group in `pyproject.toml`
+- Created `docs/developer/token-counter.md` documentation
+- Added `tests/unit/test_tokencounter.py` unit tests
+- Install with: `pip install peteos[tiktoken]`
+
 ## [2026-03-30] - RoleManager Added
 - Added `RoleManager` class: manages role registration and lookup
 - Methods: `register_role()`, `load_from_dir()`, `get_role()`, `list_roles()`
