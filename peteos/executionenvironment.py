@@ -33,7 +33,6 @@ class ExecutionEnvironment(ABC):
         self.role = role
         self._chatbot: ChatBot = self._select_chatbot()
         self._interrupt = False
-        self._running = False
         self._completion_signal: asyncio.Event = asyncio.Event()
         self._completion_signal.set()  # Start as signaled (not running)
 
@@ -55,7 +54,7 @@ class ExecutionEnvironment(ABC):
     @property
     def is_running(self) -> bool:
         """Check if the execution environment is currently running."""
-        return self._running
+        return not self._completion_signal.is_set()
 
     def set_interrupt(self) -> None:
         """Request interruption of the execution loop."""
@@ -76,12 +75,10 @@ class ExecutionEnvironment(ABC):
         This is a concrete implementation that wraps the abstract _run_impl() method
         to provide completion signaling. Derived classes should override _run_impl().
         """
-        self._running = True
         self._completion_signal.clear()
         try:
             await self._run_impl()
         finally:
-            self._running = False
             self._completion_signal.set()
 
     @abstractmethod
