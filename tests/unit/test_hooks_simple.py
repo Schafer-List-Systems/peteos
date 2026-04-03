@@ -224,3 +224,47 @@ class TestHookCalling:
 
         assert result == (False, "First")
         assert call_order == [1]  # hook2 should not be called
+
+    @pytest.mark.asyncio
+    async def test_before_loop_continue_hook_can_interrupt(self, mock_role, mock_chatbot_manager, mock_chatbot):
+        """Test that before_loop_continue hook can interrupt the loop."""
+        chat_history = ChatHistory()
+        tool_manager = ToolManager()
+
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
+        chat_history.append_message(Message(content={"role": "user", "content": "Hello!"}))
+
+        exit_calls = []
+
+        async def exit_hook(reason):
+            exit_calls.append(reason)
+
+        async def interrupt_hook(delta_messages):
+            return (True, "interrupted_by_hook")
+
+        class MockResponse:
+            def __init__(self):
+                self._data = {
+                    "role": "assistant",
+                    "text": "",
+                    "tool_calls": [{"name": "test_tool", "arguments": {}}]
+                }
+            @property
+            def data(self): return self._data
+            def __aiter__(self): return self
+            async def __anext__(self): raise StopAsyncIteration
+
+        async def mock_send_message(history, streaming=True):
+            return MockResponse()
+
+        mock_chatbot.send_message = mock_send_message
+
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env.register_hook("before_loop_continue", interrupt_hook)
+        env.register_hook("before_loop_exit", exit_hook)
+
+        await env.run()
+
+        # Loop should have been interrupted by hook
+        assert len(exit_calls) == 1
+        assert exit_calls[0] == "interrupted_by_hook"

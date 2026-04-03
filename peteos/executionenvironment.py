@@ -154,6 +154,9 @@ class ExecutionEnvironment(ABC):
         For `before_tool_execution`, returns the first non-None result from hooks,
         which can be a tuple (allow: bool, message: str) to disallow the tool call.
 
+        For `before_loop_continue`, returns the first non-None result from hooks,
+        which can be a tuple (should_exit: bool, reason: str) to interrupt the loop.
+
         Args:
             hook_point: One of "before_tool_execution", "after_tool_execution",
                 "before_loop_continue", or "before_loop_exit".

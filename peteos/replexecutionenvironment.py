@@ -122,7 +122,12 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 # Track delta messages (messages added during this iteration)
                 new_message_count = len(self.chat_history.messages) - history_length_before
                 delta_messages = self.chat_history.messages[-new_message_count:] if new_message_count > 0 else []
-                await self._call_hooks("before_loop_continue", delta_messages)
+                hook_result = await self._call_hooks("before_loop_continue", delta_messages)
+                if hook_result is not None:
+                    should_exit, reason = hook_result
+                    if should_exit:
+                        await self._call_hooks("before_loop_exit", reason)
+                        break
             else:
                 # Check if response has text content
                 text = response.data.get("text")
