@@ -148,7 +148,7 @@ class ExecutionEnvironment(ABC):
             raise ValueError(f"Unknown hook point: {hook_point}")
         self._hooks[hook_point].clear()
 
-    def _call_hooks(self, hook_point: str, *args: Any) -> Any | None:
+    async def _call_hooks(self, hook_point: str, *args: Any) -> Any | None:
         """Call all hooks registered for a specific hook point.
 
         For `before_tool_execution`, returns the first non-None result from hooks,
@@ -170,7 +170,7 @@ class ExecutionEnvironment(ABC):
 
         for callback in self._hooks[hook_point]:
             if asyncio.iscoroutinefunction(callback):
-                result = asyncio.run(callback(*args))
+                result = await callback(*args)
             else:
                 result = callback(*args)
             if result is not None:
