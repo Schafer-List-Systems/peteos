@@ -1,6 +1,6 @@
 from typing import List
 
-from peteos.message import Message
+from .message import Message
 
 
 class ChatHistory:

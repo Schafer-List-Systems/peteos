@@ -3,9 +3,9 @@
 import pytest
 import pytest_asyncio
 from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
-from peteos.httpclient import HTTPClient
-from peteos.chathistory import ChatHistory
-from peteos.message import Message
+from peteos.chatbot import HTTPClient
+from peteos.chatbot import ChatHistory
+from peteos.chatbot import Message
 from tests.http.mock_server import create_openai_mock_server, create_anthropic_mock_server
 
 

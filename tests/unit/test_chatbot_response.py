@@ -1,7 +1,11 @@
 """Tests for ChatBotResponse classes."""
 
 import pytest
-from peteos.chatbotresponse import GenericChatBotResponse, AnthropicChatBotResponse
+from peteos.chatbot import (
+    ChatBotResponse,
+    GenericChatBotResponse,
+    AnthropicChatBotResponse,
+)
 from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
 
 

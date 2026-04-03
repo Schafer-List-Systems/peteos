@@ -5,11 +5,10 @@ import time
 import pytest
 
 from peteos.session import Session
-from peteos.message import Message
-from peteos.chathistory import ChatHistory
+from peteos.chatbot import Message, ChatHistory
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
-from peteos.chatbotmanager import ChatBotManager
+from peteos.chatbot import ChatBotManager
 
 
 class MockChatBot:

@@ -1,7 +1,5 @@
-from peteos.chatbotmanager import ChatBotManager
-from peteos.chathistory import ChatHistory
+from peteos.chatbot import ChatBotManager, ChatHistory, Message
 from peteos.executionenvironment import ExecutionEnvironment
-from peteos.message import Message
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
 

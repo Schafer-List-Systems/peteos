@@ -1,5 +1,5 @@
-from peteos.chathistory import ChatHistory
-from peteos.message import Message
+from peteos.chatbot import ChatHistory
+from peteos.chatbot import Message
 
 
 def test_chat_history_initialization():

@@ -4,7 +4,7 @@ import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
-from peteos.chatbotmanager import ChatBotManager, BackendInfo
+from peteos.chatbot import ChatBotManager, BackendInfo
 from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
 
 

@@ -5,8 +5,8 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple, Any
 
-from peteos.httpclient import HTTPClient
-from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
+from .httpclient import HTTPClient
+from .chatbot import OpenAIChatBot, AnthropicChatBot
 
 
 @dataclass

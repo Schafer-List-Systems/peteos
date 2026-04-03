@@ -1,7 +1,7 @@
 """Tests for HTTPClient."""
 
 import pytest
-from peteos.httpclient import HTTPClient
+from peteos.chatbot import HTTPClient
 
 
 class TestHTTPClientStreaming:

@@ -1,9 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 
-from peteos.chatbot import ChatBot
-from peteos.chatbotmanager import ChatBotManager
-from peteos.chathistory import ChatHistory
+from peteos.chatbot import ChatBot, ChatBotManager, ChatHistory
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
 

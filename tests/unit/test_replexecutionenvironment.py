@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from peteos.chatbot import ChatBot
-from peteos.chatbotmanager import ChatBotManager
-from peteos.chathistory import ChatHistory
-from peteos.message import Message
+from peteos.chatbot import ChatBotManager
+from peteos.chatbot import ChatHistory
+from peteos.chatbot import Message
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
 from peteos.toolmanager import ToolManager

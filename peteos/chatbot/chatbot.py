@@ -4,10 +4,10 @@ from abc import ABC, abstractmethod
 import json
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
-from peteos.httpclient import HTTPClient
-from peteos.chatbotresponse import ChatBotResponse, GenericChatBotResponse, AnthropicChatBotResponse
-from peteos.chathistory import ChatHistory
-from peteos.message import Message
+from .httpclient import HTTPClient
+from .chatbotresponse import ChatBotResponse, GenericChatBotResponse, AnthropicChatBotResponse
+from .chathistory import ChatHistory
+from .message import Message
 
 
 class ChatBot(ABC):

@@ -5,9 +5,7 @@ from datetime import datetime
 import uuid
 from typing import Optional
 
-from peteos.chatbotmanager import ChatBotManager
-from peteos.chathistory import ChatHistory
-from peteos.message import Message
+from peteos.chatbot import ChatBotManager, ChatHistory, Message
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
