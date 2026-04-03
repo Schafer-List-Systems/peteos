@@ -1,9 +1,10 @@
 """Unit tests for InteractiveShellChannel."""
 
+import asyncio
 import uuid
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
 from peteos import channel
 from peteos.agent import Agent
@@ -36,11 +37,11 @@ class TestShellChannelInit:
         tool_manager = MagicMock()
 
         agent = Agent(role_manager, chatbot_manager, tool_manager)
-        channel = InteractiveShellChannel("shell", agent)
+        shell_channel = InteractiveShellChannel("shell", agent)
 
-        assert channel.name == "shell"
-        assert channel._running is True
-        assert channel.active_session_uuid is None
+        assert shell_channel.name == "shell"
+        assert shell_channel._running is False  # start() must be called first
+        assert shell_channel.active_session_uuid is None
 
     def test_shell_channel_registered_with_agent(self):
         """Test shell channel is registered with agent."""
@@ -226,18 +227,20 @@ class TestShellChannelRun:
 
     def test_run_displays_welcome(self):
         """Test run displays welcome message."""
-        from unittest.mock import patch
+        from unittest.mock import AsyncMock, patch, MagicMock
         channel = InteractiveShellChannel("shell", self.agent)
         output = []
         def mock_send(msg):
             output.append(msg)
         channel.send = mock_send
 
-        # Mock input to immediately return quit command
-        with patch.object(channel, 'receive', return_value="/quit"):
-            channel.run()
+        # Start the channel to get welcome message
+        asyncio.run(channel.start())
 
         assert any("Connected" in msg or "Commands" in msg for msg in output)
+
+        # Stop the channel
+        asyncio.run(channel.stop())
 
     def test_run_handles_quit(self):
         """Test run exits on quit command."""

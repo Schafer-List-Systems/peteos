@@ -18,9 +18,9 @@ class Channel(ABC):
         """
         self.name = name
         self._agent = agent
-        self._agent.register_channel(self)
         self._active_session_uuid: uuid.UUID | None = None
         Channel._registry[name] = self
+        agent.register_channel(self)
 
     @property
     def active_session_uuid(self) -> uuid.UUID | None:
