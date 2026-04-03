@@ -687,6 +687,7 @@ classDiagram
         +from_callable(func: Callable) Tool
         +__call__(**kwargs) Any
         +execute(**kwargs) Any
+        +_extract_parameters(func: Callable) dict static
     }
 
     class ToolManager {
@@ -728,14 +729,14 @@ classDiagram
 
     class OpenAIChatBot {
         +__init__(http_client, model, base_url)
-        +RESPONSE_TRANSLATIONS class property
-        +REQUEST_TRANSLATIONS class property
+        +RESPONSE_TRANSLATIONS dict static
+        +REQUEST_TRANSLATIONS dict static
     }
 
     class AnthropicChatBot {
-        +__init__(http_client, model, base_url, max_tokens)
-        +RESPONSE_TRANSLATIONS class property
-        +REQUEST_TRANSLATIONS class property
+        +__init__(http_client, model, base_url, max_tokens=4096)
+        +RESPONSE_TRANSLATIONS dict static
+        +REQUEST_TRANSLATIONS dict static
         +_max_tokens
         +send_message(chat_history, streaming, **kwargs) ChatBotResponse
         +_build_body(chat_history, streaming) dict
@@ -766,36 +767,60 @@ classDiagram
         +_process_event(event) dict
     }
 
+    class BackendInfo {
+        <<dataclass>>
+        +str name
+        +str url
+        +str api_type
+        +Dict[str, Any] models
+    }
+
+    class ChatBotManager {
+        +Dict[str, BackendInfo] _backends
+        +HTTPClient _http_client
+        +__init__()
+        +async add_backend(name: str, url: str) BackendInfo
+        +remove_backend(name: str) bool
+        +list_chatbots(model_regex: str) List[Tuple[str, ChatBot]]
+        +async load_from_json(json_obj: dict)
+        +async load_from_file(filepath: str)
+    }
+
     class ExecutionEnvironment {
         <<Abstract>>
-        +ToolManager tool_manager
+        +ChatBotManager chatbot_manager
         +ChatHistory chat_history
-        +ChatBot chatbot
+        +ToolManager tool_manager
+        +Role role
+        +ChatBot _chatbot
         +bool _interrupt
         +asyncio.Event _completion_signal
-        +__init__(chatbot, chat_history, tool_manager)
+        +__init__(chatbot_manager: ChatBotManager, chat_history: ChatHistory, tool_manager: ToolManager, role: Role)
         +is_running bool
+        +chatbot ChatBot
         +set_interrupt()
         +clear_interrupt()
         +get_chat_history() ChatHistory
         +run()
         +_run_impl() #abstract
         +wait_for_stop()
+        +_select_chatbot() ChatBot
     }
 
     class REPLExecutionEnvironment {
-        +__init__(chatbot, chat_history, tool_manager)
+        +__init__(chatbot_manager: ChatBotManager, chat_history: ChatHistory, tool_manager: ToolManager, role: Role)
         +_run_impl()
     }
 
     class Session {
         +UUID uuid
         +Role role
+        +ChatBotManager chatbot_manager
         +ChatHistory chat_history
         +ExecutionEnvironment execution_environment
         +deque[Message] _message_queue
         +asyncio.Lock _queue_lock
-        +__init__(role, tool_manager, chatbot, chat_history=None, session_uuid=None)
+        +__init__(role: Role, tool_manager: ToolManager, chatbot_manager: ChatBotManager, chat_history: ChatHistory=None, session_uuid: UUID=None, execution_environment: REPLExecutionEnvironment=None)
         +load_from_json(data: dict, chatbot_manager, role_manager, tool_manager) static
         +load_from_file(file_path: str, chatbot_manager, role_manager, tool_manager) static
         +queue_message(message: Message) async
@@ -807,7 +832,8 @@ classDiagram
         +Optional[str] system_prompt
         +list[str] required_tools
         +str execution_environment
-        +__init__(name, description, system_prompt=None, required_tools=None, execution_environment="REPL")
+        +str model
+        +__init__(name: str, description: str, system_prompt: Optional[str]=None, required_tools: list[str]=None, execution_environment: str="REPL", model: str=".*")
         +load_from_dict(data: dict) static
         +load_from_path(path: str) static
         +load_config_from_path(role_path: str) static
@@ -842,21 +868,27 @@ classDiagram
     ChatHistory --> Message : contains
     ExecutionEnvironment --> ChatHistory : has
     ExecutionEnvironment --> ToolManager : has
+    ExecutionEnvironment --> ChatBotManager : has
+    ExecutionEnvironment --> Role : has
     ExecutionEnvironment --> ChatBot : has
     Session --> ExecutionEnvironment : has
     Session --> ChatHistory : has
     Session --> Role : has
     Session --> ChatBot : has
     Session --> ToolManager : has
+    Session --> ChatBotManager : has
     Session --> RoleManager : has
     Agent --> Session : manages
     Agent --> ChatBot : has
     RoleManager --> Role : manages
+    ToolManager --> Tool : has/contains
     ChatBot --> HTTPClient : uses
     ChatBot --> ChatHistory : accepts
     ChatBot --> ChatBotResponse : returns
     ChatBotResponse --> AsyncGenerator : consumes
     ChatHistory --> Message : contains
+    ChatBotManager --> BackendInfo : contains
+    ChatBotManager --> ChatBot : creates
 ```
 
 ## ChatBotManager API Reference
