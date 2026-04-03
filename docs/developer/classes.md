@@ -188,10 +188,15 @@ classDiagram
     }
 
     class Agent {
-        +ChatBot _chatbot
-        +Dict[str, Session] _sessions
-        +Dict[str, object] _channels
-        +__init__(chatbot: ChatBot)
+        +RoleManager _role_manager
+        +ChatBotManager _chatbot_manager
+        +ToolManager _tool_manager
+        +Dict[UUID, Session] _sessions
+        +__init__(role_manager: RoleManager, chatbot_manager: ChatBotManager, tool_manager: ToolManager)
+        +create_session(role_name: str) Session
+        +get_session(session_uuid: UUID) Session | None
+        +list_sessions() Dict[UUID, Session]
+        +destroy_session(session_uuid: UUID) bool
     }
 
     class Message {
@@ -680,17 +685,24 @@ role = manager.get_role("assistant")
 
 ### Agent
 
-Manages concurrent sessions. Currently a stub implementation - stores sessions and channels in dicts but does not manage threads.
+Manages concurrent sessions.
 
 **Attributes:**
-- `_chatbot` (ChatBot): ChatBot instance for sessions
-- `_sessions` (Dict[str, Session]): Dictionary of sessions
-- `_channels` (Dict[str, object]): Dictionary of channels to sessions
+- `_role_manager` (RoleManager): Role manager for session creation
+- `_chatbot_manager` (ChatBotManager): ChatBot manager for session creation
+- `_tool_manager` (ToolManager): Tool manager for session creation
+- `_sessions` (Dict[UUID, Session]): Dictionary of sessions keyed by UUID
 
 **Constructor:**
 ```python
-Agent(chatbot: ChatBot)
+Agent(role_manager: RoleManager, chatbot_manager: ChatBotManager, tool_manager: ToolManager)
 ```
+
+**Methods:**
+- `create_session(role_name: str) -> Session`: Creates a new session with the specified role, registers it, and returns it
+- `get_session(session_uuid: UUID) -> Session | None`: Retrieves a session by UUID
+- `list_sessions() -> Dict[UUID, Session]`: Returns all sessions as a dictionary
+- `destroy_session(session_uuid: UUID) -> bool`: Removes a session by UUID, returns True if found and destroyed
 
 **Note:** Documented as managing threads, but implementation only stores dicts.
 
