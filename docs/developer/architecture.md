@@ -709,7 +709,7 @@ classDiagram
         +__init__(http_client: HTTPClient, model: str)
         +send_message(chat_history: ChatHistory, streaming: bool=True) ChatBotResponse
         +list_available_models() list[str]
-        +model str {get; set}
+        +model str
     }
 
     class GenericChatBot {
@@ -746,7 +746,7 @@ classDiagram
         +AsyncGenerator _stream
         +Dict[str, Any] _data
         +__init__(stream: AsyncGenerator)
-        +data Dict[str, Any] {get}
+        +data Dict[str, Any]
         +__getitem__(key: str) Any
         +__contains__(key: str) bool
     }
@@ -774,7 +774,7 @@ classDiagram
         +bool _interrupt
         +asyncio.Event _completion_signal
         +__init__(chatbot, chat_history, tool_manager)
-        +is_running bool {get}
+        +is_running bool
         +set_interrupt()
         +clear_interrupt()
         +get_chat_history() ChatHistory
@@ -906,7 +906,7 @@ graph TD
     A --> L[role.py]
     A --> O[rolemanager.py]
     A --> M[httpclient.py]
-    A --> N[utils/ (dict_path.py, tiktoken.py)]
+    A --> N[utils/ dict_path.py tiktoken.py]
 
     G -->|imports| F
     H -->|imports| H
