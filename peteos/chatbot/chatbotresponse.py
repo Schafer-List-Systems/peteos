@@ -3,7 +3,7 @@
 import json
 from typing import AsyncGenerator, AsyncIterator, Dict, Any, List
 
-from peteos.utils.dict_path import get_value_at_path as _get_value_at_path
+from peteos.utils import get_value_at_path as _get_value_at_path
 
 
 class ChatBotResponse:

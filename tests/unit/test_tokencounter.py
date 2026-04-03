@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from peteos.utils.tiktoken import count_tiktoken
+from peteos.utils import count_tiktoken
 
 
 class TestCountTiktoken:

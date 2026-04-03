@@ -12,19 +12,21 @@ For complete class definitions and diagrams, see [classes.md](classes.md).
 peteos/
 ├── __init__.py
 ├── agent.py
-├── chatbot.py
-├── chatbotresponse.py
-├── message.py
-├── chathistory.py
+├── chatbot/
+│   ├── __init__.py
+│   ├── manager.py
+│   ├── chatbot.py
+│   ├── chatbotresponse.py
+│   ├── message.py
+│   ├── chathistory.py
+│   └── httpclient.py
 ├── toolmanager.py
 ├── executionenvironment.py
-├── httpclient.py
 ├── replexecutionenvironment.py
 ├── session.py
 ├── role.py
 ├── rolemanager.py
 └── utils/
-    ├── __init__.py
     ├── dict_path.py
     └── tiktoken.py
 ```
@@ -33,9 +35,13 @@ For complete class definitions and descriptions, see [classes.md](classes.md).
 
 ## Utilities
 
-### get_value_at_path (peteos/utils/dict_path.py)
+### get_value_at_path (peteos/utils/__init__.py)
 
 Utility function for extracting values from nested dictionaries using path notation.
+
+### count_tiktoken (peteos/utils/__init__.py)
+
+Utility function for counting tokens in text using tiktoken.
 
 **Signature:**
 ```python
@@ -234,53 +240,49 @@ Non-compliant backends may omit the role field. `AnthropicChatBotResponse` defau
 
 ```mermaid
 graph TD
-    A[peteos Package] --> B[__init__.py]
-    A --> C[agent.py]
-    A --> D[chatbot.py]
-    A --> E[chatbotresponse.py]
-    A --> F[message.py]
-    A --> G[chathistory.py]
-    A --> H[toolmanager.py]
-    A --> I[executionenvironment.py]
-    A --> J[replexecutionenvironment.py]
-    A --> K[session.py]
-    A --> L[role.py]
-    A --> O[rolemanager.py]
-    A --> M[httpclient.py]
-    A --> N[utils/ dict_path.py tiktoken.py]
+    A[peteos Package] --> B[agent.py]
+    A --> C[chatbot/ sub-package]
+    A --> D[toolmanager.py]
+    A --> E[executionenvironment.py]
+    A --> F[replexecutionenvironment.py]
+    A --> G[session.py]
+    A --> H[role.py]
+    A --> I[rolemanager.py]
+    A --> J[utils/ sub-package]
 
-    G -->|imports| F
-    H -->|imports| H
-    I -->|imports| G
+    C --> C1[manager.py]
+    C --> C2[chatbot.py]
+    C --> C3[chatbotresponse.py]
+    C --> C4[message.py]
+    C --> C5[chathistory.py]
+    C --> C6[httpclient.py]
+
+    J --> J1[dict_path.py]
+    J --> J2[tiktoken.py]
+
+    C5 -->|imports| C4
+    C3 -->|imports| J
+    C2 -->|imports| C1
+    C2 -->|imports| C3
+    C2 -->|imports| C5
+    C2 -->|imports| C6
+    C1 -->|imports| C6
+    C1 -->|imports| C2
+    E -->|imports| C
+    F -->|imports| E
+    F -->|imports| C
+    G -->|imports| E
+    G -->|imports| C
+    G -->|imports| H
+    H -->|imports| E
     I -->|imports| H
-    I -->|imports| D
-    J -->|imports| I
-    J -->|imports| G
-    J -->|imports| H
-    J -->|imports| D
-    K -->|imports| I
-    K -->|imports| H
-    K -->|imports| D
-    K -->|imports| L
-    L -->|imports| I
-    O -->|imports| L
-    C -->|imports| D
-    C -->|imports| K
-    D -->|imports| G
-    D -->|imports| E
-    D -->|imports| M
-    D -->|imports| F
-    E -->|imports| N
     B -->|imports| C
-    B -->|imports| D
     B -->|imports| E
     B -->|imports| F
     B -->|imports| G
     B -->|imports| H
     B -->|imports| I
+    B -->|imports| D
     B -->|imports| J
-    B -->|imports| K
-    B -->|imports| L
-    B -->|imports| O
-    B -->|imports| M
+    B -->|imports| C
 ```
