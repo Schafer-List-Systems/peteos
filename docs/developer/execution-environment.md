@@ -196,6 +196,37 @@ Message(content={
 })
 ```
 
+## State Diagram - Environment Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+
+    Idle --> Running: run() called
+
+    Running --> Interrupted: set_interrupt()
+    Running --> Idle: _run_impl() completes
+
+    Interrupted --> Running: clear_interrupt() + run() restart
+    Interrupted --> Idle: run() restart completes
+
+    note right of Running
+        Agentic loop executing
+        - send_message() to chatbot
+        - accumulate response.data
+        - if tool_calls: execute & continue
+        - if final answer: exit loop
+        - else: continue loop
+    end note
+
+    note right of Interrupted
+        Interrupt flag set
+        - Queue drains to chat_history
+        - Env stops current iteration
+        - New run() starts with new messages
+    end note
+```
+
 ## Message Flow
 
 ```mermaid
@@ -212,13 +243,16 @@ flowchart TD
     H --> I{Tool<br/>Success?}
     I -->|Yes| J[Append Tool Result<br/>success: true]
     I -->|No| K[Append Error<br/>success: false]
-    J --> L[Loop Back<br/>to ChatBot]
+    J --> L[Continue Loop]
     K --> L
     L --> C
 
-    G -->|No| M[Final Answer]
-    M --> N[Exit Loop]
+    G -->|No| M{Final Answer?}
+    M -->|Yes| N[Exit Loop]
+    M -->|No| L
 ```
+
+**Note:** The loop exits only when there is a final answer (no tool calls and has content). If there are tool calls, the loop continues after execution. If there are no tool calls but no final answer, the loop also continues.
 
 ## Usage Example
 
