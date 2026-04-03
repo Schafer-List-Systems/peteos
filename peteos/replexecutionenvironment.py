@@ -99,5 +99,9 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                             )
                 # Loop continues - sends history with tool results back to LLM
             else:
-                # Final answer - exit loop
-                break
+                # Check if response has text content
+                text = response.data.get("text")
+                if text is not None and text:
+                    # Final answer - exit loop
+                    break
+                # No tool calls and no text - only reasoning, continue loop
