@@ -1,5 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
+from typing import Any, Callable
 
 from peteos.chatbot import ChatBot, ChatBotManager, ChatHistory
 from peteos.role import Role
@@ -33,6 +34,12 @@ class ExecutionEnvironment(ABC):
         self._interrupt = False
         self._completion_signal: asyncio.Event = asyncio.Event()
         self._completion_signal.set()  # Start as signaled (not running)
+        self._hooks: dict[str, list[Callable]] = {
+            "before_tool_execution": [],
+            "after_tool_execution": [],
+            "before_loop_continue": [],
+            "before_loop_exit": []
+        }
 
     @property
     def chatbot(self) -> ChatBot:
@@ -95,3 +102,77 @@ class ExecutionEnvironment(ABC):
         This blocks until the loop finishes (either naturally or via interruption).
         """
         await self._completion_signal.wait()
+
+    def register_hook(self, hook_point: str, callback: Callable) -> None:
+        """Register a hook callback for a specific hook point.
+
+        Args:
+            hook_point: One of "before_tool_execution", "after_tool_execution",
+                "before_loop_continue", or "before_loop_exit".
+            callback: The hook function to register. Can be sync or async.
+
+        Raises:
+            ValueError: If hook_point is not a valid hook point.
+        """
+        if hook_point not in self._hooks:
+            raise ValueError(f"Unknown hook point: {hook_point}")
+        self._hooks[hook_point].append(callback)
+
+    def deregister_hook(self, hook_point: str, callback: Callable) -> None:
+        """Deregister a specific hook callback.
+
+        Args:
+            hook_point: One of "before_tool_execution", "after_tool_execution",
+                "before_loop_continue", or "before_loop_exit".
+            callback: The hook function to remove.
+
+        Raises:
+            ValueError: If hook_point is not a valid hook point.
+            ValueError: If callback is not registered for the hook point.
+        """
+        if hook_point not in self._hooks:
+            raise ValueError(f"Unknown hook point: {hook_point}")
+        self._hooks[hook_point].remove(callback)
+
+    def deregister_all_hooks(self, hook_point: str) -> None:
+        """Deregister all hooks for a specific hook point.
+
+        Args:
+            hook_point: One of "before_tool_execution", "after_tool_execution",
+                "before_loop_continue", or "before_loop_exit".
+
+        Raises:
+            ValueError: If hook_point is not a valid hook point.
+        """
+        if hook_point not in self._hooks:
+            raise ValueError(f"Unknown hook point: {hook_point}")
+        self._hooks[hook_point].clear()
+
+    def _call_hooks(self, hook_point: str, *args: Any) -> Any | None:
+        """Call all hooks registered for a specific hook point.
+
+        For `before_tool_execution`, returns the first non-None result from hooks,
+        which can be a tuple (allow: bool, message: str) to disallow the tool call.
+
+        Args:
+            hook_point: One of "before_tool_execution", "after_tool_execution",
+                "before_loop_continue", or "before_loop_exit".
+            *args: Arguments to pass to each hook callback.
+
+        Returns:
+            The return value from the first hook that returns a value, or None.
+
+        Raises:
+            ValueError: If hook_point is not a valid hook point.
+        """
+        if hook_point not in self._hooks:
+            raise ValueError(f"Unknown hook point: {hook_point}")
+
+        for callback in self._hooks[hook_point]:
+            if asyncio.iscoroutinefunction(callback):
+                result = asyncio.run(callback(*args))
+            else:
+                result = callback(*args)
+            if result is not None:
+                return result
+        return None
