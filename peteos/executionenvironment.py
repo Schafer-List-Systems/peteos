@@ -1,5 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
+from functools import partial
 from typing import Any, Callable
 
 from peteos.chatbot import ChatBot, ChatBotManager, ChatHistory
@@ -103,20 +104,23 @@ class ExecutionEnvironment(ABC):
         """
         await self._completion_signal.wait()
 
-    def register_hook(self, hook_point: str, callback: Callable) -> None:
+    def register_hook(self, hook_point: str, callback: Callable, *args: Any) -> None:
         """Register a hook callback for a specific hook point.
 
         Args:
             hook_point: One of "before_tool_execution", "after_tool_execution",
                 "before_loop_continue", or "before_loop_exit".
             callback: The hook function to register. Can be sync or async.
+            *args: Additional arguments to pass to the callback when called.
+                These will be prepended to any arguments passed at call time.
 
         Raises:
             ValueError: If hook_point is not a valid hook point.
         """
         if hook_point not in self._hooks:
             raise ValueError(f"Unknown hook point: {hook_point}")
-        self._hooks[hook_point].append(callback)
+        # Use partial to bind extra args to the callback
+        self._hooks[hook_point].append(partial(callback, *args))
 
     def deregister_hook(self, hook_point: str, callback: Callable) -> None:
         """Deregister a specific hook callback.
@@ -132,7 +136,16 @@ class ExecutionEnvironment(ABC):
         """
         if hook_point not in self._hooks:
             raise ValueError(f"Unknown hook point: {hook_point}")
-        self._hooks[hook_point].remove(callback)
+        # Remove by checking the func attribute (for partial functions)
+        for hook in list(self._hooks[hook_point]):
+            # Check if it's a partial wrapping the original callback
+            if hasattr(hook, 'func') and hook.func == callback:
+                self._hooks[hook_point].remove(hook)
+                return
+            elif hook == callback:
+                self._hooks[hook_point].remove(hook)
+                return
+        raise ValueError(f"Callback not found for hook point '{hook_point}'")
 
     def deregister_all_hooks(self, hook_point: str) -> None:
         """Deregister all hooks for a specific hook point.

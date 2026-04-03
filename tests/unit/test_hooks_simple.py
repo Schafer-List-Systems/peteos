@@ -48,7 +48,10 @@ class TestHookRegistration:
         env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
         env.register_hook("before_tool_execution", test_hook)
 
-        assert test_hook in env._hooks["before_tool_execution"]
+        # Check that the hook is registered (wrapped in partial with no extra args)
+        hooks = env._hooks["before_tool_execution"]
+        assert len(hooks) == 1
+        assert hooks[0].func == test_hook
 
     def test_register_hook_invalid_point(self, mock_role, mock_chatbot_manager, mock_chatbot):
         """Test registering a hook for an invalid hook point raises ValueError."""

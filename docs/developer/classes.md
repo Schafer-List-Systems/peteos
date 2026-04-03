@@ -187,16 +187,53 @@ classDiagram
         +list_roles() List[Tuple]
     }
 
+    class Channel {
+        <<Abstract>>
+        +str name
+        +Agent _agent
+        +UUID | None _active_session_uuid
+        +__init__(name: str, agent: Agent)
+        +send(message: str)
+        +receive() str | None
+        +select_session(uuid: UUID)
+        +get_by_name(name: str) Channel
+    }
+
+    class RESTApiChannel {
+        +__init__(name: str, agent, host, port)
+        +send(message: str)
+        +receive() str | None
+        +async start() str
+        +async stop()
+    }
+
+    class InteractiveShellChannel {
+        +__init__(name: str, agent)
+        +send(message: str)
+        +receive() str | None
+        +handle_command(line: str) bool *str
+        +run()
+        +close()
+    }
+
     class Agent {
         +RoleManager _role_manager
         +ChatBotManager _chatbot_manager
         +ToolManager _tool_manager
         +Dict[UUID, Session] _sessions
+        +Dict[str, Channel] _channels
+        +Dict[UUID, Set[Channel]] _session_channels
         +__init__(role_manager: RoleManager, chatbot_manager: ChatBotManager, tool_manager: ToolManager)
         +create_session(role_name: str) Session
         +get_session(session_uuid: UUID) Session | None
         +list_sessions() Dict[UUID, Session]
         +destroy_session(session_uuid: UUID) bool
+        +register_channel(channel: Channel)
+        +deregister_channel(name: str)
+        +_on_before_tool_execution(session_uuid, tool_call)
+        +_on_after_tool_execution(session_uuid, tool_call, result, success)
+        +_on_before_loop_continue(session_uuid, delta_messages)
+        +_on_before_loop_exit(session_uuid, reason)
     }
 
     class Message {
@@ -209,6 +246,8 @@ classDiagram
     GenericChatBot <|-- AnthropicChatBot
     ChatBotResponse <|-- GenericChatBotResponse
     GenericChatBotResponse <|-- AnthropicChatBotResponse
+    Channel <|-- RESTApiChannel
+    Channel <|-- InteractiveShellChannel
     ChatHistory --> Message : contains
     ExecutionEnvironment --> ChatHistory : has
     ExecutionEnvironment --> ToolManager : has
@@ -224,6 +263,10 @@ classDiagram
     Session --> RoleManager : has
     Agent --> Session : manages
     Agent --> ChatBot : has
+    Agent --> Channel : manages
+    Agent --> Session : has (via _sessions)
+    Session --> Channel : subscribed to (via _session_channels)
+    Channel --> Agent : references
     RoleManager --> Role : manages
     ToolManager --> Tool : has/contains
     ChatBot --> HTTPClient : uses
@@ -683,26 +726,106 @@ loaded = manager.load_from_dir("./roles")  # ["assistant", "coder", etc.]
 role = manager.get_role("assistant")
 ```
 
+### Channel
+
+Abstract base class for communication channels connecting users to agents.
+
+**Attributes:**
+- `name` (str): Unique identifier for the channel
+- `_agent` (Agent): Reference to the parent Agent
+- `_active_session_uuid` (UUID | None): Currently selected session for this channel
+
+**Class Methods:**
+- `get_by_name(name: str) -> Channel | None`: Get a channel by name from registry
+- `list_all() -> Dict[str, Channel]`: List all registered channels
+- `deregister_all()`: Remove all channels from registry
+
+**Abstract Methods:**
+- `send(message: str) -> None`: Send a message to the user
+- `receive() -> str | None`: Block and receive a message from user
+- `select_session(uuid: UUID) -> None`: Select active session for this channel
+
+### RESTApiChannel
+
+REST API channel with HTTP endpoints and WebSocket support for real-time updates.
+
+**Constructor:**
+```python
+RESTApiChannel(name: str, agent: Agent, host: str="127.0.0.1", port: int=8080)
+```
+
+**Methods:**
+- `send(message: str) -> None`: Send message to all subscribed WebSocket clients
+- `receive() -> str | None`: Receive from internal queue (async context required)
+- `async start() -> str`: Start the HTTP server, returns server URL
+- `async stop()`: Stop the HTTP server
+
+**Endpoints:**
+- `POST /chat` - Send message to active session
+- `POST /sessions` - Create new session
+- `GET /sessions` - List all sessions
+- `POST /sessions/{uuid}/select` - Select active session
+- `GET /sessions/{uuid}/messages` - Get session message history
+- `WS /ws/{session_uuid}` - WebSocket for real-time streaming
+
+### InteractiveShellChannel
+
+Interactive shell channel for REPL-style command-line interaction.
+
+**Constructor:**
+```python
+InteractiveShellChannel(name: str, agent: Agent)
+```
+
+**Methods:**
+- `send(message: str) -> None`: Print message to terminal
+- `receive() -> str | None`: Block and read user input
+- `handle_command(line: str) -> tuple[bool, str]`: Parse and handle commands
+- `run() -> None`: Start the shell interaction loop
+- `close()`: Close the channel
+
+**Commands:**
+- `/new <role>` - Create session with role
+- `/list` - List all sessions
+- `/select <uuid>` - Select active session
+- `/messages` - Show recent messages
+- `/quit` - Exit shell
+
+Any input not starting with `/` is forwarded as a message to the active session.
+
 ### Agent
 
-Manages concurrent sessions.
+Manages sessions and channels, serving as a hub for multi-channel interaction.
 
 **Attributes:**
 - `_role_manager` (RoleManager): Role manager for session creation
 - `_chatbot_manager` (ChatBotManager): ChatBot manager for session creation
 - `_tool_manager` (ToolManager): Tool manager for session creation
 - `_sessions` (Dict[UUID, Session]): Dictionary of sessions keyed by UUID
+- `_channels` (Dict[str, Channel]): Dictionary of channels by name
+- `_session_channels` (Dict[UUID, Set[Channel]]): Mapping of sessions to subscribed channels
 
 **Constructor:**
 ```python
 Agent(role_manager: RoleManager, chatbot_manager: ChatBotManager, tool_manager: ToolManager)
 ```
 
-**Methods:**
-- `create_session(role_name: str) -> Session`: Creates a new session with the specified role, registers it, and returns it
+**Session Methods:**
+- `create_session(role_name: str) -> Session`: Creates and registers a new session, registers hooks
 - `get_session(session_uuid: UUID) -> Session | None`: Retrieves a session by UUID
-- `list_sessions() -> Dict[UUID, Session]`: Returns all sessions as a dictionary
-- `destroy_session(session_uuid: UUID) -> bool`: Removes a session by UUID, returns True if found and destroyed
+- `list_sessions() -> Dict[UUID, Session]`: Returns all sessions
+- `destroy_session(session_uuid: UUID) -> bool`: Removes a session by UUID
 
-**Note:** Documented as managing threads, but implementation only stores dicts.
+**Channel Methods:**
+- `register_channel(channel: Channel)`: Registers a channel with the agent
+- `deregister_channel(name: str)`: Removes a channel from the agent
+- `get_channel(name: str) -> Channel | None`: Gets a channel by name
+- `list_channels() -> Dict[str, Channel]`: Returns all channels
+
+**Hook Callbacks (internal):**
+- `_on_before_tool_execution(session_uuid, tool_call)`: Logs tool call before execution
+- `_on_after_tool_execution(session_uuid, tool_call, result, success)`: Logs tool result
+- `_on_before_loop_continue(session_uuid, delta_messages)`: Forwards intermediate messages
+- `_on_before_loop_exit(session_uuid, reason)`: Forwards final answer
+- `_notify_channels(session_uuid, message)`: Sends notification to all subscribed channels
 
