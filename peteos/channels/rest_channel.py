@@ -53,7 +53,9 @@ class RESTApiChannel(Channel):
         self._site = web.TCPSite(self._runner, self._host, self._port)
         await self._site.start()
 
-        self._server_url = f"http://{self._host}:{self._port}"
+        # Get the actual port assigned (especially when port=0)
+        actual_port = self._site._server.sockets[0].getsockname()[1]
+        self._server_url = f"http://{self._host}:{actual_port}"
         self._running = True
 
         return self._server_url
