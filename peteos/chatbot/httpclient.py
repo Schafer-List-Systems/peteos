@@ -36,6 +36,20 @@ class HTTPClient:
                 async for line in response.aiter_lines():
                     yield line
 
+    async def get(self, url: str) -> dict:
+        """
+        Send a GET request and return the parsed JSON response.
+
+        Args:
+            url: Endpoint URL.
+
+        Returns:
+            Parsed JSON response.
+        """
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(url)
+            return response.json()
+
     async def post(self, url: str, body: dict) -> dict:
         """
         Send a POST request and return the parsed JSON response.

@@ -95,7 +95,7 @@ class ChatBotManager:
         models_url = f"{url}/v1/models"
 
         try:
-            response = await self._http_client.post(models_url, {})
+            response = await self._http_client.get(models_url)
         except Exception as e:
             raise RuntimeError(f"Failed to probe {models_url}: {e}")
 

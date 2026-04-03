@@ -23,7 +23,7 @@ class TestChatBotManagerAddBackend:
             ]
         }
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             backend = await manager.add_backend("test-backend", "http://test:8000")
 
         assert backend.name == "test-backend"
@@ -47,7 +47,7 @@ class TestChatBotManagerAddBackend:
             ]
         }
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             backend = await manager.add_backend("anthropic-backend", "http://test:8000")
 
         assert backend.api_type == "anthropic"
@@ -63,7 +63,7 @@ class TestChatBotManagerAddBackend:
 
         mock_response = {"data": [{"id": "model-1"}]}
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.add_backend("test", "http://test:8000")
 
         with pytest.raises(ValueError, match="Backend 'test' already exists"):
@@ -76,7 +76,7 @@ class TestChatBotManagerAddBackend:
 
         mock_response = {"data": []}
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             with pytest.raises(RuntimeError, match="No models found"):
                 await manager.add_backend("empty-backend", "http://test:8000")
 
@@ -87,7 +87,7 @@ class TestChatBotManagerAddBackend:
 
         mock_response = {"unknown": "format"}
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             with pytest.raises(RuntimeError, match="Could not detect API type"):
                 await manager.add_backend("unknown-backend", "http://test:8000")
 
@@ -102,7 +102,7 @@ class TestChatBotManagerRemoveBackend:
 
         mock_response = {"data": [{"id": "model-1"}]}
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.add_backend("test", "http://test:8000")
 
         assert "test" in manager._backends
@@ -128,7 +128,7 @@ class TestChatBotManagerListChatbots:
 
         mock_response = {"data": [{"id": "model-a"}, {"id": "model-b"}]}
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.add_backend("backend1", "http://test1:8000")
 
         results = manager.list_chatbots(".*")
@@ -144,7 +144,7 @@ class TestChatBotManagerListChatbots:
 
         mock_response = {"data": [{"id": "qwen-7b"}, {"id": "qwen-14b"}, {"id": "mistral-7b"}]}
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.add_backend("llm-backend", "http://test:8000")
 
         results = manager.list_chatbots("qwen.*")
@@ -161,7 +161,7 @@ class TestChatBotManagerListChatbots:
         mock_response_openai = {"data": [{"id": "openai-model"}]}
         mock_response_anthropic = {"models": [{"id": "anthropic-model"}]}
 
-        with patch.object(manager._http_client, 'post', side_effect=[mock_response_openai, mock_response_anthropic]):
+        with patch.object(manager._http_client, 'get', side_effect=[mock_response_openai, mock_response_anthropic]):
             await manager.add_backend("openai-backend", "http://openai:8000")
             await manager.add_backend("anthropic-backend", "http://anthropic:8000")
 
@@ -179,7 +179,7 @@ class TestChatBotManagerListChatbots:
 
         mock_response = {"data": [{"id": "model-1"}]}
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.add_backend("test", "http://test:8000")
 
         results = manager.list_chatbots("nonexistent.*")
@@ -211,7 +211,7 @@ class TestChatBotManagerLoadFromJson:
             ]
         }
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.load_from_json(json_obj)
 
         assert "local-openai" in manager._backends
@@ -240,7 +240,7 @@ class TestChatBotManagerLoadFromJson:
             ]
         }
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.load_from_json(json_obj)
 
         assert "local-anthropic" in manager._backends
@@ -272,7 +272,7 @@ class TestChatBotManagerLoadFromJson:
             {"models": [{"id": "anthropic-model"}]},
         ]
 
-        with patch.object(manager._http_client, 'post', side_effect=mock_responses):
+        with patch.object(manager._http_client, 'get', side_effect=mock_responses):
             await manager.load_from_json(json_obj)
 
         assert len(manager._backends) == 2
@@ -288,7 +288,7 @@ class TestChatBotManagerLoadFromJson:
 
         # Add initial backend
         mock_response = {"data": [{"id": "old-model"}]}
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.add_backend("old", "http://old:8000")
 
         assert "old" in manager._backends
@@ -304,7 +304,7 @@ class TestChatBotManagerLoadFromJson:
         }
 
         mock_new_response = {"models": [{"id": "new-model"}]}
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_new_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_new_response)):
             await manager.load_from_json(json_obj)
 
         assert "old" not in manager._backends
@@ -336,7 +336,7 @@ class TestChatBotManagerLoadFromFile:
 
         mock_response = {"data": [{"id": "file-model"}]}
 
-        with patch.object(manager._http_client, 'post', new=AsyncMock(return_value=mock_response)):
+        with patch.object(manager._http_client, 'get', new=AsyncMock(return_value=mock_response)):
             await manager.load_from_file(str(json_file))
 
         assert "file-backend" in manager._backends
