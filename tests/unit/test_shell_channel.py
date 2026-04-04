@@ -30,7 +30,8 @@ class TestShellChannelInit:
         """Clean up."""
         _cleanup_channels()
 
-    def test_shell_channel_creation(self):
+    @pytest.mark.asyncio
+    async def test_shell_channel_creation(self):
         """Test creating a shell channel."""
         role_manager = RoleManager()
         chatbot_manager = MagicMock()
@@ -42,6 +43,9 @@ class TestShellChannelInit:
         assert shell_channel.name == "shell"
         assert shell_channel._running is False  # start() must be called first
         assert shell_channel.active_session_uuid is None
+
+        # Cleanup
+        shell_channel._running = False
 
     def test_shell_channel_registered_with_agent(self):
         """Test shell channel is registered with agent."""

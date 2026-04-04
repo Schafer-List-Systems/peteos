@@ -1,7 +1,10 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from peteos.logger import get_logger
 from peteos.role import Role
+
+_logger = get_logger(__name__)
 
 
 class RoleManager:
@@ -49,7 +52,7 @@ class RoleManager:
                     loaded_roles.append(role.name)
                 except (FileNotFoundError, KeyError, ValueError) as e:
                     # Skip roles that can't be loaded
-                    print(f"Warning: Could not load role from {sub_dir}: {e}")
+                    _logger.warning(f"Could not load role from {sub_dir}: {e}")
 
         return loaded_roles
 

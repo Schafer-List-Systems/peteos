@@ -7,10 +7,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple, AsyncIterator
 
 from peteos.channel import Channel
 from peteos.chatbot import ChatBotManager, Message
+from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.session import Session
 from peteos.toolmanager import ToolManager
+
+_logger = get_logger(__name__)
 
 
 class Agent:
