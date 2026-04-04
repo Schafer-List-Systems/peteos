@@ -1,4 +1,4 @@
-from peteos.chatbot import ChatBotManager, ChatHistory, Message
+from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
 from peteos.executionenvironment import ExecutionEnvironment
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
@@ -55,7 +55,24 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 break
 
             # Append the full response as a Message to ChatHistory
-            self.chat_history.append_message(Message(content=response.data))
+            # response.data has format from translation: {text: "...", reasoning: "...", tool_calls: [...]}
+            # Role is required - must be present (ChatBot ensures this)
+            # Other fields are optional and future-proof - any key becomes a ContentPart
+            assert "role" in response.data, f"ChatBot response missing 'role' field: {response.data.keys()}"
+
+            # Generic mapping: response.data keys → ContentPart types
+            # Any key becomes a ContentPart with part_type=key and the value
+            content_parts = []
+            for key, value in response.data.items():
+                if key == "role":
+                    continue  # Role is handled separately
+                if value:  # Only add non-empty values
+                    content_parts.append(ContentPart(part_type=key, **{key: value}))
+
+            self.chat_history.append_message(Message(
+                role=response.data["role"],
+                content=content_parts
+            ))
 
             # Check if response contains tool calls
             tool_calls = response.data.get("tool_calls")
@@ -78,45 +95,43 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                                 allow, message = hook_result
                                 if not allow:
                                     # Tool execution disallowed by hook
-                                    self.chat_history.append_message(Message(content={
-                                        "role": "tool",
-                                        "name": tool_name,
-                                        "content": message,
-                                        "success": False
-                                    }))
+                                    self.chat_history.append_message(Message(
+                                        role="tool_result",
+                                        content=[
+                                            ContentPart(part_type="tool_result", name=tool_name, content=message),
+                                            ContentPart(part_type="bool", success=False)
+                                        ]
+                                    ))
                                     await self._call_hooks("after_tool_execution", tool_call, message, False)
                                     continue
 
                             try:
                                 result = tool.execute(**args)
-                                self.chat_history.append_message(
-                                    Message(content={
-                                        "role": "tool",
-                                        "name": tool_name,
-                                        "content": str(result),
-                                        "success": True
-                                    })
-                                )
+                                self.chat_history.append_message(Message(
+                                    role="tool_result",
+                                    content=[
+                                        ContentPart(part_type="tool_result", name=tool_name, content=str(result)),
+                                        ContentPart(part_type="bool", success=True)
+                                    ]
+                                ))
                                 await self._call_hooks("after_tool_execution", tool_call, str(result), True)
                             except Exception as e:
-                                self.chat_history.append_message(
-                                    Message(content={
-                                        "role": "tool",
-                                        "name": tool_name,
-                                        "content": f"Error: {type(e).__name__}: {str(e)}",
-                                        "success": False
-                                    })
-                                )
+                                self.chat_history.append_message(Message(
+                                    role="tool_result",
+                                    content=[
+                                        ContentPart(part_type="tool_result", name=tool_name, content=f"Error: {type(e).__name__}: {str(e)}"),
+                                        ContentPart(part_type="bool", success=False)
+                                    ]
+                                ))
                                 await self._call_hooks("after_tool_execution", tool_call, str(e), False)
                         else:
-                            self.chat_history.append_message(
-                                Message(content={
-                                    "role": "tool",
-                                    "name": tool_name,
-                                    "content": f"Error: Tool '{tool_name}' not found",
-                                    "success": False
-                                })
-                            )
+                            self.chat_history.append_message(Message(
+                                role="tool_result",
+                                content=[
+                                    ContentPart(part_type="tool_result", name=tool_name, content=f"Error: Tool '{tool_name}' not found"),
+                                    ContentPart(part_type="bool", success=False)
+                                ]
+                            ))
                             await self._call_hooks("after_tool_execution", tool_call, f"Error: Tool '{tool_name}' not found", False)
                 # Loop continues - sends history with tool results back to LLM
                 # Track delta messages (messages added during this iteration)

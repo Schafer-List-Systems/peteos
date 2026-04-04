@@ -6,7 +6,7 @@ import aiohttp
 from aiohttp import web
 
 from peteos.channel import Channel
-from peteos.chatbot import Message
+from peteos.chatbot import Message, ContentPart
 
 
 class RESTApiChannel(Channel):
@@ -110,7 +110,10 @@ class RESTApiChannel(Channel):
             if session is None:
                 return web.json_response({"error": "Session not found"}, status=404)
 
-            message = Message(content={"role": "user", "content": content})
+            message = Message(
+                role="user",
+                content=[ContentPart(part_type="text", text=content)]
+            )
             await session.queue_message(message)
 
             return web.json_response({"status": "message_queued"})
@@ -215,7 +218,10 @@ class RESTApiChannel(Channel):
 
                         session = self._agent.get_session(self._active_session_uuid)
                         if session:
-                            message = Message(content={"role": "user", "content": data.get("content", "")})
+                            message = Message(
+                                role="user",
+                                content=[ContentPart(part_type="text", text=data.get("content", ""))]
+                            )
                             await session.queue_message(message)
 
                     elif data.get("type") == "subscribe":

@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 
 from peteos.channel import Channel
-from peteos.chatbot import Message
+from peteos.chatbot import Message, ContentPart
 from peteos.logger import get_logger
 
 _logger = get_logger(__name__)
@@ -64,7 +64,10 @@ class InteractiveShellChannel(Channel):
             content: The message content from the user.
         """
         if self._agent:
-            message = Message(content={"role": "user", "content": content})
+            message = Message(
+                role="user",
+                content=[ContentPart(part_type="text", text=content)]
+            )
             self._agent.post_message(session_uuid, message)
 
     async def _consume_notifications(self, session_uuid: uuid.UUID) -> None:

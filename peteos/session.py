@@ -5,7 +5,7 @@ from datetime import datetime
 import uuid
 from typing import Optional
 
-from peteos.chatbot import ChatBotManager, ChatHistory, Message
+from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -14,6 +14,46 @@ from peteos.toolmanager import ToolManager
 
 class Session:
     """A session with an execution environment."""
+
+    @staticmethod
+    def _initialize_chat_history(role: Role, tool_manager: ToolManager) -> ChatHistory:
+        """
+        Initialize chat history with role system prompt and tool list.
+
+        This is a central place for creating chat history with context from
+        the role system prompt and available tools. The system prompt and
+        tool list are prepended to the chat history as the first messages.
+
+        Args:
+            role: The Role instance containing system prompt and required tools.
+            tool_manager: The ToolManager instance with available tools.
+
+        Returns:
+            ChatHistory with system prompt and tool list prepended.
+        """
+        chat_history = ChatHistory()
+
+        # Add system prompt from role
+        if role.system_prompt:
+            chat_history.append_message(Message(
+                role="system",
+                content=[ContentPart(part_type="text", text=role.system_prompt)]
+            ))
+
+        # Add tool definitions from tool manager
+        tool_list = tool_manager.get_tool_list()
+        for tool in tool_list:
+            chat_history.append_message(Message(
+                role="tool",
+                content=[ContentPart(
+                    part_type="tool",
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=tool.parameters
+                )]
+            ))
+
+        return chat_history
 
     def __init__(
         self,
@@ -34,13 +74,14 @@ class Session:
             role: The Role instance to use (obligatory).
             tool_manager: The ToolManager instance to use.
             chatbot_manager: The ChatBotManager instance to use.
-            chat_history: Optional ChatHistory instance. Creates one if None.
+            chat_history: Optional ChatHistory instance. Creates one with system
+                prompt and tool list if None.
             session_uuid: Optional UUID. Generates one if None.
             execution_environment: Optional execution environment. Creates REPL one if None.
         """
         self.uuid = session_uuid if session_uuid is not None else uuid.uuid4()
         self.role = role
-        self.chat_history = chat_history if chat_history is not None else ChatHistory()
+        self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
         self.chatbot_manager = chatbot_manager
 
         self.execution_environment = execution_environment if execution_environment is not None else REPLExecutionEnvironment(
@@ -126,8 +167,8 @@ class Session:
                 )
 
         messages = [
-            Message(
-                content=msg["content"],
+            Message.from_dict(
+                msg["content"],
                 creation_timestamp=datetime.fromisoformat(msg["creation_timestamp"]) if "creation_timestamp" in msg else None,
                 message_id=msg.get("id")
             )
