@@ -6,6 +6,9 @@ from typing import Optional
 
 from peteos.channel import Channel
 from peteos.chatbot import Message
+from peteos.logger import get_logger
+
+_logger = get_logger(__name__)
 
 
 class InteractiveShellChannel(Channel):
@@ -49,7 +52,7 @@ class InteractiveShellChannel(Channel):
         Args:
             message: The message to display.
         """
-        print(f"[{self.name}] {message}")
+        print(message)
 
     def _post_message_to_agent(self, session_uuid: uuid.UUID, content: str) -> None:
         """Post a message to the Agent's message queue.
@@ -117,7 +120,6 @@ class InteractiveShellChannel(Channel):
 
         self._running = True
         self.send(f"Connected. Commands: /new, /list, /select, /messages, /quit")
-        self.send("")
 
     async def stop(self) -> None:
         """Stop the shell channel gracefully."""
@@ -167,7 +169,8 @@ class InteractiveShellChannel(Channel):
             try:
                 session = self._agent.create_session(args.strip())
                 self.select_session(session.uuid)
-                return (True, f"Session created: {session.uuid}")
+                _logger.debug(f"Session created: {session.uuid}")
+                return (True, "")
             except ValueError as e:
                 return (True, str(e))
 
@@ -190,7 +193,8 @@ class InteractiveShellChannel(Channel):
                 if session is None:
                     return (True, f"Session not found: {session_uuid}")
                 self.select_session(session_uuid)
-                return (True, f"Active session: {session_uuid}")
+                _logger.debug(f"Active session: {session_uuid}")
+                return (True, "")
             except ValueError:
                 return (True, f"Invalid UUID: {args}")
 
@@ -269,7 +273,6 @@ class InteractiveShellChannel(Channel):
 
                     try:
                         session_uuid = self._active_session_uuid
-                        self.send(f"Sending message to session {session_uuid}...")
                         self._post_message_to_agent(session_uuid, line)
                     except Exception as e:
                         self.send(f"Error: {type(e).__name__}: {str(e)}")

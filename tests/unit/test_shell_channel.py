@@ -85,7 +85,8 @@ class TestShellChannelCommands:
         should_continue, output = channel.handle_command("/new test")
 
         assert should_continue is True
-        assert "Session created" in output
+        # Session creation is now logged, not displayed
+        assert output == ""
         assert self.agent.get_session(channel.active_session_uuid) is not None
 
     def test_command_new_missing_role(self):
@@ -127,7 +128,8 @@ class TestShellChannelCommands:
         should_continue, output = channel.handle_command(f"/select {session_uuid}")
 
         assert should_continue is True
-        assert "Active session" in output
+        # Session selection is now logged, not displayed
+        assert output == ""
         assert channel.active_session_uuid == session_uuid
 
     def test_command_select_invalid_uuid(self):
@@ -186,7 +188,8 @@ class TestShellChannelCommands:
         should_continue, output = channel.handle_command("/NEW test")
 
         assert should_continue is True
-        assert "Session created" in output
+        # Session creation is now logged, not displayed
+        assert output == ""
 
     def test_non_command_forwarded(self):
         """Test non-command lines are forwarded as messages."""
@@ -239,6 +242,9 @@ class TestShellChannelRun:
         channel.send = mock_send
 
         # Start the channel to get welcome message
+        # Need to set active session so send() will format output
+        channel._active_session_uuid = uuid.UUID("12345678-1234-1234-1234-123456789012")
+
         asyncio.run(channel.start())
 
         assert any("Connected" in msg or "Commands" in msg for msg in output)
