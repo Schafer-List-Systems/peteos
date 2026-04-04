@@ -241,21 +241,6 @@ class TestChatHistory:
         assert history.get_generation_config("max_tokens") == 4096
         assert history.get_generation_config("nonexistent", "default") == "default"
 
-    def test_get_content(self):
-        """Test getting content as list of dictionaries."""
-        msg1 = Message(role="user", content=[ContentPart(part_type="text", text="Hi")])
-        msg2 = Message(role="assistant", content=[ContentPart(part_type="text", text="Hello")])
-        history = ChatHistory(messages=[msg1, msg2])
-        contents = history.get_content()
-        assert len(contents) == 2
-        assert contents[0]["role"] == "user"
-        assert contents[1]["role"] == "assistant"
-
-    def test_get_content_empty(self):
-        """Test getting content from empty history."""
-        history = ChatHistory()
-        assert history.get_content() == []
-
     def test_len_method(self):
         """Test len() on ChatHistory."""
         history = ChatHistory(messages=[

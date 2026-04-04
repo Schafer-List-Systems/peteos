@@ -82,15 +82,6 @@ class ChatHistory:
         """
         return self.generation_config.get(key, default)
 
-    def get_content(self) -> List[Dict[str, Any]]:
-        """
-        Get all message contents as dictionaries.
-
-        Returns:
-            List of message content dictionaries.
-        """
-        return [msg.to_dict() for msg in self.messages]
-
     def __len__(self) -> int:
         """Return the number of messages in the history."""
         return len(self.messages)
