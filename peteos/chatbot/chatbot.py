@@ -152,33 +152,46 @@ class GenericChatBot(ChatBot):
         return translated
 
     def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
-        """Build request body from chat history and defaults."""
-        body = dict(self._defaults)
+        """Build request body from chat history and defaults.
+
+        Override in subclasses for API-specific request format.
+        """
+        body = dict(chat_history.generation_config)
         body["model"] = self._model
         body["stream"] = streaming
 
-        # Build messages array - translate uniform keys to API keys
+        # Build messages array from ChatHistory
         messages = []
-        system_content = None
+        system_parts = []
+        tools = []
 
         for msg in chat_history.messages:
-            # Translate message content keys
-            msg_data = self._translate_message_fields(msg.content)
-            role = msg_data.get("role", "user")
+            role = msg.role
 
             if role == "system":
-                # Extract system content separately
-                system_content = msg_data.get("content", msg_data)
-            else:
-                messages.append(msg_data)
+                # Extract system content parts
+                system_parts.extend(msg.content)
+            elif role == "tool":
+                # Extract tool definitions
+                for part in msg.content:
+                    if part.type == "tool":
+                        tools.append(part.data)
+            elif role in ("user", "assistant"):
+                # Conversation messages
+                messages.append({
+                    "role": role,
+                    "content": [part.to_dict() for part in msg.content]
+                })
 
         body["messages"] = messages
 
         # Add system if present
-        if system_content:
-            # Check if system is in our defaults (Anthropic style)
-            if "system" not in body:
-                body["system"] = system_content
+        if system_parts:
+            body["system"] = system_parts
+
+        # Add tools if present
+        if tools:
+            body["tools"] = tools
 
         return body
 
@@ -229,6 +242,52 @@ class OpenAIChatBot(GenericChatBot):
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
         )
+
+    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
+        """Build OpenAI-specific request body.
+
+        OpenAI format:
+        - system messages included in messages[] array with role="system"
+        - tools from tool messages
+        - tool_choice from generation_config
+        """
+        body = {}
+        body["model"] = self._model
+        body["stream"] = streaming
+
+        messages = []
+        tools = []
+
+        for msg in chat_history.messages:
+            role = msg.role
+
+            if role == "tool":
+                # Extract tool definitions
+                for part in msg.content:
+                    if part.type == "tool":
+                        tools.append(part.data)
+            elif role in ("user", "assistant", "system"):
+                # Convert content parts to OpenAI format
+                content = [part.to_dict() for part in msg.content]
+                # OpenAI accepts string content or array of parts
+                if len(content) == 1 and content[0].get("type") == "text":
+                    content = content[0].get("text", "")
+                messages.append({
+                    "role": role,
+                    "content": content
+                })
+
+        body["messages"] = messages
+
+        if tools:
+            body["tools"] = tools
+
+        # Copy generation config (includes tool_choice)
+        for key, value in chat_history.generation_config.items():
+            if key not in body:
+                body[key] = value
+
+        return body
 
 class AnthropicChatBot(GenericChatBot):
     """ChatBot implementation for Anthropic-compatible API."""
@@ -297,7 +356,67 @@ class AnthropicChatBot(GenericChatBot):
             return AnthropicChatBotResponse.from_json(response_data, self._translations)
 
     def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
-        """Build request body from chat history and defaults."""
-        body = super()._build_body(chat_history, streaming)
+        """Build Anthropic-specific request body.
+
+        Anthropic format:
+        - system goes to separate 'system' field
+        - messages[] only contains user/assistant
+        - tools use 'input_schema' instead of 'parameters'
+        - tool_choice in Anthropic format
+        """
+        body = {}
+        body["model"] = self._model
+        body["stream"] = streaming
         body["max_tokens"] = self._max_tokens
+
+        messages = []
+        system_parts = []
+        tools = []
+
+        for msg in chat_history.messages:
+            role = msg.role
+
+            if role == "system":
+                # Collect system parts
+                system_parts.extend(msg.content)
+            elif role == "tool":
+                # Extract tool definitions, convert to input_schema
+                for part in msg.content:
+                    if part.type == "tool":
+                        tool_def = dict(part.data)
+                        # Convert parameters to input_schema
+                        if "parameters" in tool_def:
+                            tool_def["input_schema"] = tool_def.pop("parameters")
+                        tools.append(tool_def)
+            elif role in ("user", "assistant"):
+                # Conversation messages
+                content = [part.to_dict() for part in msg.content]
+                messages.append({
+                    "role": role,
+                    "content": content
+                })
+
+        body["messages"] = messages
+
+        if system_parts:
+            # Convert system parts to string
+            system_text = " ".join(
+                part.text for part in system_parts
+                if part.type == "text" and part.text
+            )
+            body["system"] = system_text
+
+        if tools:
+            body["tools"] = tools
+
+        # Copy generation config (excluding tool_choice for now)
+        for key, value in chat_history.generation_config.items():
+            if key not in body and key != "tool_choice":
+                body[key] = value
+
+        # Add tool_choice if present
+        tool_choice = chat_history.generation_config.get("tool_choice")
+        if tool_choice:
+            body["tool_choice"] = tool_choice
+
         return body
