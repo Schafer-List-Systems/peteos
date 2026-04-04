@@ -160,8 +160,8 @@ async def main():
     print("-" * 60)
     print()
 
-    # Run the shell interactively (blocks until /quit)
-    await shell.run()
+    # Run the shell interactively with custom prompt (blocks until /quit)
+    await run_interactive_shell(shell)
 
     print()
     print("Goodbye!")
@@ -169,6 +169,83 @@ async def main():
     # Cleanup
     await agent.stop()
     print("Agent event loop stopped")
+
+
+async def run_interactive_shell(shell):
+    """Run the shell with a custom prompt showing session info.
+
+    This is an application-level feature - the prompt helps users identify
+    which session/agent they're talking to.
+    """
+    import asyncio
+
+    # Notification task for active session
+    notification_task = None
+
+    try:
+        await shell.start()
+
+        while shell._running:
+            # Print prompt before reading input
+            prompt = _get_prompt(shell)
+            print(prompt, end="", flush=True)
+
+            # Start notification consumer if we have an active session
+            if shell._active_session_uuid is not None and notification_task is None:
+                notification_task = asyncio.create_task(
+                    shell._consume_notifications(shell._active_session_uuid)
+                )
+
+            # Read input in parallel with notifications
+            try:
+                line = await asyncio.get_event_loop().run_in_executor(
+                    None, shell._get_input_line
+                )
+            except Exception:
+                shell._running = False
+                break
+
+            if line is None:
+                break
+
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith("/"):
+                should_continue, output = shell.handle_command(line)
+                shell.send(output)
+                if not should_continue:
+                    break
+            else:
+                # Forward message to active session via Agent's queue
+                if shell._active_session_uuid is None:
+                    shell.send("No session selected. Use /new <role> or /select <uuid>.")
+                    continue
+
+                try:
+                    shell._post_message_to_agent(shell._active_session_uuid, line)
+                except Exception as e:
+                    shell.send(f"Error: {type(e).__name__}: {str(e)}")
+
+    finally:
+        await shell.stop()
+        if notification_task and not notification_task.done():
+            notification_task.cancel()
+            try:
+                await notification_task
+            except asyncio.CancelledError:
+                pass
+
+
+def _get_prompt(shell) -> str:
+    """Get the prompt string for the shell."""
+    if shell._active_session_uuid:
+        short_uuid = str(shell._active_session_uuid)[:8]
+        session = shell._agent.get_session(shell._active_session_uuid)
+        role_name = session.role.name if session else "agent"
+        return f"{short_uuid} @{role_name} >> "
+    return ">> "
 
 
 if __name__ == "__main__":
