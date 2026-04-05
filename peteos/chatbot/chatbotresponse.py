@@ -121,6 +121,7 @@ class GenericChatBotResponse(ChatBotResponse):
         Input SSE lines:
             data: {"choices": [{"delta": {"content": "Hello"}}]}
             data: {"type": "message_start", "message": {"content": [...], "reasoning": "R"}}
+            error: {"error": "some error message"}
 
         Output tuples:
             ("text", "Hello")
@@ -139,6 +140,13 @@ class GenericChatBotResponse(ChatBotResponse):
                                     yield (key, chunk)
                         except json.JSONDecodeError:
                             _logger.warning("Failed to parse SSE event: %s", line.strip())
+                elif line.startswith("error: "):
+                    error_content = line[7:]
+                    try:
+                        error_data = json.loads(error_content)
+                        _logger.error("Chatbot error: %s", error_data)
+                    except json.JSONDecodeError:
+                        _logger.error("Chatbot error: %s", error_content)
                 elif line.strip() == "[DONE]":
                     _logger.debug("Received [DONE] signal")
                 else:
