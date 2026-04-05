@@ -4,6 +4,9 @@ import json
 from typing import AsyncGenerator, AsyncIterator, Dict, Any, List
 
 from peteos.utils import get_value_at_path as _get_value_at_path
+from peteos.logger import get_logger
+
+_logger = get_logger(__name__)
 
 
 class ChatBotResponse:
@@ -135,7 +138,11 @@ class GenericChatBotResponse(ChatBotResponse):
                                     self._accumulate_event({key: chunk})
                                     yield (key, chunk)
                         except json.JSONDecodeError:
-                            pass
+                            _logger.warning("Failed to parse SSE event: %s", line.strip())
+                elif line.strip() == "[DONE]":
+                    _logger.debug("Received [DONE] signal")
+                else:
+                    _logger.warning("Unknown line from chatbot: %s", line.strip())
 
         return _stream_generator().__aiter__()
 

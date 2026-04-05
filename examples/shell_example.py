@@ -15,6 +15,7 @@ Configure the ChatBotManager in setup_components() by adding your backend(s):
 from peteos.agent import Agent
 from peteos.channels import InteractiveShellChannel
 from peteos.chatbot.manager import ChatBotManager
+from peteos.logger import setup_logging
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
@@ -125,6 +126,9 @@ def setup_tool_manager():
 
 async def main():
     """Main entry point."""
+    # Configure logging
+    setup_logging(level="INFO", debug=True)
+
     print("=" * 60)
     print("  Peteos Interactive Shell Example")
     print("=" * 60)
