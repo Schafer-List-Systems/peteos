@@ -140,15 +140,19 @@ class GenericChatBotResponse(ChatBotResponse):
                                     yield (key, chunk)
                         except json.JSONDecodeError:
                             _logger.warning("Failed to parse SSE event: %s", line.strip())
-                elif line.startswith("error: "):
-                    error_content = line[7:]
-                    try:
-                        error_data = json.loads(error_content)
-                        _logger.error("Chatbot error: %s", error_data)
-                    except json.JSONDecodeError:
-                        _logger.error("Chatbot error: %s", error_content)
                 elif line.strip() == "[DONE]":
                     _logger.debug("Received [DONE] signal")
+                elif line.startswith("{") or line.startswith("["):
+                    try:
+                        data = json.loads(line)
+                        if isinstance(data, dict) and "error" in data:
+                            self._data["error"] = str(data["error"])
+                            _logger.error("Chatbot error: %s", data["error"])
+                            continue
+                        else:
+                            _logger.warning("Unknown line from chatbot: %s", line.strip())
+                    except json.JSONDecodeError:
+                        _logger.warning("Failed to parse line from chatbot: %s", line.strip())
                 else:
                     _logger.warning("Unknown line from chatbot: %s", line.strip())
 

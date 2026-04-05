@@ -1,7 +1,10 @@
 from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
 from peteos.executionenvironment import ExecutionEnvironment
+from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
+
+_logger = get_logger(__name__)
 
 
 class REPLExecutionEnvironment(ExecutionEnvironment):
@@ -57,7 +60,10 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             # Append the full response as a Message to ChatHistory
             # response.data has format from translation: {text: "...", reasoning: "...", tool_calls: [...]}
             # Role is required - must be present (ChatBot ensures this)
-            # Other fields are optional and future-proof - any key becomes a ContentPart
+            # If there's an error from the chatbot, skip appending and exit loop
+            if "error" in response.data:
+                _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
+                break
             assert "role" in response.data, f"ChatBot response missing 'role' field: {response.data.keys()}"
 
             # Generic mapping: response.data keys → ContentPart types
