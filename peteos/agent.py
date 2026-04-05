@@ -436,8 +436,8 @@ class Agent:
             elif role == "assistant":
                 text = ""
                 for part in msg.content:
-                    if part.type == "text" and part.text:
-                        text = part.text
+                    if part.type == "text" and part.data.get("text"):
+                        text = part.data.get("text")
                         break
                 if text:
                     self._publish_notification(session_uuid, f"[Agent] {text}")
@@ -464,10 +464,10 @@ class Agent:
                     text = ""
                     reasoning = ""
                     for part in last_msg.content:
-                        if part.type == "text" and part.text:
-                            text = part.text
-                        elif part.type == "reasoning" and part.reasoning:
-                            reasoning = part.reasoning
+                        if part.type == "text" and part.data.get("text"):
+                            text = part.data.get("text")
+                        elif part.type == "reasoning" and part.data.get("reasoning"):
+                            reasoning = part.data.get("reasoning")
                     if text:
                         self._publish_notification(session_uuid, f"[Agent] {text}")
                     elif reasoning:

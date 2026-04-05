@@ -283,7 +283,7 @@ class OpenAIChatBot(GenericChatBot):
         body["messages"] = messages
 
         if tools:
-            body["tools"] = tools
+            body["tools"] = [{"type": "function", "function": t} for t in tools]
 
         # Copy generation config (includes tool_choice)
         for key, value in chat_history.generation_config.items():
