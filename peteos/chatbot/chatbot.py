@@ -207,14 +207,17 @@ class OpenAIChatBot(GenericChatBot):
 
     # Default translation configuration for OpenAI API
     RESPONSE_TRANSLATIONS = {
+        # Streaming mode (delta events)
         "choices[*].delta.role": "role",
-        "choices[*].message.content": "text",
-        "choices[*].message.reasoning": "reasoning",
-        "choices[*].message.thinking": "reasoning",
         "choices[*].delta.content": "text",
         "choices[*].delta.reasoning": "reasoning",
         "choices[*].delta.thinking": "reasoning",
         "choices[*].delta.tool_calls": "tool_calls",
+        # Non-streaming mode (message object)
+        "choices[*].message.role": "role",
+        "choices[*].message.content": "text",
+        "choices[*].message.reasoning": "reasoning",
+        "choices[*].message.thinking": "reasoning",
         "choices[*].message.tool_calls": "tool_calls",
     }
 

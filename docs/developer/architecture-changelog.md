@@ -157,6 +157,13 @@
 - No framework components implemented yet
 - Documentation structure established
 
+## [2026-04-04] - Chat History Design
+- Created `docs/developer/chat-history-design.md`: complete specification for ChatHistory class
+- Decisions: MessageContent always list, Tools use canonical JSON Schema, System as message at position 0
+- Defines Message, ContentPart, ToolDefinition classes with clear structure
+- Documents translation rules for OpenAI, Anthropic, Gemini, Cohere APIs
+- Reserved field for response_format constraints (OpenAI JSON mode, Gemini responseSchema)
+
 ## [2026-03-27] - New Session:
 - session id: 810fb120-e4e5-4e32-9718-88bbcaf7641a
 - model: qwen3.5-35b-a3b

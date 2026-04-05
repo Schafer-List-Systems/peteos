@@ -1,6 +1,7 @@
 """InteractiveShellChannel - REPL-style interaction with agents via queues."""
 
 import asyncio
+import sys
 import uuid
 from typing import Optional
 
@@ -102,7 +103,8 @@ class InteractiveShellChannel(Channel):
     def _get_input_line(self) -> Optional[str]:
         """Synchronous input reader for use with run_in_executor."""
         try:
-            return input()
+            line = sys.stdin.readline()
+            return line if line else None
         except EOFError:
             return None
 

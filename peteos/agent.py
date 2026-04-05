@@ -422,17 +422,23 @@ class Agent:
             delta_messages: List of messages added during this iteration.
         """
         for msg in delta_messages:
-            content = msg.content
-            role = content.get("role", "unknown")
-            if role == "tool":
-                tool_name = content.get("name", "unknown")
-                tool_content = content.get("content", "")
-                success = content.get("success", False)
-                status = "success" if success else "failed"
-                message = f"[Agent] Tool '{tool_name}' result ({status}): {tool_content}"
-                self._publish_notification(session_uuid, message)
+            role = msg.role
+            if role == "tool_result":
+                for part in msg.content:
+                    if part.type == "tool_result":
+                        tool_name = part.data.get("name", "unknown")
+                        tool_content = part.data.get("content", "")
+                        success = part.data.get("success", False)
+                        status = "success" if success else "failed"
+                        message = f"[Agent] Tool '{tool_name}' result ({status}): {tool_content}"
+                        self._publish_notification(session_uuid, message)
+                        break
             elif role == "assistant":
-                text = content.get("text", content.get("content", ""))
+                text = ""
+                for part in msg.content:
+                    if part.type == "text" and part.text:
+                        text = part.text
+                        break
                 if text:
                     self._publish_notification(session_uuid, f"[Agent] {text}")
 
@@ -454,14 +460,17 @@ class Agent:
             history = session.chat_history.messages
             if history:
                 last_msg = history[-1]
-                content = last_msg.content
-                role = content.get("role", "unknown")
-                if role == "assistant":
-                    text = content.get("text", content.get("content", ""))
+                if last_msg.role == "assistant":
+                    text = ""
+                    reasoning = ""
+                    for part in last_msg.content:
+                        if part.type == "text" and part.text:
+                            text = part.text
+                        elif part.type == "reasoning" and part.reasoning:
+                            reasoning = part.reasoning
                     if text:
                         self._publish_notification(session_uuid, f"[Agent] {text}")
-                    elif "reasoning" in content:
-                        reasoning = content.get("reasoning", "")
+                    elif reasoning:
                         self._publish_notification(
                             session_uuid,
                             f"[Agent] Reasoning: {reasoning}"

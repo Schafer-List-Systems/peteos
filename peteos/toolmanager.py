@@ -121,3 +121,12 @@ class ToolManager:
             The Tool instance, or None if not found.
         """
         return self._tools.get(name)
+
+    def get_tool_list(self) -> list[Tool]:
+        """
+        Get list of all registered tools.
+
+        Returns:
+            List of Tool instances.
+        """
+        return list(self._tools.values())

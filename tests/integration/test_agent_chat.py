@@ -8,7 +8,7 @@ sys.path.insert(0, '/home/frygge/projects/private/peteos')
 from unittest.mock import MagicMock, AsyncMock
 from peteos.agent import Agent
 from peteos.chatbot.manager import ChatBotManager
-from peteos.chatbot import Message
+from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
@@ -52,8 +52,11 @@ class TestAgentChatFlow:
 
         session = agent.create_session("test")
 
-        # Post a message
-        msg = Message(content={"role": "user", "content": "Test message"})
+        # Post a message using new Message format
+        msg = Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Test message")]
+        )
         agent.post_message(session.uuid, msg)
 
         # Wait for processing
@@ -64,6 +67,7 @@ class TestAgentChatFlow:
 
         # Verify message was added to history
         assert len(session.chat_history.messages) >= 1, "Message should be in history"
+        assert session.chat_history.messages[0].role == "user"
 
         await agent.stop()
 
@@ -77,8 +81,11 @@ class TestAgentChatFlow:
 
         session = agent.create_session("test")
 
-        # Post a message
-        msg = Message(content={"role": "user", "content": "What is 2+2?"})
+        # Post a message using new Message format
+        msg = Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="What is 2+2?")]
+        )
         agent.post_message(session.uuid, msg)
 
         # Wait for processing and chatbot response
@@ -103,9 +110,12 @@ class TestAgentChatFlow:
 
         session = agent.create_session("test")
 
-        # Send question
+        # Send question using new Message format
         question = "What is the weather?"
-        msg = Message(content={"role": "user", "content": question})
+        msg = Message(
+            role="user",
+            content=[ContentPart(part_type="text", text=question)]
+        )
         agent.post_message(session.uuid, msg)
 
         # Wait for response
@@ -115,8 +125,8 @@ class TestAgentChatFlow:
         history = session.chat_history.messages
         assert len(history) >= 2, "Should have user message and response"
 
-        # Verify response exists
-        assistant_messages = [m for m in history if m.content.get('role') == 'assistant']
+        # Verify response exists - check role attribute, not content
+        assistant_messages = [m for m in history if m.role == 'assistant']
         assert len(assistant_messages) > 0, "Should have at least one assistant response"
 
         await agent.stop()
