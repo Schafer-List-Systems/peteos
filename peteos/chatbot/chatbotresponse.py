@@ -129,19 +129,24 @@ class GenericChatBotResponse(ChatBotResponse):
         """
         async def _stream_generator():
             async for line in self._stream:
-                if line.startswith("data: ") and line.strip() != "[DONE]":
+                # Check for [DONE] first (can be "data: [DONE]" or just "[DONE]")
+                if line.strip() == "[DONE]" or line == "data: [DONE]\n" or line == "data: [DONE]":
+                    _logger.debug("Received [DONE] signal")
+                    break
+                if line.startswith("data: "):
                     data = line[6:]
                     if data.strip():
                         try:
                             event = json.loads(data)
-                            for key, chunk in self._process_event(event).items():
+                            translated = self._process_event(event)
+                            _logger.debug("SSE event translated: %s", translated)
+                            for key, chunk in translated.items():
                                 if chunk is not None:
                                     self._accumulate_event({key: chunk})
+                                    _logger.debug("Accumulated %s: %s", key, chunk)
                                     yield (key, chunk)
                         except json.JSONDecodeError:
                             _logger.warning("Failed to parse SSE event: %s", line.strip())
-                elif line.strip() == "[DONE]":
-                    _logger.debug("Received [DONE] signal")
                 elif line.startswith("{") or line.startswith("["):
                     try:
                         data = json.loads(line)
