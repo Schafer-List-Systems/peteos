@@ -1,7 +1,7 @@
 """Response classes for ChatBot with streaming support."""
 
 import json
-from typing import AsyncGenerator, AsyncIterator, Dict, Any, List
+from typing import Any, Dict, AsyncGenerator, AsyncIterator
 
 from peteos.utils import get_value_at_path as _get_value_at_path
 from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
@@ -182,33 +182,3 @@ class GenericChatBotResponse(ChatBotResponse):
             Translated event with target keys and preserved index fields.
         """
         return _translate_delta_event(event, self._translations)
-
-
-class AnthropicChatBotResponse(GenericChatBotResponse):
-    """Response wrapper for Anthropic API using delta merge.
-
-    Uses the generic translate_delta_event + merge_delta_into_target pattern.
-    Anthropic's index field is top-level metadata (not in arrays), so it's
-    simply ignored during translation.
-
-    The Anthropic API `/v1/messages` endpoint includes role in message_start.
-    However, some LLM backends (non-compliant implementations) skip the role field.
-
-    This class overrides _process_event to default role to 'assistant' when missing from
-    message_start, handling non-compliant backends that omit the role field.
-    """
-
-    def __init__(self, stream: AsyncGenerator[str, None], translations: Dict[str, str]):
-        super().__init__(stream, translations)
-
-    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process an Anthropic event, defaulting role to 'assistant' if missing from message_start.
-
-        The Anthropic API includes role in message_start. This fallback handles
-        non-compliant backends that omit the role field entirely.
-        """
-        if event.get("type") == "message_start" and "role" not in event.get("message", {}):
-            self._data["role"] = "assistant"
-
-        return self._translate_event(event)

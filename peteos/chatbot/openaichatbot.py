@@ -6,9 +6,8 @@ from typing import Dict, Any, List, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
 from .chatbot import GenericChatBot
+from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .httpclient import HTTPClient
-from .chatbotresponse import ChatBotResponse
-from .openaichatbotresponse import OpenAIChatBotResponse
 from .chathistory import ChatHistory
 from .message import Message
 
@@ -138,3 +137,13 @@ class OpenAIChatBot(GenericChatBot):
 
         _logger.debug("OpenAI request body: %s", json.dumps(body, indent=2))
         return body
+
+
+class OpenAIChatBotResponse(GenericChatBotResponse):
+    """ChatBotResponse for OpenAI-compatible API.
+
+    Uses generic delta translation and merging from parent class.
+    No special-case handling needed - index-based merging handles tool_calls automatically.
+    """
+
+    pass

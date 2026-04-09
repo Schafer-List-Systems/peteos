@@ -1,13 +1,14 @@
 """Anthropic-compatible ChatBot implementation."""
 
 import json
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Any, Dict, AsyncGenerator
 
 from peteos.logger import get_logger
 from .chatbot import GenericChatBot
-from .httpclient import HTTPClient
-from .chatbotresponse import ChatBotResponse, AnthropicChatBotResponse
+from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .chathistory import ChatHistory
+from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
+from .httpclient import HTTPClient
 from .message import Message
 
 _logger = get_logger(__name__)
@@ -148,3 +149,24 @@ class AnthropicChatBot(GenericChatBot):
             body["tool_choice"] = tool_choice
 
         return body
+
+
+class AnthropicChatBotResponse(GenericChatBotResponse):
+    """ChatBotResponse for Anthropic-compatible API.
+
+    Uses generic delta translation and merging from parent class.
+    Anthropic's index field is top-level metadata (not in arrays), so it's
+    simply ignored during translation.
+    """
+
+    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process an Anthropic event, defaulting role to 'assistant' if missing from message_start.
+
+        The Anthropic API includes role in message_start. This fallback handles
+        non-compliant backends that omit the role field entirely.
+        """
+        if event.get("type") == "message_start" and "role" not in event.get("message", {}):
+            _merge_delta_into_target(self._data, {"role": "assistant"})
+
+        return self._translate_event(event)

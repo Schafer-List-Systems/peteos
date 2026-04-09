@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
 from .httpclient import HTTPClient
-from .chatbotresponse import ChatBotResponse, GenericChatBotResponse, AnthropicChatBotResponse
+from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .chathistory import ChatHistory
 from .message import Message
 
