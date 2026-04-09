@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple, Any
 
 from .httpclient import HTTPClient
-from .chatbot import OpenAIChatBot, AnthropicChatBot
+from .openaichatbot import OpenAIChatBot
+from .anthropicchatbot import AnthropicChatBot
 
 
 @dataclass

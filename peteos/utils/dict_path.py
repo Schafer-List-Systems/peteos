@@ -1,4 +1,8 @@
-"""Utility functions for peteos."""
+"""Utility functions for accessing data at arbitrary paths in nested structures.
+
+This module provides functions for traversing and extracting data from
+nested dictionaries and lists using path notation.
+"""
 
 
 def get_value_at_path(data: dict, path: str, type_discriminator: bool = True) -> any:
@@ -87,3 +91,81 @@ def get_value_at_path(data: dict, path: str, type_discriminator: bool = True) ->
         i += 1
 
     return current
+
+
+def extract_with_indices(data: dict, path_parts: list, parent_index: int | None = None) -> any:
+    """
+    Extract value at path, propagating index from parent arrays.
+
+    If parent has 'index': 0, extracted array items will have index field set.
+
+    Args:
+        data: Source dictionary
+        path_parts: Parsed path components (e.g., ["choices", "delta", "tool_calls"])
+        parent_index: Index of parent array item, if any
+
+    Returns:
+        Extracted value with index fields propagated, or None if not found
+    """
+    if not path_parts:
+        return propagate_indices(data, parent_index)
+
+    part = path_parts[0]
+    remaining = path_parts[1:]
+    remaining_str = ".".join(remaining) if remaining else None
+
+    if "[" in part and part.endswith("]"):
+        # Array access: "choices[0]" or "choices[*]"
+        base = part.split("[")[0]
+        index_str = part.split("[")[1].rstrip("]")
+
+        if base not in data or not isinstance(data[base], list):
+            return None
+
+        if index_str == "*":
+            # Wildcard - extract from first item only (delta events are per-index)
+            if data[base]:
+                return extract_with_indices(data[base][0], remaining, parent_index=0)
+            return None
+        else:
+            # Specific index like "choices[0]"
+            try:
+                idx = int(index_str)
+                if idx < len(data[base]):
+                    return extract_with_indices(data[base][idx], remaining, parent_index=idx)
+                return None
+            except ValueError:
+                return None
+
+    # Simple key access
+    if part in data:
+        return extract_with_indices(data[part], remaining, parent_index) if remaining else data[part]
+    return None
+
+
+def propagate_indices(obj: any, parent_index: int | None) -> any:
+    """
+    Ensure all array items have 'index' field matching parent_index.
+
+    This propagates index from parent arrays to their children, which is
+    necessary for delta merge to work correctly with nested arrays.
+
+    Args:
+        obj: Object to propagate indices into
+        parent_index: Index of parent array item
+
+    Returns:
+        Object with index fields propagated
+    """
+    if isinstance(obj, list):
+        for i, item in enumerate(obj):
+            if isinstance(item, dict):
+                # Only set index if not already present
+                if parent_index is not None and "index" not in item:
+                    item["index"] = parent_index
+            # Recurse with current item's index
+            propagate_indices(item, parent_index if parent_index is not None else i)
+    elif isinstance(obj, dict):
+        for key, value in obj.items():
+            propagate_indices(value, parent_index)
+    return obj

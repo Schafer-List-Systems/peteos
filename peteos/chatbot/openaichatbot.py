@@ -5,8 +5,10 @@ import json
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
+from .chatbot import GenericChatBot
 from .httpclient import HTTPClient
-from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
+from .chatbotresponse import ChatBotResponse
+from .openaichatbotresponse import OpenAIChatBotResponse
 from .chathistory import ChatHistory
 from .message import Message
 
@@ -57,6 +59,21 @@ class OpenAIChatBot(GenericChatBot):
             request_translations=self.REQUEST_TRANSLATIONS,
         )
 
+    async def send_message(
+        self,
+        chat_history: ChatHistory,
+        streaming: bool = True
+    ) -> ChatBotResponse:
+        """Send a chat history to the LLM and receive a response."""
+        body = self._build_body(chat_history, streaming)
+
+        if streaming:
+            stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
+            return OpenAIChatBotResponse(stream, self._translations)
+        else:
+            response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
+            return OpenAIChatBotResponse.from_json(response_data, self._translations)
+
     def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
         """Build OpenAI-specific request body.
 
@@ -80,6 +97,20 @@ class OpenAIChatBot(GenericChatBot):
                 for part in msg.content:
                     if part.type == "tool":
                         tools.append(part.data)
+            elif role == "tool_result":
+                # Tool result messages - build tool_result dict for API
+                for part in msg.content:
+                    if part.type == "tool_result":
+                        tool_name = part.data.get("name", "unknown")
+                        tool_content = part.data.get("content", "")
+                        success = part.data.get("success", False)
+                        msg_dict = {
+                            "role": "tool",
+                            "name": tool_name,
+                            "content": tool_content
+                        }
+                        messages.append(msg_dict)
+                        break
             elif role in ("user", "assistant", "system"):
                 # Conversation messages - build message dict from ContentPart fields
                 # Use translation table to map uniform keys to API-specific keys

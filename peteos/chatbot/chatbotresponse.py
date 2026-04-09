@@ -4,6 +4,8 @@ import json
 from typing import AsyncGenerator, AsyncIterator, Dict, Any, List
 
 from peteos.utils import get_value_at_path as _get_value_at_path
+from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
+from peteos.utils.delta_merge import translate_delta_event as _translate_delta_event
 from peteos.logger import get_logger
 
 _logger = get_logger(__name__)
@@ -94,22 +96,12 @@ class GenericChatBotResponse(ChatBotResponse):
 
     def _accumulate_event(self, event: Dict[str, Any]) -> None:
         """
-        Accumulate translated event into response dict.
+        Accumulate translated event into response dict using delta merge.
 
         Args:
-            event: Translated event with target keys.
+            event: Translated event with target keys (and preserved index fields).
         """
-        for key, value in event.items():
-            if value is not None:
-                existing = self._data.get(key, "")
-                if isinstance(existing, str):
-                    self._data[key] = str(existing) + str(value)
-                elif isinstance(existing, list):
-                    self._data[key].append(value)
-                elif isinstance(existing, dict):
-                    self._data[key].update(value)
-                else:
-                    self._data[key] = value
+        _merge_delta_into_target(self._data, event)
 
     def _event_generator(self) -> AsyncIterator[tuple[str, Any]]:
         """
@@ -137,8 +129,9 @@ class GenericChatBotResponse(ChatBotResponse):
                     data = line[6:]
                     if data.strip():
                         try:
-                            event = json.loads(data)
-                            translated = self._process_event(event)
+                            raw_event = json.loads(data)
+                            _logger.debug("Raw SSE event: %s", raw_event)
+                            translated = self._process_event(raw_event)
                             _logger.debug("SSE event translated: %s", translated)
                             for key, chunk in translated.items():
                                 if chunk is not None:
@@ -179,29 +172,24 @@ class GenericChatBotResponse(ChatBotResponse):
         """
         Translate an event using configured path translations.
 
+        This uses delta-aware translation that preserves index fields for
+        proper delta merging.
+
         Args:
             event: Raw API response event.
 
         Returns:
-            Translated event with target keys.
+            Translated event with target keys and preserved index fields.
         """
-        translated: Dict[str, Any] = {}
-
-        for path, target in self._translations.items():
-            value = _get_value_at_path(event, path)
-            if value is not None:
-                # Handle array values from wildcard paths
-                if isinstance(value, list):
-                    value = "".join(str(v) for v in value if v)
-                else:
-                    value = str(value)
-                translated[target] = value
-
-        return translated
+        return _translate_delta_event(event, self._translations)
 
 
 class AnthropicChatBotResponse(GenericChatBotResponse):
-    """Response wrapper for Anthropic API using standard translations.
+    """Response wrapper for Anthropic API using delta merge.
+
+    Uses the generic translate_delta_event + merge_delta_into_target pattern.
+    Anthropic's index field is top-level metadata (not in arrays), so it's
+    simply ignored during translation.
 
     The Anthropic API `/v1/messages` endpoint includes role in message_start.
     However, some LLM backends (non-compliant implementations) skip the role field.

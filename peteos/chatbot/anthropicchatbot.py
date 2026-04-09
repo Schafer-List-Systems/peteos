@@ -4,6 +4,7 @@ import json
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
+from .chatbot import GenericChatBot
 from .httpclient import HTTPClient
 from .chatbotresponse import ChatBotResponse, AnthropicChatBotResponse
 from .chathistory import ChatHistory
@@ -16,22 +17,26 @@ class AnthropicChatBot(GenericChatBot):
     """ChatBot implementation for Anthropic-compatible API."""
 
     # Default translation configuration for Anthropic API
-    # stream=True (streaming): content via content_block_start/content_block_delta events
-    # stream=False (non-streaming): role, content array at top level
-    # Real Anthropic API: {"role": "assistant", "content": [{"type": "text", "text": "..."}], ...}
-    # Qwen local API:      {"type": "message", "role": "assistant", "content": [...], ...}
+    # Based on Qwen's Anthropic-compatible endpoint structure:
+    # - content_block_start: {"type":"content_block_start","content_block":{"type":"thinking"},"index":0}
+    # - content_block_delta: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"..."},"index":0}
+    # - index is top-level metadata (not in arrays), so it's ignored during translation
     RESPONSE_TRANSLATIONS = {
         # stream=True entries (streaming mode)
         "message_start.message.role": "role",              # role in message_start event
-        "content_block_delta.delta.text": "text",          # text chunks
-        "content_block_delta.delta.thinking": "reasoning", # reasoning chunks
+        "delta.thinking": "reasoning",  # thinking chunks (type discriminator used)
+        "delta.text": "text",  # text chunks (type discriminator used)
+        "delta.partial_json": "tool_arguments",  # tool JSON args
+        "content_block_start.content_block.type": "tool_type",  # tool block start
         "content_block_start.content_block.text": "text",  # text block start
-        "content_block_start.content_block.thinking": "reasoning",  # thinking block start
-        "content_block_start.content_block.reasoning": "reasoning",  # reasoning block start
+        "content_block_start.content_block.reasoning": "reasoning",  # thinking block start (reasoning field)
+        "content_block_start.content_block.thinking": "reasoning",  # thinking block start (thinking field)
         # stream=False entries (non-streaming mode)
         "role": "role",                                    # role at top level
         "content[*].text": "text",                         # content array at top level
         "content[*].thinking": "reasoning",                # content array with thinking
+        # Message delta (final stop reason)
+        "message_delta.delta.stop_reason": "stop_reason",
     }
 
     REQUEST_TRANSLATIONS = {

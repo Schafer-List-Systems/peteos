@@ -1,3 +1,5 @@
+import json
+
 from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
 from peteos.executionenvironment import ExecutionEnvironment
 from peteos.logger import get_logger
@@ -81,17 +83,37 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             ))
 
             # Check if response contains tool calls
-            tool_calls = response.data.get("tool_calls")
-            tool_calls_list = tool_calls if isinstance(tool_calls, list) else []
+            raw_tool_calls = response.data.get("tool_calls")
+            # tool_calls is accumulated as a string during streaming - parse it as JSON
+            if isinstance(raw_tool_calls, str):
+                _logger.debug("raw_tool_calls type: %s", type(raw_tool_calls))
+                _logger.debug("raw_tool_calls value: %s", raw_tool_calls[:200])
+                try:
+                    tool_calls_list = json.loads(raw_tool_calls)
+                    if not isinstance(tool_calls_list, list):
+                        tool_calls_list = []
+                except (json.JSONDecodeError, TypeError) as e:
+                    _logger.debug("JSON parse error: %s", e)
+                    tool_calls_list = []
+            else:
+                tool_calls_list = raw_tool_calls if isinstance(raw_tool_calls, list) else []
+
+            _logger.debug("Tool calls detected: %s", tool_calls_list)
+            _logger.debug("response.data keys: %s", list(response.data.keys()))
+            if "tool_calls" in response.data:
+                _logger.debug("response.tool_calls type: %s", type(response.data["tool_calls"]))
+                _logger.debug("response.tool_calls value: %s", response.data["tool_calls"])
 
             if tool_calls_list:
                 # Track history length before tool execution
                 history_length_before = len(self.chat_history.messages)
+                _logger.debug("History length before tool execution: %d", history_length_before)
                 # Execute tool calls
                 for tool_call in tool_calls_list:
                     if isinstance(tool_call, dict):
                         tool_name = tool_call.get("name")
-                        args = tool_call.get("arguments", {})
+                        # Parse arguments from JSON string (accumulated during streaming)
+                        args = json.loads(tool_call.get("arguments", "{}"))
 
                         tool = self.tool_manager.get_tool(tool_name)
                         if tool:
