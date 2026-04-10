@@ -391,3 +391,91 @@ class TestEdgeCases:
         target = {"count": "42"}
         merge_delta_into_target(target, {"count": "forty-two"})
         assert target["count"] == "42forty-two"
+
+
+class TestOpenAIStyleTranslation:
+    """Tests for OpenAI SSE event translation to uniform format."""
+
+    def test_openai_reasoning_translation(self):
+        """Test OpenAI reasoning delta translation."""
+        event = {
+            "choices": [{"delta": {"reasoning": "Hello"}}]
+        }
+        result = translate_delta_event(
+            event,
+            {"choices[*].delta.reasoning": "reasoning"}
+        )
+        assert result["reasoning"] == "Hello"
+
+    def test_openai_tool_call_index_0(self):
+        """Test OpenAI tool call with index 0."""
+        event = {
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {"name": "add", "arguments": "{}"}
+                    }]
+                }
+            }]
+        }
+        # Field-by-field translation preserves index and creates nested structure
+        result = translate_delta_event(
+            event,
+            {
+                "choices[*].delta.tool_calls[0].index": "tool_calls[0].index",
+                "choices[*].delta.tool_calls[0].id": "tool_calls[0].id",
+                "choices[*].delta.tool_calls[0].type": "tool_calls[0].type",
+                "choices[*].delta.tool_calls[0].function.name": "tool_calls[0].name",
+                "choices[*].delta.tool_calls[0].function.arguments": "tool_calls[0].arguments",
+            }
+        )
+        assert result["tool_calls"][0]["index"] == 0
+        assert result["tool_calls"][0]["id"] == "call_abc"
+        assert result["tool_calls"][0]["name"] == "add"
+
+    def test_openai_tool_call_index_1(self):
+        """Test OpenAI tool call with index 1."""
+        event = {
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 1,
+                        "id": "call_def",
+                        "type": "function",
+                        "function": {"name": "sub", "arguments": "{}"}
+                    }]
+                }
+            }]
+        }
+        result = translate_delta_event(
+            event,
+            {
+                "choices[*].delta.tool_calls[0].index": "tool_calls[0].index",
+                "choices[*].delta.tool_calls[0].type": "tool_calls[0].type",
+                "choices[*].delta.tool_calls[0].id": "tool_calls[0].id",
+                "choices[*].delta.tool_calls[0].function.name": "tool_calls[0].name",
+                "choices[*].delta.tool_calls[0].function.arguments": "tool_calls[0].arguments",
+            }
+        )
+        # Index from tool_calls[0] is preserved (actual tool_calls[0].index = 1)
+        assert result["tool_calls"][0]["index"] == 1
+
+
+class TestAnthropicStyleTranslation:
+    """Tests for Anthropic SSE event translation to uniform format."""
+
+    def test_anthropic_thinking_block(self):
+        """Test Anthropic thinking block translation."""
+        event = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "Hello"}
+        }
+        result = translate_delta_event(
+            event,
+            {"delta.thinking": "reasoning"}
+        )
+        assert result["reasoning"] == "Hello"

@@ -22,13 +22,23 @@ class AnthropicChatBot(GenericChatBot):
     # - content_block_start: {"type":"content_block_start","content_block":{"type":"thinking"},"index":0}
     # - content_block_delta: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"..."},"index":0}
     # - index is top-level metadata (not in arrays), so it's ignored during translation
+    #
+    # Translation strategy: All providers produce IDENTICAL uniform format
+    # Tool calls are accumulated into a tool_calls array with index fields for delta merging
+    # Anthropic's top-level "index" field is used to extract individual events
+    # and propagate nested indices into the tool_calls array structure
     RESPONSE_TRANSLATIONS = {
         # stream=True entries (streaming mode)
         "message_start.message.role": "role",              # role in message_start event
         "delta.thinking": "reasoning",  # thinking chunks (type discriminator used)
         "delta.text": "text",  # text chunks (type discriminator used)
-        "delta.partial_json": "tool_arguments",  # tool JSON args
-        "content_block_start.content_block.type": "tool_type",  # tool block start
+        # Tool calls: map to uniform tool_calls array structure
+        # Anthropic uses partial_json for tool arguments, we consolidate into tool_calls array
+        "delta.partial_json": "tool_calls.arguments",      # tool JSON args into array item (no index prefix)
+        "content_block_start.content_block.type": "tool_calls.type",  # block type into array
+        "content_block_start.content_block.id": "tool_calls.id",      # tool_use id into array
+        "content_block_start.content_block.name": "tool_calls.name",  # tool_use name into array
+        # Text blocks
         "content_block_start.content_block.text": "text",  # text block start
         "content_block_start.content_block.reasoning": "reasoning",  # thinking block start (reasoning field)
         "content_block_start.content_block.thinking": "reasoning",  # thinking block start (thinking field)

@@ -99,6 +99,61 @@ def merge_delta_into_target(target: Dict, delta: Any, path: str = "") -> None:
         raise ValueError(f"Standalone scalar at path {path}: {delta!r}")
 
 
+def _set_nested(result: Dict, target_key: str, value: Any) -> None:
+    """
+    Parse target_key with array syntax and set nested value in result.
+
+    Handles keys like:
+    - "content" → result["content"] = value
+    - "tool_calls[0].index" → result["tool_calls"][0]["index"] = value
+    - "tool_calls[0].name" → result["tool_calls"][0]["name"] = value
+
+    Args:
+        result: Dictionary to set value into
+        target_key: Key with optional array syntax (e.g., "tool_calls[0].index")
+        value: Value to set
+    """
+    # Split by dots to get path parts, preserving array indices
+    parts = target_key.split(".")
+    current = result
+
+    for i, part in enumerate(parts):
+        # Check if part has array syntax like "tool_calls[0]"
+        if "[" in part and part.endswith("]"):
+            base_name = part.split("[")[0]
+            idx_str = part.split("[")[1].rstrip("]")
+            idx = int(idx_str)
+
+            # Ensure base_name exists and is a list
+            if base_name not in current:
+                current[base_name] = []
+            if not isinstance(current[base_name], list):
+                current[base_name] = []
+
+            # Expand list if needed
+            while len(current[base_name]) <= idx:
+                current[base_name].append({})
+
+            # Move to the array item
+            current = current[base_name][idx]
+        else:
+            # Regular key access
+            if part not in current:
+                # If this is the last part, set the value
+                if i == len(parts) - 1:
+                    current[part] = value
+                else:
+                    # Need nested dict
+                    current[part] = {}
+                    current = current[part]
+            else:
+                # Key exists, move deeper if not last part
+                if i == len(parts) - 1:
+                    current[part] = value
+                else:
+                    current = current[part]
+
+
 def translate_delta_event(event: Dict, translations: Dict[str, str]) -> Dict:
     """
     Translate SSE delta event to uniform format, preserving all index fields.
@@ -107,10 +162,15 @@ def translate_delta_event(event: Dict, translations: Dict[str, str]) -> Dict:
     1. Parse source path to identify array indices
     2. Extract value at that path
     3. Propagate index values to nested arrays
-    4. Store under target_key in uniform format
+    4. Store under target_key in uniform format, parsing array syntax
 
     Supports type discriminator paths: "content_block_start.content_block.text"
     will match event["type"] == "content_block_start" then extract content_block.text
+
+    Special handling for Anthropic API:
+    - Anthropic places 'index' at top-level of events (not in arrays)
+    - This index is used to propagate to nested arrays in uniform format
+    - E.g., index=0 means we're processing the first item of tool_calls array
 
     Args:
         event: Raw SSE event (e.g., from OpenAI or Anthropic API)
@@ -129,6 +189,10 @@ def translate_delta_event(event: Dict, translations: Dict[str, str]) -> Dict:
     """
     from .dict_path import extract_with_indices, get_value_at_path
 
+    # Extract top-level index from Anthropic-style events
+    # Anthropic puts index at top-level for per-item tracking
+    parent_index = event.get("index")
+
     result = {}
 
     for source_path, target_key in translations.items():
@@ -136,7 +200,7 @@ def translate_delta_event(event: Dict, translations: Dict[str, str]) -> Dict:
         path_parts = source_path.split(".")
 
         # First try extract_with_indices (for paths like "choices[*].delta.tool_calls")
-        translated = extract_with_indices(event, path_parts)
+        translated = extract_with_indices(event, path_parts, parent_index=parent_index)
 
         # If that fails and path starts with event type, try type discriminator
         # This handles paths like "content_block_start.content_block.text"
@@ -149,6 +213,6 @@ def translate_delta_event(event: Dict, translations: Dict[str, str]) -> Dict:
                 translated = get_value_at_path(event, remaining_path, type_discriminator=True)
 
         if translated is not None:
-            result[target_key] = translated
+            _set_nested(result, target_key, translated)
 
     return result

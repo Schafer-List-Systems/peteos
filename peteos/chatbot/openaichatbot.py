@@ -18,19 +18,21 @@ class OpenAIChatBot(GenericChatBot):
     """ChatBot implementation for OpenAI-compatible API."""
 
     # Default translation configuration for OpenAI API
+    # Translates OpenAI SSE events to uniform delta format
+    # All index fields are preserved for merge_delta_into_target to use
     RESPONSE_TRANSLATIONS = {
         # Streaming mode (delta events)
         "choices[*].delta.role": "role",
-        "choices[*].delta.content": "text",
         "choices[*].delta.reasoning": "reasoning",
-        "choices[*].delta.thinking": "reasoning",
-        "choices[*].delta.tool_calls": "tool_calls",
-        # Non-streaming mode (message object)
-        "choices[*].message.role": "role",
-        "choices[*].message.content": "text",
-        "choices[*].message.reasoning": "reasoning",
-        "choices[*].message.thinking": "reasoning",
-        "choices[*].message.tool_calls": "tool_calls",
+        "choices[*].delta.content": "content",
+        "choices[*].delta.finish_reason": "stop_reason",
+        # Tool calls: translate individual fields, preserving index
+        # OpenAI returns one tool call per event, so we use [0] for extraction
+        "choices[*].delta.tool_calls[0].index": "tool_calls[0].index",
+        "choices[*].delta.tool_calls[0].type": "tool_calls[0].type",
+        "choices[*].delta.tool_calls[0].id": "tool_calls[0].id",
+        "choices[*].delta.tool_calls[0].function.name": "tool_calls[0].name",
+        "choices[*].delta.tool_calls[0].function.arguments": "tool_calls[0].arguments",
     }
 
     REQUEST_TRANSLATIONS = {
