@@ -18,36 +18,51 @@ class AnthropicChatBot(GenericChatBot):
     """ChatBot implementation for Anthropic-compatible API."""
 
     # Default translation configuration for Anthropic API
-    # Based on Qwen's Anthropic-compatible endpoint structure:
-    # - content_block_start: {"type":"content_block_start","content_block":{"type":"thinking"},"index":0}
-    # - content_block_delta: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"..."},"index":0}
-    # - index is top-level metadata (not in arrays), so it's ignored during translation
+    # Translates Anthropic SSE events to uniform delta format
     #
-    # Translation strategy: All providers produce IDENTICAL uniform format
-    # Tool calls are accumulated into a tool_calls array with index fields for delta merging
-    # Anthropic's top-level "index" field is used to extract individual events
-    # and propagate nested indices into the tool_calls array structure
+    # Anthropic SSE Structure:
+    # - message_start: {"type":"message_start","message":{"role":"assistant"}}
+    # - content_block_start: {"type":"content_block_start","content_block":{...},"index":0}
+    # - content_block_delta: {"type":"content_block_delta","delta":{...},"index":0}
+    # - message_delta: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}
+    # - content_block_stop: {"type":"content_block_stop","index":0}
+    #
+    # Key difference from OpenAI: Anthropic places 'index' at top-level of events,
+    # not inside arrays. The index indicates which content array item to update.
+    #
+    # Translation strategy: Field-by-field translation with index propagation
+    # - Top-level 'index' from event is used as parent_index during translation
+    # - Array syntax in target keys (e.g., "content[0].type") creates proper nested structure
+    # - Type discriminators filter content_block_start/content_block_delta events
+    #
+    # Uniform format produced:
+    # {
+    #   "role": "assistant",
+    #   "content": [
+    #     {"index": 0, "type": "thinking", "content": "..."},
+    #     {"index": 1, "type": "tool_use", "id": "...", "name": "...", "arguments": "..."}
+    #   ],
+    #   "stop_reason": "tool_use"
+    # }
     RESPONSE_TRANSLATIONS = {
-        # stream=True entries (streaming mode)
-        "message_start.message.role": "role",              # role in message_start event
-        "delta.thinking": "reasoning",  # thinking chunks (type discriminator used)
-        "delta.text": "text",  # text chunks (type discriminator used)
-        # Tool calls: map to uniform tool_calls array structure
-        # Anthropic uses partial_json for tool arguments, we consolidate into tool_calls array
-        "delta.partial_json": "tool_calls.arguments",      # tool JSON args into array item (no index prefix)
-        "content_block_start.content_block.type": "tool_calls.type",  # block type into array
-        "content_block_start.content_block.id": "tool_calls.id",      # tool_use id into array
-        "content_block_start.content_block.name": "tool_calls.name",  # tool_use name into array
-        # Text blocks
-        "content_block_start.content_block.text": "text",  # text block start
-        "content_block_start.content_block.reasoning": "reasoning",  # thinking block start (reasoning field)
-        "content_block_start.content_block.thinking": "reasoning",  # thinking block start (thinking field)
-        # stream=False entries (non-streaming mode)
-        "role": "role",                                    # role at top level
-        "content[*].text": "text",                         # content array at top level
-        "content[*].thinking": "reasoning",                # content array with thinking
-        # Message delta (final stop reason)
+        # Message start - extract role
+        "message_start.message.role": "role",
+        # Message delta - extract stop_reason
         "message_delta.delta.stop_reason": "stop_reason",
+        # Thinking blocks
+        # Type discriminator: matches content_block_start when delta.type exists
+        "content_block_start.content_block.type": "content[0].type",
+        "content_block_start.content_block.thinking": "content[0].content",
+        "content_block_delta.delta.thinking": "content[0].content",
+        # Text blocks
+        "content_block_start.content_block.type": "content[0].type",
+        "content_block_start.content_block.text": "content[0].content",
+        "content_block_delta.delta.text": "content[0].content",
+        # Tool use blocks - field-by-field with array syntax
+        "content_block_start.content_block.type": "content[0].type",
+        "content_block_start.content_block.id": "content[0].id",
+        "content_block_start.content_block.name": "content[0].name",
+        "content_block_delta.delta.partial_json": "content[0].arguments",
     }
 
     REQUEST_TRANSLATIONS = {

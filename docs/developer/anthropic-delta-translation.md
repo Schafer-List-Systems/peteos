@@ -4,285 +4,316 @@ This document specifies how Anthropic-compatible API streaming responses are tra
 
 ## Anthropic SSE Event Format
 
-### Basic Stream Structure
+### Event Types
+
+```
+message_start     → Initial message metadata (role)
+content_block_start → Start of a content block (type, id, name for tools)
+content_block_delta → Incremental content (thinking, text, tool arguments)
+content_block_stop → End of a content block
+message_delta     → Final message metadata (stop_reason)
+message_stop      → Stream completion
+```
+
+### Raw SSE Stream
+
+Each event line contains:
+```
+event: <event_type>
+data: <JSON object>
+```
+
+### 1. Message Start Event
 
 ```json
 {
   "type": "message_start",
   "message": {
     "id": "msg_xxx",
-    "type": "message",
     "role": "assistant",
-    "content": [],
-    "model": "model-name",
+    "model": "qwen/qwen3.5-35b-a3b",
     "stop_reason": null,
-    "stop_sequence": null
+    "content": [],
+    "usage": {"input_tokens": 294, "output_tokens": 0}
   }
 }
 ```
 
-### Content Block Events
+### 2. Content Block Start Event
 
+**Thinking block:**
 ```json
 {
   "type": "content_block_start",
   "index": 0,
   "content_block": {
     "type": "thinking",
-    "thinking": "thought content"
+    "thinking": ""
   }
 }
 ```
 
+**Text block:**
+```json
+{
+  "type": "content_block_start",
+  "index": 0,
+  "content_block": {
+    "type": "text",
+    "text": ""
+  }
+}
+```
+
+**Tool use block:**
+```json
+{
+  "type": "content_block_start",
+  "index": 1,
+  "content_block": {
+    "type": "tool_use",
+    "id": "chatcmpl-tool-bf20b0ee27af2ff0",
+    "name": "calculate",
+    "input": {}
+  }
+}
+```
+
+### 3. Content Block Delta Events
+
+**Thinking delta:**
 ```json
 {
   "type": "content_block_delta",
   "index": 0,
   "delta": {
     "type": "thinking_delta",
-    "thinking": "more thought content"
+    "thinking": "The user wants me to calculate:"
   }
 }
 ```
 
-```json
-{
-  "type": "content_block_stop",
-  "index": 0
-}
-```
-
-### Tool Call Format
-
-```json
-{
-  "type": "content_block_start",
-  "index": 0,
-  "content_block": {
-    "type": "tool_use",
-    "id": "toolu_xxx",
-    "name": "function_name"
-  }
-}
-```
-
+**Text delta:**
 ```json
 {
   "type": "content_block_delta",
   "index": 0,
   "delta": {
-    "type": "input_json_delta",
-    "partial_json": '{"key": "value'
+    "type": "text_delta",
+    "text": "final response"
   }
 }
 ```
 
-### Message Delta (Stop Reason)
+**Tool arguments delta:**
+```json
+{
+  "type": "content_block_delta",
+  "index": 1,
+  "delta": {
+    "type": "input_json_delta",
+    "partial_json": "{\"expression\":\"2**16 + 32 * 15 - 100\"}"
+  }
+}
+```
+
+**Signature delta (not used in uniform format):**
+```json
+{
+  "type": "content_block_delta",
+  "index": 0,
+  "delta": {
+    "type": "signature_delta",
+    "signature": "82ba0132aa424fa2938b11af8f7ed003"
+  }
+}
+```
+
+### 4. Message Delta Event
 
 ```json
 {
   "type": "message_delta",
   "delta": {
-    "stop_reason": "end_turn",
+    "stop_reason": "tool_use",
     "stop_sequence": null
   },
   "message": {
-    "id": "msg_xxx",
-    "model": "model-name",
-    "stop_reason": "end_turn",
-    "stop_sequence": null
+    "stop_reason": "tool_use"
   }
 }
 ```
+
+### 5. Content Block Stop / Message Stop
+
+```json
+{
+  "type": "content_block_stop",
+  "index": 1
+}
+
+{
+  "type": "message_stop"
+}
+```
+
+## Index Field Semantics
+
+Anthropic places `index` at the **top-level of content block events**, not inside arrays:
+
+```json
+{
+  "type": "content_block_delta",
+  "index": 0,        # <-- Points to content[0] in uniform format
+  "delta": {...}
+}
+```
+
+This top-level `index` indicates which content array item the event applies to. During translation:
+1. The `index` is extracted from the event
+2. It is propagated into the uniform delta's array items
+3. The `index` is stripped from the final accumulated result
 
 ## Translation to Uniform Delta Format
 
 ### Translation Rules
 
-#### 1. Content Blocks
+| Anthropic Source Path | Uniform Target | Notes |
+|-----------------------|----------------|-------|
+| `message_start.message.role` | `role` | Only in message_start event |
+| `message_delta.delta.stop_reason` | `stop_reason` | Only in message_delta event |
+| `content_block_start.content_block.type` | `content[0].type` | "thinking", "text", or "tool_use" |
+| `content_block_start.content_block.thinking` | `content[0].content` | Thinking block text |
+| `content_block_start.content_block.text` | `content[0].content` | Text block content |
+| `content_block_start.content_block.id` | `content[0].id` | Tool use ID |
+| `content_block_start.content_block.name` | `content[0].name` | Tool use name |
+| `content_block_delta.delta.thinking` | `content[0].content` | Thinking fragment |
+| `content_block_delta.delta.text` | `content[0].content` | Text fragment |
+| `content_block_delta.delta.partial_json` | `content[0].arguments` | Tool arguments fragment |
 
-Anthropic uses `content_block_start`, `content_block_delta`, and `content_block_stop` events with a top-level `index` field.
+### Key Translation Strategy
 
-```
-source_path                                    target_path
----------------------------------------------  -------------------------
-message_start.message.role                     "role"
-message_delta.delta.stop_reason                "stop_reason"
+1. **content_block_start**: Extract block metadata (type, id, name) and initial content
+2. **content_block_delta**: Append content fragments or arguments to the block at position `index`
+3. **message_start**: Extract `role` field
+4. **message_delta**: Extract `stop_reason` field
 
-# For thinking blocks
-content_block_start.content_block.type         "content[0].type"      (value: "thinking")
-content_block_start.content_block.thinking     "content[0].content"
-content_block_delta.delta.thinking             "content[0].content"   (concatenated)
+## Examples
 
-# For text blocks
-content_block_start.content_block.type         "content[0].type"      (value: "text")
-content_block_start.content_block.text         "content[0].content"
-content_block_delta.delta.text                 "content[0].content"   (concatenated)
+### Example 1: Thinking Block Accumulation
 
-# For tool_use blocks
-content_block_start.content_block.type         "content[0].type"      (value: "tool_use")
-content_block_start.content_block.id           "content[0].id"
-content_block_start.content_block.name         "content[0].name"
-content_block_delta.delta.partial_json         "content[0].arguments" (concatenated)
-```
-
-#### 2. Index Field Handling
-
-Anthropic places `index` at the **top level of events**, not inside arrays:
-
+**SSE Events:**
 ```json
+{"type":"content_block_start","content_block":{"type":"thinking","thinking":""},"index":0}
+{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"The"},"index":0}
+{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":" user"},"index":0}
+```
+
+**Translated Uniform Deltas:**
+```python
+{"content": [{"index": 0, "type": "thinking", "content": ""}]}
+{"content": [{"index": 0, "content": "The"}]}
+{"content": [{"index": 0, "content": " user"}]}
+```
+
+**After Accumulation:**
+```python
 {
-  "type": "content_block_delta",
-  "index": 0,           # <-- Top-level, points to content[0]
-  "delta": {...}
+    "content": [{
+        "type": "thinking",
+        "content": "The user"
+    }]
 }
 ```
 
-During translation, this top-level `index` is used to:
-1. Determine which content array item to update
-2. Include `index` in the translated delta for merge control
-3. Strip `index` from the final accumulated result
+### Example 2: Tool Use Block
 
-## Translation Implementation
-
-### Event Type Mapping
-
-```python
-EVENT_TYPE_MAP = {
-    "content_block_start": "start",
-    "content_block_delta": "delta",
-    "content_block_stop": "stop",
-    "message_start": "message_start",
-    "message_delta": "message_delta"
-}
-```
-
-### Translation Function Algorithm
-
-```python
-def translate_anthropic_event(event: Dict) -> Dict:
-    """
-    Translate Anthropic SSE event to uniform delta format.
-    """
-    result = {}
-    
-    # Handle message_start - extract role
-    if event.get("type") == "message_start":
-        message = event.get("message", {})
-        if "role" in message:
-            result["role"] = message["role"]
-        return result
-    
-    # Handle message_delta - extract stop_reason
-    if event.get("type") == "message_delta":
-        delta = event.get("delta", {})
-        if "stop_reason" in delta:
-            result["stop_reason"] = delta["stop_reason"]
-        return result
-    
-    # Extract top-level index (position pointer)
-    index = event.get("index")
-    
-    # Handle content_block_start
-    if event.get("type") == "content_block_start":
-        cb = event.get("content_block", {})
-        block_type = cb.get("type")
-        
-        content_block = {
-            "index": index,
-            "type": block_type,
-        }
-        
-        if block_type == "thinking":
-            content_block["content"] = cb.get("thinking", "")
-        elif block_type == "text":
-            content_block["content"] = cb.get("text", "")
-        elif block_type == "tool_use":
-            content_block["id"] = cb.get("id")
-            content_block["name"] = cb.get("name")
-            content_block["arguments"] = ""
-        
-        result["content"] = [content_block]
-        return result
-    
-    # Handle content_block_delta
-    if event.get("type") == "content_block_delta":
-        delta = event.get("delta", {})
-        delta_type = delta.get("type")
-        
-        content_block = {
-            "index": index,
-        }
-        
-        if delta_type == "thinking_delta":
-            content_block["type"] = "thinking"
-            content_block["content"] = delta.get("thinking", "")
-        elif delta_type == "text_delta":
-            content_block["type"] = "text"
-            content_block["content"] = delta.get("text", "")
-        elif delta_type == "input_json_delta":
-            content_block["type"] = "tool_use"
-            content_block["arguments"] = delta.get("partial_json", "")
-        
-        result["content"] = [content_block]
-        return result
-    
-    return result
-```
-
-### Handling Multiple Content Blocks
-
-Anthropic returns each content block as a separate event with its own `index`. The translation must:
-
-1. Create new content array items when `index` exceeds current length
-2. Concatenate string fragments for the same `index`
-3. Merge object fields (tool_use.id, tool_use.name) into same array item
-
-**Example: Multi-block response**
-
+**SSE Events:**
 ```json
-// Event 1: thinking block
-{
-  "type": "content_block_start",
-  "index": 0,
-  "content_block": {"type": "thinking", "thinking": "Let me"}
-}
-// Translates to: {"content": [{"index": 0, "type": "thinking", "content": "Let me"}]}
+{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_xxx","name":"calculate","input":{}},"index":1}
+{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{"},"index":1}
+{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"\"expression\":\"2+2\"}"},"index":1}
+```
 
-// Event 2: more thinking
-{
-  "type": "content_block_delta",
-  "index": 0,
-  "delta": {"type": "thinking_delta", "thinking": " calculate"}
-}
-// Merges into content[0]: {"content": [{"index": 0, "type": "thinking", "content": "Let me calculate"}]}
+**Translated Uniform Deltas:**
+```python
+{"content": [{"index": 1, "type": "tool_use", "id": "toolu_xxx", "name": "calculate", "arguments": {}}]}
+{"content": [{"index": 1, "arguments": "{"}]}
+{"content": [{"index": 1, "arguments": "\"expression\":\"2+2\"}"}]}
+```
 
-// Event 3: tool_use block
+**After Accumulation:**
+```python
 {
-  "type": "content_block_start",
-  "index": 1,
-  "content_block": {"type": "tool_use", "id": "toolu_xxx", "name": "add"}
+    "content": [{
+        "type": "tool_use",
+        "id": "toolu_xxx",
+        "name": "calculate",
+        "arguments": '{"expression":"2+2"}'
+    }]
 }
-// Creates content[1]: {"content": [..., {"index": 1, "type": "tool_use", "id": "toolu_xxx", "name": "add"}]}
+```
+
+### Example 3: Full Response with Multiple Blocks
+
+**SSE Events (abbreviated):**
+```json
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"content_block_start","content_block":{"type":"thinking","thinking":"Let"},"index":0}
+{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":" me"},"index":0}
+{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"add"},"index":1}
+{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{"},"index":1}
+{"type":"content_block_stop","index":1}
+{"type":"message_delta","delta":{"stop_reason":"tool_use"}}
+```
+
+**Translation Result (after accumulation):**
+```python
+{
+    "role": "assistant",
+    "content": [
+        {
+            "type": "thinking",
+            "content": "Let me"
+        },
+        {
+            "type": "tool_use",
+            "id": "t1",
+            "name": "add",
+            "arguments": "{"
+        }
+    ],
+    "stop_reason": "tool_use"
+}
 ```
 
 ## Key Differences from OpenAI
 
 | Aspect | OpenAI | Anthropic |
 |--------|--------|-----------|
-| Role location | `choices[0].delta.role` | `message_start.message.role` |
-| Reasoning field | `delta.reasoning` | `delta.thinking` (with `thinking_delta` type) |
+| Index location | In arrays (`choices[0]`, `tool_calls[0]`) | **Top-level event** (`index: 0`) |
+| Thinking field | `delta.reasoning` | `delta.thinking` (with `thinking_delta` type) |
 | Text field | `delta.content` | `delta.text` (with `text_delta` type) |
 | Tool call ID | `tool_calls[0].id` | `content_block_start.content_block.id` |
-| Index location | **In arrays** (`choices[0]`, `tool_calls[0]`) | **Top-level event** (`index: 0`) |
 | Tool arguments | `function.arguments` | `partial_json` |
-| Block start event | No explicit start | `content_block_start` required |
-| Stop reason | `finish_reason` in delta | `message_delta` event |
+| Block start event | No explicit start | **Required**: `content_block_start` |
+| Stop reason | `finish_reason` in delta | **Separate event**: `message_delta` |
 
-## Notes
+## Implementation Notes
 
-- Anthropic requires `content_block_start` before `content_block_delta` for each block
-- The top-level `index` field is a position pointer to the content array
-- Tool call `arguments` (via `partial_json`) arrives in multiple fragments
-- `content_block_stop` signals end of a block (not strictly needed for translation)
-- Different block types (`thinking`, `text`, `tool_use`) are identified by `content_block.type`
+1. **Sequential Block Processing**: Anthropic returns each content block as a separate event with its own `index`. The translation must:
+   - Create new content array items when `index` exceeds current length
+   - Concatenate string fragments for the same `index`
+   - Merge object fields (tool_use.id, tool_use.name) into same array item
+
+2. **Event Filtering**: Only process relevant events:
+   - `message_start`: Extract role
+   - `content_block_start`: Initialize new content block
+   - `content_block_delta`: Append content/arguments
+   - `message_delta`: Extract stop_reason
+   - Ignore `content_block_stop` and `message_stop` (informational only)
+
+3. **Delta Type Handling**: For `content_block_delta`, check `delta.type` to determine which field contains the content:
+   - `thinking_delta`: Use `delta.thinking`
+   - `text_delta`: Use `delta.text`
+   - `input_json_delta`: Use `delta.partial_json`

@@ -467,6 +467,18 @@ class TestOpenAIStyleTranslation:
 class TestAnthropicStyleTranslation:
     """Tests for Anthropic SSE event translation to uniform format."""
 
+    def test_anthropic_message_start(self):
+        """Test Anthropic message_start event translation."""
+        event = {
+            "type": "message_start",
+            "message": {"role": "assistant"}
+        }
+        result = translate_delta_event(
+            event,
+            {"message_start.message.role": "role"}
+        )
+        assert result["role"] == "assistant"
+
     def test_anthropic_thinking_block(self):
         """Test Anthropic thinking block translation."""
         event = {
@@ -479,3 +491,112 @@ class TestAnthropicStyleTranslation:
             {"delta.thinking": "reasoning"}
         )
         assert result["reasoning"] == "Hello"
+
+    def test_anthropic_thinking_accumulation(self):
+        """Test Anthropic thinking block accumulation with multiple deltas."""
+        event1 = {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": "Let me"}
+        }
+        event2 = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": " calculate"}
+        }
+
+        result1 = translate_delta_event(
+            event1,
+            {
+                "content_block_start.content_block.type": "content[0].type",
+                "content_block_start.content_block.thinking": "content[0].content",
+            }
+        )
+        result2 = translate_delta_event(
+            event2,
+            {"content_block_delta.delta.thinking": "content[0].content"}
+        )
+
+        assert result1["content"][0]["type"] == "thinking"
+        assert result1["content"][0]["content"] == "Let me"
+        assert result2["content"][0]["content"] == " calculate"
+
+    def test_anthropic_tool_use_block(self):
+        """Test Anthropic tool_use block translation."""
+        event_start = {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_xxx",
+                "name": "calculate",
+                "input": {}
+            }
+        }
+        result = translate_delta_event(
+            event_start,
+            {
+                "content_block_start.content_block.type": "content[0].type",
+                "content_block_start.content_block.id": "content[0].id",
+                "content_block_start.content_block.name": "content[0].name",
+            }
+        )
+        assert result["content"][0]["type"] == "tool_use"
+        assert result["content"][0]["id"] == "toolu_xxx"
+        assert result["content"][0]["name"] == "calculate"
+
+    def test_anthropic_tool_arguments_accumulation(self):
+        """Test Anthropic tool arguments accumulation via partial_json."""
+        event1 = {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_xxx",
+                "name": "calculate"
+            }
+        }
+        event2 = {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '{"expr":'}
+        }
+        event3 = {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '"2+2"}'}
+        }
+
+        result1 = translate_delta_event(
+            event1,
+            {
+                "content_block_start.content_block.type": "content[0].type",
+                "content_block_start.content_block.id": "content[0].id",
+                "content_block_start.content_block.name": "content[0].name",
+            }
+        )
+        result2 = translate_delta_event(
+            event2,
+            {"content_block_delta.delta.partial_json": "content[0].arguments"}
+        )
+        result3 = translate_delta_event(
+            event3,
+            {"content_block_delta.delta.partial_json": "content[0].arguments"}
+        )
+
+        assert result1["content"][0]["type"] == "tool_use"
+        assert result1["content"][0]["name"] == "calculate"
+        assert result2["content"][0]["arguments"] == '{"expr":'
+        assert result3["content"][0]["arguments"] == '"2+2"}'
+
+    def test_anthropic_stop_reason(self):
+        """Test Anthropic message_delta stop_reason translation."""
+        event = {
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"}
+        }
+        result = translate_delta_event(
+            event,
+            {"message_delta.delta.stop_reason": "stop_reason"}
+        )
+        assert result["stop_reason"] == "tool_use"
