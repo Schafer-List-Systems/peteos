@@ -41,6 +41,62 @@ class OpenAIChatBot(GenericChatBot):
         "tool_calls": "tool_calls",
     }
 
+    @staticmethod
+    def _translate_tool_params_to_openai(raw_params: dict) -> dict:
+        """
+        Translate internal tool parameters to OpenAI JSON Schema format.
+
+        Internal format: {param_name: {type, required, default}, ...}
+        OpenAI format: {"type": "object", "properties": {...}, "required": [...]}
+
+        Args:
+            raw_params: Tool parameters from internal format
+
+        Returns:
+            OpenAI-compatible parameters schema
+        """
+        required_params = []
+        properties = {}
+
+        type_map = {
+            "int": "integer",
+            "str": "string",
+            "float": "number",
+            "bool": "boolean",
+            "list": "array",
+            "dict": "object",
+            "any": "string",
+        }
+
+        for param_name, param_info in raw_params.items():
+            # Handle both dict and string param_info
+            if isinstance(param_info, str):
+                json_type = type_map.get(param_info, "string")
+                prop = {"type": json_type}
+                required_params.append(param_name)
+            else:
+                py_type = param_info.get("type", "string")
+                json_type = type_map.get(py_type, "string")
+
+                prop = {"type": json_type}
+
+                if "required" in param_info:
+                    if param_info["required"]:
+                        required_params.append(param_name)
+                else:
+                    required_params.append(param_name)
+
+                if "default" in param_info:
+                    prop["default"] = param_info["default"]
+
+            properties[param_name] = prop
+
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required_params,
+        }
+
     def __init__(self, http_client: HTTPClient, model: str, base_url: str):
         """
         Initialize OpenAIChatBot.
@@ -94,10 +150,16 @@ class OpenAIChatBot(GenericChatBot):
             role = msg.role
 
             if role == "tool":
-                # Extract tool definitions
+                # Extract tool definitions and translate parameters to OpenAI format
                 for part in msg.content:
                     if part.type == "tool":
-                        tools.append(part.data)
+                        # part.data: {name, description, parameters}
+                        # Translate parameters to JSON Schema
+                        translated = dict(part.data)
+                        translated["parameters"] = self._translate_tool_params_to_openai(
+                            part.data.get("parameters", {})
+                        )
+                        tools.append(translated)
             elif role == "tool_result":
                 # Tool result messages - build tool_result dict for API
                 for part in msg.content:

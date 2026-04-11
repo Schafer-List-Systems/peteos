@@ -72,13 +72,20 @@ def setup_tool_manager():
     """Setup ToolManager with example tools.
 
     Returns:
-        Configured ToolManager with get_weather and calculate tools.
+        Configured ToolManager with get_weather, random, and calculate tools.
     """
+    import random
+
     tool_manager = ToolManager()
 
     def get_weather(city: str) -> str:
         """Get the current weather for a city."""
         return f"Sunny and 25°C in {city}"
+
+    def random(min: int = 1, max: int = 10) -> str:
+        """Generate a random number between min and max (inclusive)."""
+        result = random.randint(min, max)
+        return f"Random number: {result}"
 
     def calculate(expression: str) -> str:
         """Calculate a simple arithmetic expression safely."""
@@ -119,6 +126,7 @@ def setup_tool_manager():
             return f"Error: {e}"
 
     tool_manager.register_tool(func=get_weather)
+    tool_manager.register_tool(func=random)
     tool_manager.register_tool(func=calculate)
 
     return tool_manager
