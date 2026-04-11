@@ -45,6 +45,8 @@ class AnthropicChatBot(GenericChatBot):
     #   "stop_reason": "tool_use"
     # }
     RESPONSE_TRANSLATIONS = {
+        # Top-level index - used for content array positioning
+        "index": "content[0].index",
         # Message start - extract role
         "message_start.message.role": "role",
         # Message delta - extract stop_reason
@@ -70,6 +72,61 @@ class AnthropicChatBot(GenericChatBot):
         "reasoning": "reasoning",
         "tool_calls": "tool_calls",
     }
+
+    @staticmethod
+    def _translate_tool_params_to_anthropic(raw_params: dict) -> dict:
+        """
+        Translate internal tool parameters to Anthropic format.
+
+        Internal format: {param_name: {type, required, default}, ...}
+        Anthropic format: {"type": "object", "properties": {...}, "required": [...]}
+
+        Args:
+            raw_params: Tool parameters from internal format
+
+        Returns:
+            Anthropic-compatible input schema
+        """
+        required_params = []
+        properties = {}
+
+        type_map = {
+            "int": "integer",
+            "str": "string",
+            "float": "number",
+            "bool": "boolean",
+            "list": "array",
+            "dict": "object",
+            "any": "string",
+        }
+
+        for param_name, param_info in raw_params.items():
+            if isinstance(param_info, str):
+                json_type = type_map.get(param_info, "string")
+                prop = {"type": json_type}
+                required_params.append(param_name)
+            else:
+                py_type = param_info.get("type", "string")
+                json_type = type_map.get(py_type, "string")
+
+                prop = {"type": json_type}
+
+                if "required" in param_info:
+                    if param_info["required"]:
+                        required_params.append(param_name)
+                else:
+                    required_params.append(param_name)
+
+                if "default" in param_info:
+                    prop["default"] = param_info["default"]
+
+            properties[param_name] = prop
+
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required_params,
+        }
 
     def __init__(self, http_client: HTTPClient, model: str, base_url: str, max_tokens: int = 4096):
         """
@@ -134,13 +191,17 @@ class AnthropicChatBot(GenericChatBot):
                 # Collect system parts
                 system_parts.extend(msg.content)
             elif role == "tool":
-                # Extract tool definitions, convert to input_schema
+                # Extract tool definitions and translate parameters to Anthropic format
                 for part in msg.content:
                     if part.type == "tool":
+                        # part.data: {name, description, parameters}
+                        # Anthropic expects "input_schema" instead of "parameters"
                         tool_def = dict(part.data)
-                        # Convert parameters to input_schema
                         if "parameters" in tool_def:
-                            tool_def["input_schema"] = tool_def.pop("parameters")
+                            tool_def["input_schema"] = self._translate_tool_params_to_anthropic(
+                                part.data.get("parameters", {})
+                            )
+                        del tool_def["parameters"]
                         tools.append(tool_def)
             elif role in ("user", "assistant"):
                 # Conversation messages
