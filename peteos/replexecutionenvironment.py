@@ -60,7 +60,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 break
 
             # Append the full response as a Message to ChatHistory
-            # response.data has format from translation: {text: "...", reasoning: "...", tool_calls: [...]}
+            # response.data has format from translation: {text: "...", reasoning: "...", content: [...]}
             # Role is required - must be present (ChatBot ensures this)
             # If there's an error from the chatbot, skip appending and exit loop
             if "error" in response.data:
@@ -68,14 +68,26 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 break
             assert "role" in response.data, f"ChatBot response missing 'role' field: {response.data.keys()}"
 
-            # Generic mapping: response.data keys → ContentPart types
-            # Any key becomes a ContentPart with part_type=key and the value
+            # Build content parts from accumulated response data
             content_parts = []
-            for key, value in response.data.items():
-                if key == "role":
-                    continue  # Role is handled separately
-                if value:  # Only add non-empty values
-                    content_parts.append(ContentPart(part_type=key, **{key: value}))
+
+            # Add text content if present
+            if response.data.get("text"):
+                content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
+
+            # Add reasoning if present
+            if response.data.get("reasoning"):
+                content_parts.append(ContentPart(part_type="reasoning", reasoning=response.data["reasoning"]))
+
+            # Add tool calls from content array if present
+            if "content" in response.data and isinstance(response.data["content"], list):
+                # Filter for tool_use items
+                tool_use_items = [
+                    item for item in response.data["content"]
+                    if isinstance(item, dict) and item.get("type") == "tool_use"
+                ]
+                if tool_use_items:
+                    content_parts.append(ContentPart(part_type="tool_calls", tool_calls=tool_use_items))
 
             self.chat_history.append_message(Message(
                 role=response.data["role"],
@@ -83,26 +95,15 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             ))
 
             # Check if response contains tool calls
-            raw_tool_calls = response.data.get("tool_calls")
-            # tool_calls is accumulated as a string during streaming - parse it as JSON
-            if isinstance(raw_tool_calls, str):
-                _logger.debug("raw_tool_calls type: %s", type(raw_tool_calls))
-                _logger.debug("raw_tool_calls value: %s", raw_tool_calls[:200])
-                try:
-                    tool_calls_list = json.loads(raw_tool_calls)
-                    if not isinstance(tool_calls_list, list):
-                        tool_calls_list = []
-                except (json.JSONDecodeError, TypeError) as e:
-                    _logger.debug("JSON parse error: %s", e)
-                    tool_calls_list = []
-            else:
-                tool_calls_list = raw_tool_calls if isinstance(raw_tool_calls, list) else []
+            # Tool calls are stored in content array with type="tool_use"
+            content_array = response.data.get("content", [])
+            tool_calls_list = [
+                item for item in content_array
+                if isinstance(item, dict) and item.get("type") == "tool_use"
+            ]
 
             _logger.debug("Tool calls detected: %s", tool_calls_list)
             _logger.debug("response.data keys: %s", list(response.data.keys()))
-            if "tool_calls" in response.data:
-                _logger.debug("response.tool_calls type: %s", type(response.data["tool_calls"]))
-                _logger.debug("response.tool_calls value: %s", response.data["tool_calls"])
 
             if tool_calls_list:
                 # Track history length before tool execution
