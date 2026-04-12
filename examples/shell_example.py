@@ -84,7 +84,8 @@ def setup_tool_manager():
 
     def random(min: int = 1, max: int = 10) -> str:
         """Generate a random number between min and max (inclusive)."""
-        result = random.randint(min, max)
+        import random as rd
+        result = rd.randint(min, max)
         return f"Random number: {result}"
 
     def calculate(expression: str) -> str:
