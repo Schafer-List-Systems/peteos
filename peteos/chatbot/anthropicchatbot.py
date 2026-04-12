@@ -1,7 +1,7 @@
 """Anthropic-compatible ChatBot implementation."""
 
 import json
-from typing import Any, Dict, AsyncGenerator
+from typing import Any, Dict, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
 from .chatbot import GenericChatBot
@@ -16,6 +16,9 @@ _logger = get_logger(__name__)
 
 class AnthropicChatBot(GenericChatBot):
     """ChatBot implementation for Anthropic-compatible API."""
+
+    DEFAULT_CHAT_ENDPOINT = "/v1/messages"
+    DEFAULT_MODELS_ENDPOINT = "/v1/models"
 
     # Default translation configuration for Anthropic API
     # Translates Anthropic SSE events to uniform delta format
@@ -128,7 +131,14 @@ class AnthropicChatBot(GenericChatBot):
             "required": required_params,
         }
 
-    def __init__(self, http_client: HTTPClient, model: str, base_url: str, chat_endpoint: str = "/v1/messages", max_tokens: int = 4096):
+    def __init__(
+        self,
+        http_client: HTTPClient,
+        model: str,
+        base_url: str,
+        chat_endpoint: Optional[str] = None,
+        max_tokens: int = 4096
+    ):
         """
         Initialize AnthropicChatBot.
 
@@ -136,15 +146,15 @@ class AnthropicChatBot(GenericChatBot):
             http_client: HTTP client for making API requests.
             model: The Anthropic model identifier (e.g., "claude-3-opus-20240229").
             base_url: The Anthropic API base URL.
-            chat_endpoint: API-specific chat endpoint (default: "/v1/messages").
+            chat_endpoint: API-specific chat endpoint. Defaults to DEFAULT_CHAT_ENDPOINT.
             max_tokens: Maximum tokens to generate (default: 4096).
         """
         super().__init__(
             http_client=http_client,
             model=model,
             base_url=base_url,
-            chat_endpoint=chat_endpoint,
-            models_endpoint="/v1/models",
+            chat_endpoint=chat_endpoint or self.DEFAULT_CHAT_ENDPOINT,
+            models_endpoint=self.DEFAULT_MODELS_ENDPOINT,
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
         )

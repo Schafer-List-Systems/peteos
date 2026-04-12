@@ -17,6 +17,9 @@ _logger = get_logger(__name__)
 class OpenAIChatBot(GenericChatBot):
     """ChatBot implementation for OpenAI-compatible API."""
 
+    DEFAULT_CHAT_ENDPOINT = "/v1/chat/completions"
+    DEFAULT_MODELS_ENDPOINT = "/v1/models"
+
     # Default translation configuration for OpenAI API
     # Translates OpenAI SSE events to uniform delta format
     # All index fields are preserved for merge_delta_into_target to use
@@ -107,7 +110,13 @@ class OpenAIChatBot(GenericChatBot):
             "required": required_params,
         }
 
-    def __init__(self, http_client: HTTPClient, model: str, base_url: str, chat_endpoint: str = "/v1/chat/completions"):
+    def __init__(
+        self,
+        http_client: HTTPClient,
+        model: str,
+        base_url: str,
+        chat_endpoint: Optional[str] = None
+    ):
         """
         Initialize OpenAIChatBot.
 
@@ -115,14 +124,14 @@ class OpenAIChatBot(GenericChatBot):
             http_client: HTTP client for making API requests.
             model: The OpenAI model identifier (e.g., "gpt-4").
             base_url: The OpenAI API base URL.
-            chat_endpoint: API-specific chat endpoint (default: "/v1/chat/completions").
+            chat_endpoint: API-specific chat endpoint. Defaults to DEFAULT_CHAT_ENDPOINT.
         """
         super().__init__(
             http_client=http_client,
             model=model,
             base_url=base_url,
-            chat_endpoint=chat_endpoint,
-            models_endpoint="/v1/models",
+            chat_endpoint=chat_endpoint or self.DEFAULT_CHAT_ENDPOINT,
+            models_endpoint=self.DEFAULT_MODELS_ENDPOINT,
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
         )

@@ -17,7 +17,6 @@ class BackendInfo:
     url: str
     api_type: str  # "openai" or "anthropic"
     models: Dict[str, Any]  # model_id -> ChatBot instance
-    chat_endpoint: str  # API-specific chat endpoint
 
 
 class ChatBotManager:
@@ -36,8 +35,7 @@ class ChatBotManager:
         self,
         name: str,
         url: str,
-        api_type: Optional[str] = None,
-        chat_endpoint: Optional[str] = None
+        api_type: Optional[str] = None
     ) -> BackendInfo:
         """Add a new backend and auto-detect its capabilities.
 
@@ -46,16 +44,12 @@ class ChatBotManager:
             url: Base URL of the API (e.g., "http://localhost:8000").
             api_type: Optional API type override ("openai" or "anthropic").
                      If not provided, API type is auto-detected.
-            chat_endpoint: Optional API-specific chat endpoint override.
-                          If not provided, default endpoints are used:
-                          - OpenAI: "/v1/chat/completions"
-                          - Anthropic: "/v1/messages"
 
         Returns:
             BackendInfo with detected API type and discovered models.
 
         Raises:
-            ValueError: If backend with same name already exists or invalid api_type.
+            ValueError: If backend with same name already exists.
             RuntimeError: If API detection fails.
         """
         if name in self._backends:
@@ -69,22 +63,17 @@ class ChatBotManager:
         else:
             models = await self._list_models_for_api_type(url, api_type)
 
-        # Default chat endpoints per API type
-        if chat_endpoint is None:
-            chat_endpoint = "/v1/chat/completions" if api_type == "openai" else "/v1/messages"
-
-        # Create ChatBot instances for each model
+        # Create ChatBot instances - let classes use their default endpoints
         chatbots: Dict[str, Any] = {}
         for model_id in models:
-            chatbot = self._create_chatbot(api_type, model_id, url, chat_endpoint)
+            chatbot = self._create_chatbot(api_type, model_id, url)
             chatbots[model_id] = chatbot
 
         backend_info = BackendInfo(
             name=name,
             url=url,
             api_type=api_type,
-            models=chatbots,
-            chat_endpoint=chat_endpoint
+            models=chatbots
         )
         self._backends[name] = backend_info
         return backend_info
@@ -178,14 +167,13 @@ class ChatBotManager:
 
         return model_ids
 
-    def _create_chatbot(self, api_type: str, model_id: str, base_url: str, chat_endpoint: str) -> Any:
+    def _create_chatbot(self, api_type: str, model_id: str, base_url: str) -> Any:
         """Create appropriate ChatBot instance for model.
 
         Args:
             api_type: "openai" or "anthropic".
             model_id: Model identifier.
             base_url: Base URL of the API.
-            chat_endpoint: API-specific chat endpoint (e.g., "/v1/chat/completions" or "/v1/messages").
 
         Returns:
             ChatBot instance.
@@ -194,15 +182,13 @@ class ChatBotManager:
             return OpenAIChatBot(
                 http_client=self._http_client,
                 model=model_id,
-                base_url=base_url,
-                chat_endpoint=chat_endpoint
+                base_url=base_url
             )
         elif api_type == "anthropic":
             return AnthropicChatBot(
                 http_client=self._http_client,
                 model=model_id,
-                base_url=base_url,
-                chat_endpoint=chat_endpoint
+                base_url=base_url
             )
         else:
             raise ValueError(f"Unknown API type: {api_type}")
@@ -251,23 +237,17 @@ class ChatBotManager:
             else:
                 models = await self._list_models_for_api_type(url, api_type)
 
-            # Default chat endpoints per API type
-            chat_endpoint = backend_config.get("chat_endpoint")
-            if chat_endpoint is None:
-                chat_endpoint = "/v1/chat/completions" if api_type == "openai" else "/v1/messages"
-
-            # Create ChatBot instances for each model
+            # Create ChatBot instances - let classes use their default endpoints
             chatbots: Dict[str, Any] = {}
             for model_id in models:
-                chatbot = self._create_chatbot(api_type, model_id, url, chat_endpoint)
+                chatbot = self._create_chatbot(api_type, model_id, url)
                 chatbots[model_id] = chatbot
 
             self._backends[name] = BackendInfo(
                 name=name,
                 url=url,
                 api_type=api_type,
-                models=chatbots,
-                chat_endpoint=chat_endpoint
+                models=chatbots
             )
 
     async def load_from_file(self, filepath: str) -> None:
