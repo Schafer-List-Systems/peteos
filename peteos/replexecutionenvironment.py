@@ -1,12 +1,113 @@
 import json
 
+import inspect
+from typing import Any, Callable, Dict
+
 from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
 from peteos.executionenvironment import ExecutionEnvironment
 from peteos.logger import get_logger
 from peteos.role import Role
-from peteos.toolmanager import ToolManager
+from peteos.toolmanager import ToolManager, Tool
 
 _logger = get_logger(__name__)
+
+
+def _cast_args_to_types(func: Callable, args: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Cast arguments to correct types based on function signature.
+
+    This handles type mismatches between LLM-returned JSON strings and
+    Python type annotations or default values (e.g., "1" -> 1, "true" -> True).
+
+    Args:
+        func: The function to cast arguments for.
+        args: Dictionary of arguments to cast.
+
+    Returns:
+        Dictionary with arguments cast to correct types.
+    """
+    signature = inspect.signature(func)
+    casted_args = {}
+
+    for param_name, param in signature.parameters.items():
+        if param_name not in args:
+            # Use default value if parameter has one
+            if param.default != inspect.Parameter.empty:
+                casted_args[param_name] = param.default
+            continue
+
+        value = args[param_name]
+        annotation = param.annotation
+
+        # Skip casting for Any or empty annotations
+        if annotation == inspect.Parameter.empty or annotation == Any:
+            # Try to infer type from default value
+            if param.default != inspect.Parameter.empty:
+                target_type = type(param.default)
+                # If default is not the same type as value, try conversion
+                if type(value) != target_type:
+                    value = _try_cast_value(value, target_type)
+            casted_args[param_name] = value
+            continue
+
+        # Get the target type from annotation
+        target_type = annotation
+
+        # Handle special cases
+        if target_type == int:
+            if isinstance(value, str):
+                try:
+                    value = int(value)
+                except ValueError:
+                    pass
+        elif target_type == float:
+            if isinstance(value, str):
+                try:
+                    value = float(value)
+                except ValueError:
+                    pass
+        elif target_type == bool:
+            if isinstance(value, str):
+                value = value.lower() in ("true", "1", "yes")
+        elif target_type == str:
+            if not isinstance(value, str):
+                value = str(value)
+        else:
+            # For other types, try to cast using the type
+            value = _try_cast_value(value, target_type)
+
+        casted_args[param_name] = value
+
+    return casted_args
+
+
+def _try_cast_value(value: Any, target_type: type) -> Any:
+    """
+    Try to cast a value to the target type.
+
+    Args:
+        value: The value to cast.
+        target_type: The target type.
+
+    Returns:
+        The casted value, or the original value if casting fails.
+    """
+    if target_type == int and isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    elif target_type == float and isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    elif target_type == bool and isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    elif target_type == str:
+        return str(value)
+    else:
+        return value
 
 
 class REPLExecutionEnvironment(ExecutionEnvironment):
@@ -118,6 +219,10 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
                         tool = self.tool_manager.get_tool(tool_name)
                         if tool:
+                            # Cast arguments to correct types based on function signature
+                            args = _cast_args_to_types(tool.func, args)
+                            _logger.debug("Casted args for %s: %s", tool_name, args)
+
                             # Check if tool execution should be allowed
                             hook_result = await self._call_hooks("before_tool_execution", tool_call)
                             if hook_result is not None:
