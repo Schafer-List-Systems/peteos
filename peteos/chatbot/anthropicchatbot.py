@@ -252,7 +252,11 @@ class AnthropicChatBotResponse(GenericChatBotResponse):
         The Anthropic API includes role in message_start. This fallback handles
         non-compliant backends that omit the role field entirely.
         """
-        if event.get("type") == "message_start" and "role" not in event.get("message", {}):
-            _merge_delta_into_target(self._data, {"role": "assistant"})
+        result = self._translate_event(event)
 
-        return self._translate_event(event)
+        # Default role to 'assistant' if message_start is missing it
+        if event.get("type") == "message_start" and "role" not in event.get("message", {}):
+            if "role" not in result:
+                result["role"] = "assistant"
+
+        return result

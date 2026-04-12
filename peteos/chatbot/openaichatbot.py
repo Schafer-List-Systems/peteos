@@ -1,6 +1,5 @@
 """OpenAI-compatible ChatBot implementation."""
 
-from abc import ABC, abstractmethod
 import json
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
@@ -10,6 +9,7 @@ from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .httpclient import HTTPClient
 from .chathistory import ChatHistory
 from .message import Message
+from peteos.utils.delta_merge import merge_delta_into_target
 
 _logger = get_logger(__name__)
 
@@ -20,19 +20,29 @@ class OpenAIChatBot(GenericChatBot):
     # Default translation configuration for OpenAI API
     # Translates OpenAI SSE events to uniform delta format
     # All index fields are preserved for merge_delta_into_target to use
+    #
+    # Default translation configuration for OpenAI API
+    # Translates OpenAI SSE events to uniform delta format
+    # All index fields are preserved for merge_delta_into_target to use
+    #
+    # Key difference from Anthropic: OpenAI content is plain text, not interleaved blocks
+    # OpenAI returns text directly in 'content' field (not in an array with type)
+    # Tool calls use the content array format with index fields
     RESPONSE_TRANSLATIONS = {
         # Streaming mode (delta events)
         "choices[*].delta.role": "role",
         "choices[*].delta.reasoning": "reasoning",
-        "choices[*].delta.content": "content",
+        # OpenAI content is plain text - map to 'text' for backwards compatibility
+        "choices[*].delta.content": "text",
         "choices[*].delta.finish_reason": "stop_reason",
-        # Tool calls: translate individual fields, preserving index
-        # OpenAI returns one tool call per event, so we use [0] for extraction
-        "choices[*].delta.tool_calls[0].index": "tool_calls[0].index",
-        "choices[*].delta.tool_calls[0].type": "tool_calls[0].type",
-        "choices[*].delta.tool_calls[0].id": "tool_calls[0].id",
-        "choices[*].delta.tool_calls[0].function.name": "tool_calls[0].name",
-        "choices[*].delta.tool_calls[0].function.arguments": "tool_calls[0].arguments",
+        # Tool calls: translate to uniform content array format
+        # OpenAI returns one tool call per event, use [0] for extraction
+        "choices[*].delta.tool_calls[0].index": "content[0].index",
+        # OpenAI tool_calls doesn't have a type field - we set it in _process_event
+        # Just extract the fields that exist: id, function.name, function.arguments
+        "choices[*].delta.tool_calls[0].id": "content[0].id",
+        "choices[*].delta.tool_calls[0].function.name": "content[0].name",
+        "choices[*].delta.tool_calls[0].function.arguments": "content[0].arguments",
     }
 
     REQUEST_TRANSLATIONS = {
@@ -155,11 +165,161 @@ class OpenAIChatBot(GenericChatBot):
                     if part.type == "tool":
                         # part.data: {name, description, parameters}
                         # Translate parameters to JSON Schema
-                        translated = dict(part.data)
-                        translated["parameters"] = self._translate_tool_params_to_openai(
+                        params = self._translate_tool_params_to_openai(
                             part.data.get("parameters", {})
                         )
-                        tools.append(translated)
+                        tool_def = {
+                            "type": "function",
+                            "function": {
+                                "name": part.data.get("name"),
+                                "description": part.data.get("description", ""),
+                                "parameters": params
+                            }
+                        }
+                        tools.append(tool_def)
+            elif role == "tool_result":
+                # Tool result messages - build tool_result dict for API
+                for part in msg.content:
+                    if part.type == "tool_result":
+                        tool_name = part.data.get("name", "unknown")
+                        tool_content = part.data.get("content", "")
+                        msg_dict = {
+                            "role": "tool",
+                            "name": tool_name,
+                            "content": tool_content
+                        }
+                        messages.append(msg_dict)
+                        break
+            elif role in ("user", "assistant", "system"):
+                # Conversation messages - build message dict from ContentPart fields
+                # Use translation table to map uniform keys to API-specific keys
+                msg_dict = {"role": role}
+                for part in msg.content:
+                    # part.data contains fields like "text", "reasoning", etc.
+                    # Use translation to map to API-specific key
+                    for key, value in part.data.items():
+                        if key in self._request_translations:
+                            api_key = self._request_translations[key]
+                        else:
+                            api_key = key
+                        msg_dict[api_key] = value
+                messages.append(msg_dict)
+
+        body["messages"] = messages
+
+        if tools:
+            body["tools"] = tools
+
+        # Copy generation config (includes tool_choice)
+        for key, value in chat_history.generation_config.items():
+            if key not in body:
+                body[key] = value
+
+        _logger.debug("OpenAI request body: %s", json.dumps(body, indent=2))
+        return body
+
+
+class OpenAIChatBotResponse(GenericChatBotResponse):
+    """ChatBotResponse for OpenAI-compatible API.
+
+    Translates OpenAI SSE events to uniform delta format.
+    Special handling: OpenAI tool_calls are converted to uniform content array
+    with type="tool_use" for backwards compatibility with existing code.
+    """
+
+    @staticmethod
+    def _set_tool_call_types(translated: Dict[str, Any]) -> None:
+        """
+        Set type="tool_use" for tool call items in translated event.
+
+        OpenAI tool_calls don't have a type field (unlike Anthropic).
+        The Uniform Delta Protocol expects type="tool_use" for all content array items.
+
+        This is a static method so tests can call it directly on translated events.
+        """
+        if "content" in translated and isinstance(translated["content"], list):
+            for item in translated["content"]:
+                if isinstance(item, dict):
+                    # Tool call items have either name+arguments (streaming) or name+id (initial event)
+                    # or just name (minimal case)
+                    if ("name" in item and ("arguments" in item or "id" in item or len(item) == 1)) or \
+                       ("name" in item and "function" in item):
+                        # This is a tool call item - set type to tool_use
+                        item["type"] = "tool_use"
+
+    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process an OpenAI event, setting type="tool_use" for tool call items.
+
+        OpenAI tool_calls don't have a type field (unlike Anthropic).
+        The Uniform Delta Protocol expects type="tool_use" for all content array items.
+        This override sets type="tool_use" after translation.
+        """
+        translated = self._translate_event(event)
+        self._set_tool_call_types(translated)
+        return translated
+
+    def _accumulate_event(self, event: Dict[str, Any]) -> None:
+        """
+        Accumulate translated event into response dict using delta merge.
+
+        For OpenAI responses:
+        - Content is plain text (not interleaved blocks like Anthropic)
+        - The 'content' array contains text blocks
+        - For backwards compatibility, also set 'text' field by concatenating text blocks
+
+        Args:
+            event: Translated event with target keys (and preserved index fields).
+        """
+        merge_delta_into_target(self._data, event)
+
+        # For OpenAI responses: extract text from content array for backwards compatibility
+        if "content" in self._data and isinstance(self._data["content"], list):
+            # Concatenate all text content to 'text' field
+            text_parts = [
+                item.get("content", "")
+                for item in self._data["content"]
+                if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            if text_parts:
+                self._data["text"] = "".join(text_parts)
+
+    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
+        """Build OpenAI-specific request body.
+
+        OpenAI format:
+        - system messages included in messages[] array with role="system"
+        - tools from tool messages
+        - tool_choice from generation_config
+        """
+        body = {}
+        body["model"] = self._model
+        body["stream"] = streaming
+
+        messages = []
+        tools = []
+
+        for msg in chat_history.messages:
+            role = msg.role
+
+            if role == "tool":
+                # Extract tool definitions and translate parameters to OpenAI format
+                for part in msg.content:
+                    if part.type == "tool":
+                        # part.data: {name, description, parameters}
+                        # Translate parameters to JSON Schema
+                        params = self._translate_tool_params_to_openai(
+                            part.data.get("parameters", {})
+                        )
+                        tool_def = {
+                            "type": "function",
+                            "function": {
+                                "name": part.data.get("name"),
+                                "description": part.data.get("description", ""),
+                                "parameters": params
+                            }
+                        }
+                        tools.append(tool_def)
             elif role == "tool_result":
                 # Tool result messages - build tool_result dict for API
                 for part in msg.content:
@@ -192,7 +352,7 @@ class OpenAIChatBot(GenericChatBot):
         body["messages"] = messages
 
         if tools:
-            body["tools"] = [{"type": "function", "function": t} for t in tools]
+            body["tools"] = tools
 
         # Copy generation config (includes tool_choice)
         for key, value in chat_history.generation_config.items():
@@ -203,11 +363,3 @@ class OpenAIChatBot(GenericChatBot):
         return body
 
 
-class OpenAIChatBotResponse(GenericChatBotResponse):
-    """ChatBotResponse for OpenAI-compatible API.
-
-    Uses generic delta translation and merging from parent class.
-    No special-case handling needed - index-based merging handles tool_calls automatically.
-    """
-
-    pass

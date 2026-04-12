@@ -153,7 +153,14 @@ async def main():
         response_data = response.data
         reasoning = response_data.get("reasoning", "")
         text = response_data.get("text", "")
-        tool_calls = response_data.get("tool_calls", [])
+
+        # Extract tool calls from uniform content array
+        # Tool calls are stored in content array with type="tool_use"
+        content_array = response_data.get("content", [])
+        tool_calls = [
+            item for item in content_array
+            if isinstance(item, dict) and item.get("type") == "tool_use"
+        ]
 
         # Print reasoning if present
         if reasoning:
@@ -178,6 +185,7 @@ async def main():
         if reasoning:
             content_parts.append(ContentPart(part_type="reasoning", reasoning=reasoning))
         if tool_calls:
+            # Convert uniform tool call format back to API-specific format if needed
             content_parts.append(ContentPart(part_type="tool_calls", tool_calls=tool_calls))
 
         chat_history.append_message(Message(
