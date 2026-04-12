@@ -128,7 +128,7 @@ class AnthropicChatBot(GenericChatBot):
             "required": required_params,
         }
 
-    def __init__(self, http_client: HTTPClient, model: str, base_url: str, max_tokens: int = 4096):
+    def __init__(self, http_client: HTTPClient, model: str, base_url: str, chat_endpoint: str = "/v1/messages", max_tokens: int = 4096):
         """
         Initialize AnthropicChatBot.
 
@@ -136,13 +136,14 @@ class AnthropicChatBot(GenericChatBot):
             http_client: HTTP client for making API requests.
             model: The Anthropic model identifier (e.g., "claude-3-opus-20240229").
             base_url: The Anthropic API base URL.
+            chat_endpoint: API-specific chat endpoint (default: "/v1/messages").
             max_tokens: Maximum tokens to generate (default: 4096).
         """
         super().__init__(
             http_client=http_client,
             model=model,
             base_url=base_url,
-            chat_endpoint="/v1/messages",
+            chat_endpoint=chat_endpoint,
             models_endpoint="/v1/models",
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
@@ -205,7 +206,27 @@ class AnthropicChatBot(GenericChatBot):
                         tools.append(tool_def)
             elif role in ("user", "assistant"):
                 # Conversation messages
-                content = [part.to_dict() for part in msg.content]
+                content = []
+                for part in msg.content:
+                    if part.type == "tool_calls":
+                        # Expand uniform tool_calls format to individual content items
+                        for tool_call in part.data.get("tool_calls", []):
+                            # tool_call: {'type': 'tool_use', 'id': '...', 'name': '...', 'arguments': '...'}
+                            content_item = dict(tool_call)
+                            # Convert arguments to input for Anthropic
+                            if "arguments" in content_item:
+                                content_item["input"] = json.loads(content_item["arguments"])
+                                del content_item["arguments"]
+                            content.append(content_item)
+                    elif part.type == "reasoning":
+                        # Convert reasoning to thinking for Anthropic format
+                        content_item = {
+                            "type": "thinking",
+                            "thinking": part.data.get("reasoning", "")
+                        }
+                        content.append(content_item)
+                    else:
+                        content.append(part.to_dict())
                 messages.append({
                     "role": role,
                     "content": content
@@ -244,6 +265,35 @@ class AnthropicChatBotResponse(GenericChatBotResponse):
     Anthropic's index field is top-level metadata (not in arrays), so it's
     simply ignored during translation.
     """
+
+    def _accumulate_event(self, event: Dict[str, Any]) -> None:
+        """
+        Accumulate translated event into response dict.
+
+        For Anthropic responses, also extract text from content array for
+        backwards compatibility.
+        """
+        super()._accumulate_event(event)
+
+        # Extract text from content array for backwards compatibility
+        # Text blocks in Anthropic have type='text', thinking blocks have type='thinking'
+        if "content" in self._data and isinstance(self._data["content"], list):
+            # Concatenate all text content to 'text' field
+            text_parts = [
+                item.get("content", "")
+                for item in self._data["content"]
+                if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            if text_parts:
+                self._data["text"] = "".join(text_parts)
+            # Also concatenate thinking content to 'reasoning' field
+            reasoning_parts = [
+                item.get("content", "")
+                for item in self._data["content"]
+                if isinstance(item, dict) and item.get("type") == "thinking"
+            ]
+            if reasoning_parts:
+                self._data["reasoning"] = "".join(reasoning_parts)
 
     def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """

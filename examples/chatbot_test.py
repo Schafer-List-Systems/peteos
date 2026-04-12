@@ -12,6 +12,7 @@ Usage:
 import asyncio
 import json
 import logging
+import os
 import random
 from peteos.chatbot.manager import ChatBotManager
 from peteos.chatbot.chatbot import GenericChatBot
@@ -77,8 +78,17 @@ async def main():
         print("No backends configured. Exiting.")
         return
 
-    # Get first backend
-    backend_name = list(chatbot_manager._backends.keys())[0]
+    # Get backend - support TEST_BACKEND environment variable to specify which backend to test
+    backend_name = os.environ.get("TEST_BACKEND")
+    if backend_name and backend_name in chatbot_manager._backends:
+        print(f"Testing backend: {backend_name}")
+    elif not backend_name:
+        backend_name = list(chatbot_manager._backends.keys())[0]
+        print(f"No TEST_BACKEND specified, using first backend: {backend_name}")
+    else:
+        print(f"Backend '{backend_name}' not found. Available backends: {list(chatbot_manager._backends.keys())}")
+        return
+
     backend_info = chatbot_manager._backends[backend_name]
 
     # Get first model from backend
@@ -86,6 +96,7 @@ async def main():
     chatbot = backend_info.models[model_name]
 
     print(f"Using backend: {backend_name} ({backend_info.api_type})")
+    print(f"Chat endpoint: {backend_info.chat_endpoint}")
     print(f"Model: {model_name}")
     print()
 

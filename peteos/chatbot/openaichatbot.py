@@ -107,7 +107,7 @@ class OpenAIChatBot(GenericChatBot):
             "required": required_params,
         }
 
-    def __init__(self, http_client: HTTPClient, model: str, base_url: str):
+    def __init__(self, http_client: HTTPClient, model: str, base_url: str, chat_endpoint: str = "/v1/chat/completions"):
         """
         Initialize OpenAIChatBot.
 
@@ -115,12 +115,13 @@ class OpenAIChatBot(GenericChatBot):
             http_client: HTTP client for making API requests.
             model: The OpenAI model identifier (e.g., "gpt-4").
             base_url: The OpenAI API base URL.
+            chat_endpoint: API-specific chat endpoint (default: "/v1/chat/completions").
         """
         super().__init__(
             http_client=http_client,
             model=model,
             base_url=base_url,
-            chat_endpoint="/v1/chat/completions",
+            chat_endpoint=chat_endpoint,
             models_endpoint="/v1/models",
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
