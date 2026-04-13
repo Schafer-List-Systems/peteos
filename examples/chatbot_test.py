@@ -96,7 +96,6 @@ async def main():
     chatbot = backend_info.models[model_name]
 
     print(f"Using backend: {backend_name} ({backend_info.api_type})")
-    print(f"Chat endpoint: {backend_info.chat_endpoint}")
     print(f"Model: {model_name}")
     print()
 

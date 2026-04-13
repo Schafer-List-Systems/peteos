@@ -140,6 +140,12 @@ class GenericChatBotResponse(ChatBotResponse):
                                     yield (key, chunk)
                         except json.JSONDecodeError:
                             _logger.warning("Failed to parse SSE event: %s", line.strip())
+                elif line.startswith("event: "):
+                    # Skip event type markers (e.g., "event: message_start")
+                    # The actual data is on the next line starting with "data: "
+                    # This is expected behavior for SSE streams with event type markers
+                    _logger.debug("Received event marker: %s", line.strip())
+                    continue
                 elif line.startswith("{") or line.startswith("["):
                     try:
                         data = json.loads(line)
