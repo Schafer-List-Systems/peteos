@@ -415,7 +415,8 @@ class Agent:
         """Hook callback fired when the loop continues after tool calls.
 
         Publishes tool results and intermediate messages to all subscribed
-        channels.
+        channels. Tool results are already reported by after_tool_execution,
+        so we skip them here to avoid duplicates.
 
         Args:
             session_uuid: The UUID of the session.
@@ -424,15 +425,8 @@ class Agent:
         for msg in delta_messages:
             role = msg.role
             if role == "tool_result":
-                for part in msg.content:
-                    if part.type == "tool_result":
-                        tool_name = part.data.get("name", "unknown")
-                        tool_content = part.data.get("content", "")
-                        success = part.data.get("success", False)
-                        status = "success" if success else "failed"
-                        message = f"[Agent] Tool '{tool_name}' result ({status}): {tool_content}"
-                        self._publish_notification(session_uuid, message)
-                        break
+                # Tool results already reported by _on_after_tool_execution
+                continue
             elif role == "assistant":
                 text = ""
                 for part in msg.content:
