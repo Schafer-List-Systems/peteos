@@ -104,9 +104,7 @@ def setup_tool_manager():
             }
 
             def eval_expr(node):
-                if isinstance(node, ast.Num):
-                    return node.n
-                elif isinstance(node, ast.Constant):
+                if isinstance(node, ast.Constant):
                     return node.value
                 elif isinstance(node, ast.BinOp):
                     left = eval_expr(node.left)
@@ -136,7 +134,7 @@ def setup_tool_manager():
 async def main():
     """Main entry point."""
     # Configure logging
-    setup_logging(level="INFO", debug=True)
+    setup_logging(level="INFO", debug=False)
 
     print("=" * 60)
     print("  Peteos Interactive Shell Example")
