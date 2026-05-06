@@ -72,6 +72,9 @@ class Agent:
         # Per-session message queues for incoming messages
         self._message_queues: Dict[uuid.UUID, asyncio.Queue] = {}
 
+        # Per-session events to signal message availability (avoids 10ms polling)
+        self._session_events: Dict[uuid.UUID, asyncio.Event] = {}
+
         # Per-channel notification queues for outgoing messages
         # Key: (channel_name, session_uuid) -> Queue[str]
         self._notification_queues: Dict[Tuple[str, uuid.UUID], asyncio.Queue] = {}
@@ -162,25 +165,59 @@ class Agent:
         """Main event loop that processes messages and notifications.
 
         This loop runs in a background thread and:
-        1. Polls message queues for pending messages to process
-        2. Routes messages to their respective sessions
-        3. Handles hook notifications from sessions
-        4. Publishes notifications to channel queues
+        1. Awaits signal events when queues are empty (no polling)
+        2. Drains all pending messages from signaled sessions
+        3. Routes messages to their respective sessions
+        4. Handles hook notifications from sessions
+        5. Publishes notifications to channel queues
         """
-        while self._running:
-            # Process pending messages
-            for session_uuid, queue in list(self._message_queues.items()):
-                if not queue.empty():
-                    try:
-                        message = queue.get_nowait()
-                        session = self._sessions.get(session_uuid)
-                        if session:
-                            await session.queue_message(message)
-                    except asyncio.QueueEmpty:
-                        pass
+        # Tasks awaiting on per-session events; maps session_uuid -> Task[None]
+        _wait_tasks: dict[uuid.UUID, asyncio.Task] = {}
 
-            # Small sleep to prevent busy waiting
-            await asyncio.sleep(0.01)
+        async def _wait_for_event(session_uuid: uuid.UUID, event: asyncio.Event) -> None:
+            await event.wait()
+
+        while self._running:
+            # Build or maintain wait tasks for sessions with active events
+            for session_uuid, event in self._session_events.items():
+                if session_uuid not in _wait_tasks:
+                    _wait_tasks[session_uuid] = asyncio.create_task(
+                        _wait_for_event(session_uuid, event)
+                    )
+
+            if not _wait_tasks:
+                await asyncio.sleep(0.01)
+                continue
+
+            # Wait for any wait task to complete
+            done, _ = await asyncio.wait(
+                _wait_tasks.values(), return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # Collect session uuids whose events fired
+            session_uuids_ready: set[uuid.UUID] = set()
+            for task in done:
+                # Find which session this task belongs to
+                for su, t in list(_wait_tasks.items()):
+                    if t is task:
+                        session_uuids_ready.add(su)
+                        del _wait_tasks[su]
+                        break
+
+            # Drain ALL pending messages for ALL signaled sessions in one
+            # pass so messages don't sit while we process one session at a
+            # time.
+            for session_uuid in session_uuids_ready:
+                event = self._session_events.get(session_uuid)
+                if event:
+                    event.clear()
+                queue = self._message_queues.get(session_uuid)
+                session = self._sessions.get(session_uuid)
+                if not queue or not session:
+                    continue
+                while not queue.empty():
+                    message = queue.get_nowait()
+                    await session.queue_message(message)
 
     def create_session(self, role_name: str) -> Session:
         """Create a new session with the specified role.
@@ -207,8 +244,9 @@ class Agent:
         )
         self._sessions[session.uuid] = session
 
-        # Create message queue for this session
+        # Create message queue and signal event for this session
         self._message_queues[session.uuid] = asyncio.Queue()
+        self._session_events[session.uuid] = asyncio.Event()
 
         # Initialize channel tracking
         self._session_channels[session.uuid] = set()
@@ -252,7 +290,7 @@ class Agent:
     def destroy_session(self, session_uuid: uuid.UUID) -> bool:
         """Destroy a session by its UUID.
 
-        Cleans up message queue and notification queues for this session.
+        Cleans up message queue, signal event, and notification queues for this session.
 
         Args:
             session_uuid: The UUID of the session to destroy.
@@ -261,9 +299,11 @@ class Agent:
             True if the session was found and destroyed, False otherwise.
         """
         if session_uuid in self._sessions:
-            # Clean up message queue
+            # Clean up message queue and signal event
             if session_uuid in self._message_queues:
                 del self._message_queues[session_uuid]
+            if session_uuid in self._session_events:
+                del self._session_events[session_uuid]
 
             # Clean up all notification queues for this session
             keys_to_delete = [
@@ -282,7 +322,7 @@ class Agent:
         return False
 
     def post_message(self, session_uuid: uuid.UUID, message: Message) -> None:
-        """Post a message to a session's message queue.
+        """Post a message to a session's message queue and signal the event.
 
         Non-blocking queue put. If the queue is full, this will block
         until space is available (default behavior of asyncio.Queue).
@@ -298,6 +338,8 @@ class Agent:
         if queue is None:
             raise KeyError(f"Session {session_uuid} not found")
         queue.put_nowait(message)
+        if session_uuid in self._session_events:
+            self._session_events[session_uuid].set()
 
     def subscribe_notifications(
         self,

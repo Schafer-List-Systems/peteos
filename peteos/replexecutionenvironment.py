@@ -172,10 +172,6 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             # Build content parts from accumulated response data
             content_parts = []
 
-            # Add text content if present
-            if response.data.get("text"):
-                content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
-
             # Add reasoning if present
             if response.data.get("reasoning"):
                 content_parts.append(ContentPart(part_type="reasoning", reasoning=response.data["reasoning"]))
@@ -202,6 +198,10 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 item for item in content_array
                 if isinstance(item, dict) and item.get("type") == "tool_use"
             ]
+
+            # Add text content if present
+            if response.data.get("text"):
+                content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
 
             _logger.debug("Tool calls detected: %s", tool_calls_list)
             _logger.debug("response.data keys: %s", list(response.data.keys()))

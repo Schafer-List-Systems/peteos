@@ -1,0 +1,8 @@
+{
+    "nextcloud_url": "https://cloud.example.com",
+    "bot_id": "your-bot-id",
+    "bot_secret": "your-shared-secret",
+    "default_role": "test",
+    "host": "0.0.0.0",
+    "port": 8766
+}

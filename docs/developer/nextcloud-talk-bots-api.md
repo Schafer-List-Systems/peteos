@@ -1,6 +1,6 @@
 # Nextcloud Talk Bots API
 
-Reference for implementing a Nextcloud Talk channel in the agent system. All information sourced from [official Nextcloud Talk Bots documentation](https://nextcloud-talk.readthedocs.io/en/latest/bots/).
+Reference for implementing a Nextcloud Talk channel in the agent system. All information sourced from [official Nextcloud Talk Bots documentation](https://nextcloud-talk.readthedocs.io/en/latest/bots/) and verified against live webhook payloads.
 
 ## Overview
 
@@ -15,6 +15,24 @@ Bots can only be installed via CLI for security reasons:
 ```
 
 Required arguments include the bot name, a webhook URL (your server's endpoint), and a shared secret. For internal Nextcloud applications, use the `nextcloudapp://$APPID` URI scheme with feature flag `4`.
+
+### Required Feature Flags
+
+After installation, bots do **not** enable webhook delivery by default. You must explicitly enable features via `talk:bot:state`:
+
+```bash
+./occ talk:bot:state <bot-id> 1 --feature webhook --feature response --feature reaction
+```
+
+| Feature | Purpose |
+|---|---|
+| `webhook` | Enables webhook delivery of events to your endpoint |
+| `response` | Allows the bot to send response messages back to chat |
+| `reaction` | Enables emoji reaction events (Like/Undo) |
+
+The second argument (`1`) sets the bot state to **active**. Use `0` to deactivate.
+
+**Without the `webhook` feature flag, bots will receive Join/Leave events but no `Create` (chat message) events.**
 
 ## Authentication & Signature Verification
 
@@ -54,13 +72,15 @@ All API calls route through:
 POST /ocs/v2.php/apps/spreed/api/v1/bot/{token}/{action}
 ```
 
-Where `{token}` is the conversation token and `{action}` is the specific operation.
+Where `{token}` is the bot's ID (not the conversation token) and `{action}` is the specific operation.
 
 **All outgoing requests must include:** `OCS-APIRequest: true`
 
 ## Incoming Webhooks (Events Received by the Bot)
 
-All payloads use the **Activity Streams 2.0 Vocabulary** JSON format with `actor`, `object`, and optional `target` fields.
+All payloads use the **Activity Streams 2.0 Vocabulary** JSON format with `actor`, `object`, and `target` fields.
+
+**Key convention:** The conversation token is always in `target.id`, never in `object.token`. The `target` field describes the room the event belongs to.
 
 ### Supported Event Types
 
@@ -72,24 +92,37 @@ Triggered when a user sends a chat message in a room the bot is part of.
 {
   "type": "Create",
   "actor": {
+    "type": "Person",
     "id": "users/<userId>",
-    "actorType": "users",
-    "displayName": "<displayName>"
+    "name": "<userId>",
+    "displayName": "<displayName>",
+    "talkParticipantType": 1
   },
-  "actor.talkParticipantType": 1,
   "object": {
-    "token": "<conversationToken>",
-    "type": "comment",
+    "type": "Note",
     "id": "<messageId>",
-    "content": "{\"message\":\"Hello bot!\",\"parameters\":{}}",
-    "inReplyTo": "<parentMessageId or 0>"
+    "name": "message",
+    "content": "{\"message\":\"<text>\",\"parameters\":{...}}",
+    "mediaType": "text/markdown"
+  },
+  "target": {
+    "type": "Collection",
+    "id": "<conversationToken>",
+    "name": "<roomName>"
   }
 }
 ```
 
-- `object.content` is a JSON-encoded dict with `message` (Markdown text) and `parameters` (rich objects)
-- `object.inReplyTo` is present only for reply messages (message ID of the parent)
+| Field | Description |
+|---|---|
+| `target.id` | **Conversation token** — maps the event to a specific room |
+| `object.id` | The message ID within the conversation |
+| `object.content` | JSON-encoded dict with `message` (text, may contain mention placeholders like `{mention-user1}`) and `parameters` (rich objects mapping mentions to type/id/name/mention-id) |
+| `object.mediaType` | Content type, typically `text/markdown` |
+| `actor.talkParticipantType` | Integer participant type (e.g. `1`) |
+
 - Message length limit: ~32,000 characters
+- `object.inReplyTo` is present only for reply messages (message ID of the parent)
 
 #### 2. Reaction Added (`Like`)
 
@@ -99,15 +132,18 @@ Triggered when a user adds an emoji reaction to any message.
 {
   "type": "Like",
   "actor": {
+    "type": "Person",
     "id": "users/<userId>",
-    "actorType": "users"
+    "name": "<userId>",
+    "displayName": "<displayName>"
   },
   "content": "<emoji>"
 }
 ```
 
 - `content` contains the emoji string (e.g., `:thumbsup:` or the raw emoji)
-- Requires `reaction` capability flag (Talk 21+)
+- Requires `reaction` feature flag enabled via `talk:bot:state`
+- No `target` field — the reaction context is determined by the receiving message's handler
 
 #### 3. Reaction Removed (`Undo`)
 
@@ -117,8 +153,10 @@ Triggered when a user removes an emoji reaction.
 {
   "type": "Undo",
   "actor": {
+    "type": "Person",
     "id": "users/<userId>",
-    "actorType": "users"
+    "name": "<userId>",
+    "displayName": "<displayName>"
   },
   "object": {
     "content": "<emoji>"
@@ -127,7 +165,7 @@ Triggered when a user removes an emoji reaction.
 ```
 
 - `object.content` contains the removed emoji
-- Requires `reaction` capability flag (Talk 21+)
+- Requires `reaction` feature flag enabled via `talk:bot:state`
 
 #### 4. Bot Added to Room (`Join`)
 
@@ -137,19 +175,22 @@ Triggered when the bot is added to a conversation.
 {
   "type": "Join",
   "actor": {
+    "type": "Person",
     "id": "bots/<sha1hash>",
-    "actorType": "bots",
+    "name": "<botName>",
     "displayName": "<botName>"
   },
   "object": {
-    "token": "<conversationToken>",
-    "type": "room"
+    "type": "room",
+    "id": "<conversationToken>",
+    "name": "<roomName>"
   }
 }
 ```
 
-- `actor.id` uses `bots/` prefix with a SHA1 hash
+- `actor.id` uses `bots/` prefix with a SHA1 hash (bot identifier)
 - `object.id` holds the conversation token
+- `target` may be present for some room types
 
 #### 5. Bot Removed from Room (`Leave`)
 
@@ -160,8 +201,10 @@ Triggered when the bot is removed from a conversation. Same structure as `Join` 
 ### Send Text Message
 
 ```
-POST /ocs/v2.php/apps/spreed/api/v1/bot/{token}/message
+POST /ocs/v2.php/apps/spreed/api/v1/bot/{botId}/message
 ```
+
+Where `{botId}` is the bot's registration ID (e.g. `7`), **not** the conversation token.
 
 | Parameter | Description |
 |---|---|
@@ -169,6 +212,10 @@ POST /ocs/v2.php/apps/spreed/api/v1/bot/{token}/message
 | `replyTo` | Message ID to reply to (optional) |
 | `referenceId` | Unique reference ID for idempotency (optional) |
 | `silent` | Send without notification (optional) |
+
+**Outgoing signature:** For each outgoing request, generate a new random nonce, compute HMAC-SHA256 of `nonce + form_body`, and set headers:
+- `X-Nextcloud-Talk-Bot-Random`: the nonce
+- `X-Nextcloud-Talk-Bot-Signature`: the HMAC digest
 
 **Response codes:**
 
@@ -184,7 +231,7 @@ POST /ocs/v2.php/apps/spreed/api/v1/bot/{token}/message
 ### Add Reaction
 
 ```
-POST /ocs/v2.php/apps/spreed/api/v1/bot/{token}/reaction/{messageId}
+POST /ocs/v2.php/apps/spreed/api/v1/bot/{botId}/reaction/{messageId}
 ```
 
 | Parameter | Description |
@@ -196,7 +243,7 @@ POST /ocs/v2.php/apps/spreed/api/v1/bot/{token}/reaction/{messageId}
 ### Remove Reaction
 
 ```
-DELETE /ocs/v2.php/apps/spreed/api/v1/bot/{token}/reaction/{messageId}
+DELETE /ocs/v2.php/apps/spreed/api/v1/bot/{botId}/reaction/{messageId}
 ```
 
 | Parameter | Description |
@@ -235,12 +282,14 @@ Instead of external webhooks, bots can hook directly into the Nextcloud PHP even
 
 ## Implementation Checklist for a Bot Channel
 
-1. **HTTP server** - Expose an HTTPS endpoint for webhook deliveries
-2. **Signature verification** - HMAC-SHA256 verification on every incoming request
-3. **Event dispatch** - Route `Create`, `Like`, `Undo`, `Join`, `Leave` events to appropriate handlers
-4. **Message sending** - Implement `POST /bot/{token}/message` calls with `OCS-APIRequest: true` header
-5. **Reaction support** - Implement add/remove reaction endpoints if `reaction` capability is available
-6. **Conversation tracking** - Track which rooms the bot has been `Join`ed to; ignore events from unknown rooms
-7. **Idempotency** - Use `referenceId` parameter for message sends to handle retries
-8. **Error handling** - Properly handle 4xx/5xx responses with retries/backoff where appropriate
-9. **Message routing** - Map incoming messages to agent sessions; handle `inReplyTo` for conversation context
+1. **HTTP server** — Expose an HTTPS endpoint for webhook deliveries
+2. **Signature verification** — HMAC-SHA256 verification on every incoming request
+3. **Event dispatch** — Route `Create`, `Like`, `Undo`, `Join`, `Leave` events to appropriate handlers
+4. **Conversation token location** — Always read the conversation token from `target.id`, never from `object.token`
+5. **Message sending** — Implement `POST /bot/{botId}/message` calls with `OCS-APIRequest: true` header
+6. **Reaction support** — Implement add/remove reaction endpoints if `reaction` capability is available
+7. **Conversation tracking** — Track which rooms the bot has been `Join`ed to; ignore events from unknown rooms
+8. **Idempotency** — Use `referenceId` parameter for message sends to handle retries
+9. **Error handling** — Properly handle 4xx/5xx responses with retries/backoff where appropriate
+10. **Message routing** — Map incoming messages to agent sessions; handle `inReplyTo` for conversation context
+11. **Notification subscription** — Subscribe the channel to the agent's `_session_channels` and `_notification_queues` for each session so hook notifications are delivered
