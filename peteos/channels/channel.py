@@ -1,6 +1,7 @@
+import asyncio
 import uuid
 from abc import ABC, abstractmethod
-from typing import Dict, Set
+from typing import AsyncIterator, Dict, Set
 
 
 class Channel(ABC):
@@ -19,6 +20,8 @@ class Channel(ABC):
         self.name = name
         self._agent = agent
         self._active_session_uuid: uuid.UUID | None = None
+        self._session_consumer_tasks: Dict[uuid.UUID, asyncio.Task] = {}
+        self._running: bool = False
         Channel._registry[name] = self
         agent.register_channel(self)
 
@@ -83,3 +86,69 @@ class Channel(ABC):
             Dictionary mapping channel names to Channel instances.
         """
         return dict(cls._registry)
+
+    def subscribe_to_session(self, session_uuid: uuid.UUID) -> None:
+        """Subscribe this channel to notifications for a session.
+
+        Creates the notification queue, registers the channel with the
+        agent's _session_channels, and starts the notification consumer
+        for the given session.
+
+        Args:
+            session_uuid: The session to subscribe to.
+        """
+        if not self._running:
+            return
+
+        queue_key = (self.name, session_uuid)
+        if queue_key not in self._agent._notification_queues:
+            self._agent._notification_queues[queue_key] = asyncio.Queue()
+        if session_uuid not in self._agent._session_channels:
+            self._agent._session_channels[session_uuid] = set()
+        self._agent._session_channels[session_uuid].add(self)
+        # Start notification consumer if not already running for this session
+        if session_uuid not in self._session_consumer_tasks or \
+           self._session_consumer_tasks[session_uuid].done():
+            self._session_consumer_tasks[session_uuid] = asyncio.create_task(
+                self._consume_notifications(session_uuid)
+            )
+
+    def unsubscribe_from_session(self, session_uuid: uuid.UUID) -> None:
+        """Unsubscribe this channel from notifications for a session.
+
+        Cancels the notification consumer task for the given session.
+
+        Args:
+            session_uuid: The session to unsubscribe from.
+        """
+        task = self._session_consumer_tasks.pop(session_uuid, None)
+        if task and not task.done():
+            task.cancel()
+
+    async def _consume_notifications(self, session_uuid: uuid.UUID) -> None:
+        """Poll the notification queue and forward messages via send().
+
+        Runs until the channel is stopped. Concrete subclasses may override
+        to customize notification delivery behavior.
+
+        Args:
+            session_uuid: The session to consume notifications for.
+        """
+        queue_key = (self.name, session_uuid)
+        try:
+            while self._running:
+                queue = self._agent._notification_queues.get(queue_key)
+                if not queue:
+                    await asyncio.sleep(0.1)
+                    continue
+                if not queue.empty():
+                    try:
+                        notification = queue.get_nowait()
+                        self._active_session_uuid = session_uuid
+                        self.send(notification)
+                    except Exception:
+                        pass
+                else:
+                    await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            pass

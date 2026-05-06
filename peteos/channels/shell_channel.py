@@ -45,7 +45,6 @@ class InteractiveShellChannel(Channel):
         """
         super().__init__(name, agent)
         self._running = False  # Explicit start/stop lifecycle
-        self._notification_queues: dict = {}
 
     def send(self, message: str) -> None:
         """Send a message to the shell.
@@ -70,35 +69,6 @@ class InteractiveShellChannel(Channel):
                 content=[ContentPart(part_type="text", text=content)]
             )
             self._agent.post_message(session_uuid, message)
-
-    async def _consume_notifications(self, session_uuid: uuid.UUID) -> None:
-        """Consume notifications from the Agent's notification queue.
-
-        Runs until the Agent is stopped. Blocks on queue get(), so non-blocking.
-
-        Args:
-            session_uuid: The UUID of the session to subscribe to.
-        """
-        while self._running:
-            try:
-                # Get notifications for this channel/session
-                queue_key = (self.name, session_uuid)
-                if queue_key not in self._agent._notification_queues:
-                    # Subscribe to this channel's notifications for this session
-                    self._agent._notification_queues[queue_key] = asyncio.Queue()
-                    if session_uuid not in self._agent._session_channels:
-                        self._agent._session_channels[session_uuid] = set()
-
-                queue = self._agent._notification_queues[queue_key]
-                if not queue.empty():
-                    notification = queue.get_nowait()
-                    self.send(notification)
-                else:
-                    # Wait a bit before checking again
-                    await asyncio.sleep(0.1)
-            except Exception:
-                # Queue might be closed, break
-                break
 
     def _get_input_line(self) -> Optional[str]:
         """Synchronous input reader for use with run_in_executor."""
@@ -137,23 +107,13 @@ class InteractiveShellChannel(Channel):
         """
         Select a session as the active session for this channel.
 
-        Also subscribes to notifications for this session.
+        Also subscribes to notifications for this session via the base class.
 
         Args:
             session_uuid: The UUID of the session to select.
         """
         super().select_session(session_uuid)
-
-        # Subscribe to notifications for this session
-        queue_key = (self.name, session_uuid)
-        if queue_key not in self._agent._notification_queues:
-            self._agent._notification_queues[queue_key] = asyncio.Queue()
-        if session_uuid not in self._agent._session_channels:
-            self._agent._session_channels[session_uuid] = set()
-        # Also register the channel so it's tracked
-        if session_uuid not in self._agent._session_channels:
-            self._agent._session_channels[session_uuid] = set()
-        self._agent._session_channels[session_uuid].add(self)
+        self.subscribe_to_session(session_uuid)
 
     def handle_command(self, line: str) -> tuple[bool, str]:
         """Handle a shell command.
@@ -238,17 +198,8 @@ class InteractiveShellChannel(Channel):
         """
         await self.start()
 
-        # Notification task for active session
-        notification_task: Optional[asyncio.Task] = None
-
         try:
             while self._running:
-                # Start notification consumer if we have an active session
-                if self._active_session_uuid is not None and notification_task is None:
-                    notification_task = asyncio.create_task(
-                        self._consume_notifications(self._active_session_uuid)
-                    )
-
                 # Read input in parallel with notifications
                 try:
                     line = await asyncio.get_event_loop().run_in_executor(
@@ -284,9 +235,3 @@ class InteractiveShellChannel(Channel):
 
         finally:
             await self.stop()
-            if notification_task and not notification_task.done():
-                notification_task.cancel()
-                try:
-                    await notification_task
-                except asyncio.CancelledError:
-                    pass
