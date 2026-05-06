@@ -72,61 +72,67 @@ def setup_tool_manager():
     """Setup ToolManager with example tools.
 
     Returns:
-        Configured ToolManager with get_weather, random, and calculate tools.
+        Configured ToolManager with read and eval_python tools.
     """
-    import random
-
     tool_manager = ToolManager()
+    namespaces: dict[str, dict] = {}
 
-    def get_weather(city: str) -> str:
-        """Get the current weather for a city."""
-        return f"Sunny and 25°C in {city}"
+    def read(filename: str) -> str:
+        """Read a file and return its contents as a string.
 
-    def random(min: int = 1, max: int = 10) -> str:
-        """Generate a random number between min and max (inclusive)."""
-        import random as rd
-        result = rd.randint(min, max)
-        return f"Random number: {result}"
-
-    def calculate(expression: str) -> str:
-        """Calculate a simple arithmetic expression safely."""
+        Args:
+            filename: The path to the file to read.
+        """
         try:
-            import ast
-            import operator
-
-            op_map = {
-                ast.Add: operator.add,
-                ast.Sub: operator.sub,
-                ast.Mult: operator.mul,
-                ast.Div: operator.truediv,
-                ast.Pow: operator.pow,
-                ast.Mod: operator.mod,
-            }
-
-            def eval_expr(node):
-                if isinstance(node, ast.Constant):
-                    return node.value
-                elif isinstance(node, ast.BinOp):
-                    left = eval_expr(node.left)
-                    right = eval_expr(node.right)
-                    return op_map[type(node.op)](left, right)
-                elif isinstance(node, ast.UnaryOp):
-                    operand = eval_expr(node.operand)
-                    if isinstance(node.op, ast.USub):
-                        return -operand
-                    return operand
-                else:
-                    raise ValueError("Unsupported expression")
-
-            tree = ast.parse(expression, mode="eval")
-            result = eval_expr(tree.body)
-            return str(result)
+            with open(filename, "r") as f:
+                return f.read()
         except Exception as e:
-            return f"Error: {e}"
+            return f"Error: {type(e).__name__}: {e}"
 
-    tool_manager.register_tool(func=get_weather)
-    tool_manager.register_tool(func=random)
-    tool_manager.register_tool(func=calculate)
+    def eval_python(python_string: str, namespace_name: str = "") -> str:
+        """Execute Python code and return stdout and return_value.
+
+        The return value is captured by setting _result in the code.
+        Use the same namespace_name across calls to maintain state (variables defined in one call are available in subsequent calls).
+        Omit namespace_name or pass '' for a fresh anonymous namespace destroyed after each call.
+        Pass 'globals' to execute in the module's global namespace (sharing module-level imports and definitions).
+        Pass a named namespace_name for persistent state.
+
+        Args:
+            python_string: A string containing valid Python code to execute.
+            namespace_name: The namespace name for state persistence. Empty string for ephemeral (default).
+        """
+        import io
+        import sys
+
+        if namespace_name == "globals":
+            ns: dict = globals()
+        elif namespace_name == "":
+            ns = {}
+        else:
+            ns = namespaces.get(namespace_name)
+            if ns is None:
+                namespaces[namespace_name] = {}
+                ns = namespaces[namespace_name]
+
+        stdout_capture = io.StringIO()
+        old_stdout = sys.stdout
+        return_value = None
+        try:
+            sys.stdout = stdout_capture
+            code = compile(python_string, "<eval>", "exec")
+            exec(code, ns)
+            return_value = ns.get("_result")
+        except Exception as e:
+            return_value = f"Error: {type(e).__name__}: {e}"
+        finally:
+            sys.stdout = old_stdout
+
+        stdout = stdout_capture.getvalue()
+        return f"stdout: {stdout!r}\nreturn_value: {return_value!r}"
+
+    tool_manager.register_tool(func=read)
+    tool_manager.register_tool(func=eval_python)
 
     return tool_manager
 
