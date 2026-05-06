@@ -3,6 +3,8 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Dict, Set
 
+from peteos.chatbot import Message
+
 
 class Channel(ABC):
     """Abstract base class for channels connecting users to agents."""
@@ -22,6 +24,9 @@ class Channel(ABC):
         self._active_session_uuid: uuid.UUID | None = None
         self._session_consumer_tasks: Dict[uuid.UUID, asyncio.Task] = {}
         self._running: bool = False
+        self._show_reasoning: bool = True
+        self._show_tool_calls: bool = True
+        self._show_tool_results: bool = True
         Channel._registry[name] = self
         agent.register_channel(self)
 
@@ -40,12 +45,15 @@ class Channel(ABC):
         self._active_session_uuid = session_uuid
 
     @abstractmethod
-    def send(self, message: str) -> None:
+    def send(self, message: Message) -> None:
         """
         Send a message to the user through this channel.
 
+        Each channel decides how to format or serialize the Message
+        for its specific medium (terminal, HTTP, chat platform, etc.).
+
         Args:
-            message: The message to send.
+            message: The Message to send.
         """
         pass
 
@@ -101,14 +109,15 @@ class Channel(ABC):
             return
 
         queue_key = (self.name, session_uuid)
+
         if queue_key not in self._agent._notification_queues:
             self._agent._notification_queues[queue_key] = asyncio.Queue()
         if session_uuid not in self._agent._session_channels:
             self._agent._session_channels[session_uuid] = set()
         self._agent._session_channels[session_uuid].add(self)
+
         # Start notification consumer if not already running for this session
-        if session_uuid not in self._session_consumer_tasks or \
-           self._session_consumer_tasks[session_uuid].done():
+        if session_uuid not in self._session_consumer_tasks or self._session_consumer_tasks[session_uuid].done():
             self._session_consumer_tasks[session_uuid] = asyncio.create_task(
                 self._consume_notifications(session_uuid)
             )
@@ -128,8 +137,8 @@ class Channel(ABC):
     async def _consume_notifications(self, session_uuid: uuid.UUID) -> None:
         """Poll the notification queue and forward messages via send().
 
-        Runs until the channel is stopped. Concrete subclasses may override
-        to customize notification delivery behavior.
+        Runs until the channel is stopped. Subclasses may override to customize
+        notification delivery behavior.
 
         Args:
             session_uuid: The session to consume notifications for.
@@ -143,12 +152,27 @@ class Channel(ABC):
                     continue
                 if not queue.empty():
                     try:
-                        notification = queue.get_nowait()
+                        message = queue.get_nowait()
+                        if message.role == "reasoning" and not self._show_reasoning:
+                            continue
+                        elif message.role == "tool" and not self._show_tool_calls:
+                            continue
+                        elif message.role == "tool_result" and not self._show_tool_results:
+                            continue
                         self._active_session_uuid = session_uuid
-                        self.send(notification)
+                        self.send(message)
                     except Exception:
                         pass
                 else:
                     await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             pass
+
+    def enable_reasoning(self, on: bool) -> None:
+        self._show_reasoning = on
+
+    def enable_tool_calls(self, on: bool) -> None:
+        self._show_tool_calls = on
+
+    def enable_tool_results(self, on: bool) -> None:
+        self._show_tool_results = on

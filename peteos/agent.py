@@ -6,7 +6,7 @@ from collections import deque
 from typing import Any, Dict, List, Optional, Set, Tuple, AsyncIterator
 
 from peteos.channels.channel import Channel
-from peteos.chatbot import ChatBotManager, Message
+from peteos.chatbot import ChatBotManager, Message, ContentPart
 from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -422,9 +422,11 @@ class Agent:
             Tuple (allow: bool, message: str) - For now, always allows.
         """
         tool_name = tool_call.get("name", "unknown")
-        args = tool_call.get("arguments", {})
-        message = f"[Agent] Tool called: {tool_name} with args: {args}"
-        self._publish_notification(session_uuid, message)
+        msg = Message(
+            role="tool",
+            content=[ContentPart(part_type="tool_call", tool_call=tool_call)],
+        )
+        self._publish_notification(session_uuid, msg)
         return (True, "")
 
     def _on_after_tool_execution(
@@ -444,10 +446,13 @@ class Agent:
             result: The tool result as a string.
             success: Whether the tool execution succeeded.
         """
-        tool_name = tool_call.get("name", "unknown")
-        status = "success" if success else "failed"
-        message = f"[Agent] Tool '{tool_name}' {status}: {result}"
-        self._publish_notification(session_uuid, message)
+        status = "error" if not success else "ok"
+        msg = Message(
+            role="tool_result",
+            content=[ContentPart(part_type="text", text=result)],
+            metadata={"tool_status": status},
+        )
+        self._publish_notification(session_uuid, msg)
 
     def _on_before_loop_continue(
         self,
@@ -456,27 +461,15 @@ class Agent:
     ) -> None:
         """Hook callback fired when the loop continues after tool calls.
 
-        Publishes tool results and intermediate messages to all subscribed
-        channels. Tool results are already reported by after_tool_execution,
-        so we skip them here to avoid duplicates.
+        Publishes intermediate messages to subscribed channels.
 
         Args:
             session_uuid: The UUID of the session.
             delta_messages: List of messages added during this iteration.
         """
         for msg in delta_messages:
-            role = msg.role
-            if role == "tool_result":
-                # Tool results already reported by _on_after_tool_execution
-                continue
-            elif role == "assistant":
-                text = ""
-                for part in msg.content:
-                    if part.type == "text" and part.data.get("text"):
-                        text = part.data.get("text")
-                        break
-                if text:
-                    self._publish_notification(session_uuid, f"[Agent] {text}")
+            if msg.role == "assistant" and msg.text:
+                self._publish_notification(session_uuid, msg)
 
     def _on_before_loop_exit(
         self,
@@ -497,25 +490,12 @@ class Agent:
             if history:
                 last_msg = history[-1]
                 if last_msg.role == "assistant":
-                    text = ""
-                    reasoning = ""
-                    for part in last_msg.content:
-                        if part.type == "text" and part.data.get("text"):
-                            text = part.data.get("text")
-                        elif part.type == "reasoning" and part.data.get("reasoning"):
-                            reasoning = part.data.get("reasoning")
-                    if text:
-                        self._publish_notification(session_uuid, f"[Agent] {text}")
-                    elif reasoning:
-                        self._publish_notification(
-                            session_uuid,
-                            f"[Agent] Reasoning: {reasoning}"
-                        )
+                    self._publish_notification(session_uuid, last_msg)
 
     def _publish_notification(
         self,
         session_uuid: uuid.UUID,
-        message: str
+        message: Message
     ) -> None:
         """Publish a notification to all subscribed channels.
 
@@ -524,7 +504,7 @@ class Agent:
 
         Args:
             session_uuid: The UUID of the session.
-            message: The notification message to publish.
+            message: The Message to publish.
         """
         channels = self._session_channels.get(session_uuid, set())
         for channel in channels:
@@ -535,5 +515,4 @@ class Agent:
                     try:
                         queue.put_nowait(message)
                     except Exception:
-                        # Queue might be closed, ignore
                         pass

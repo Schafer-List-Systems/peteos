@@ -83,21 +83,64 @@ class NextcloudTalkChannel(Channel):
         if self._runner:
             await self._runner.cleanup()
 
-    def send(self, message: str) -> None:
+    def send(self, message: Message) -> None:
         """Send a message to the originating Nextcloud conversation.
 
-        Looks up the conversation token for the currently active session
-        and dispatches the message via the Nextcloud Bot API.
+        Iterates over content parts, formats each into text, and sends via
+        the Nextcloud Bot API. Skips parts filtered by enable/disable flags.
 
         Args:
-            message: The message text to send.
+            message: The Message to send.
         """
         if not self._active_session_uuid:
             return
         conversation_token = self._session_conversations.get(self._active_session_uuid)
         if not conversation_token:
             return
-        asyncio.create_task(self._send_to_nextcloud(conversation_token, message))
+
+        for part in message.content:
+            if not self._should_send_part(part, message.role):
+                continue
+            payload = self._format_for_nextcloud(part, message)
+            asyncio.create_task(self._send_to_nextcloud(conversation_token, payload))
+
+    def _should_send_part(self, part: ContentPart, msg_role: str) -> bool:
+        """Check if a content part should be sent based on enabled/disabled flags."""
+        if part.type == "reasoning" and not self._show_reasoning:
+            return False
+        if part.type == "tool_calls" and not self._show_tool_calls:
+            return False
+        if part.type == "tool_call" and not self._show_tool_calls:
+            return False
+        if part.type == "tool_result" and not self._show_tool_results:
+            return False
+        return True
+
+    def _format_for_nextcloud(self, part: ContentPart, message: Message) -> dict:
+        """Format a content part into a Nextcloud-compatible payload."""
+        payload = {
+            "message": "",
+            "replyTo": "",
+            "referenceId": message.id,
+            "silent": False,
+        }
+        if part.type == "text":
+            payload["message"] = part.data.get("text", "")
+        elif part.type == "reasoning":
+            reasoning = part.data.get("reasoning", "")
+            payload["message"] = f"[Reasoning] {reasoning}"
+        elif part.type in ("tool_calls", "tool_call"):
+            tc = part.data.get("tool_call") or part.data.get("tool_calls")
+            if isinstance(tc, dict):
+                payload["message"] = f"[Tool Call] {tc.get('name', '?')}({tc.get('arguments', {})})"
+            elif isinstance(tc, list):
+                names = [f"{item.get('name', '?')}({item.get('arguments', {})})" for item in tc]
+                payload["message"] = "[Tool Call] " + ", ".join(names)
+            else:
+                payload["message"] = "[Tool Call] (no data)"
+        elif part.type == "tool_result":
+            payload["message"] = part.data.get("content", "")
+        return payload
 
     def receive(self) -> str | None:
         """Webhook-driven channel - no polling.
@@ -276,29 +319,29 @@ class NextcloudTalkChannel(Channel):
         """
         self.subscribe_to_session(session_uuid)
 
-    async def _send_to_nextcloud(self, conversation_token: str, message_text: str) -> None:
+    async def _send_to_nextcloud(self, conversation_token: str, payload: dict) -> None:
         """Send a message to a Nextcloud Talk conversation.
 
         Per the official Nextcloud Talk Bots API:
         - Endpoint: POST /ocs/v2.php/apps/spreed/api/v1/bot/{TOKEN}/message
           where TOKEN is the conversation token, NOT the bot ID
         - Content-Type: application/json
-        - Body: {"message": "..."}
+        - Body: {"message": "...", "replyTo": ..., "referenceId": ..., "silent": ...}
         - Signature: HMAC-SHA256 of random_header + raw request body
 
         Args:
             conversation_token: The conversation to send to.
-            message_text: The message text (Markdown supported).
+            payload: Dict with message, replyTo, referenceId, silent keys.
         """
         try:
             import aiohttp
 
+            json_body = json.dumps(payload)
             random_nonce = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
-            json_body = json.dumps({"message": message_text})
-            # Sign random + raw message text (same as official bash example)
+            # Sign random + message text (same as official bash example)
             signature = hmac.new(
                 self._bot_secret.encode(),
-                (random_nonce + message_text).encode(),
+                (random_nonce + payload["message"]).encode(),
                 hashlib.sha256,
             ).hexdigest()
 

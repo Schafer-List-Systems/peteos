@@ -1,5 +1,6 @@
 """Unit tests for NextcloudTalkChannel."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -345,7 +346,7 @@ class TestSend:
             bot_id="abc", bot_secret="secret",
         )
         # _active_session_uuid is None by default
-        channel.send("hello")  # Should not raise
+        channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]))  # Should not raise
 
     def test_send_no_conversation_mapping(self, agent):
         test_uuid = uuid.uuid4()
@@ -356,7 +357,7 @@ class TestSend:
         )
         channel._active_session_uuid = test_uuid
         # No mapping in _session_conversations
-        channel.send("hello")  # Should not raise
+        channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]))  # Should not raise
 
     @pytest.mark.asyncio
     async def test_send_calls_nextcloud_api(self, agent):
@@ -380,10 +381,19 @@ class TestSend:
             mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
             mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            await channel._send_to_nextcloud("convtoken", "Hello!")
+            channel.send(Message(
+                role="assistant",
+                content=[ContentPart(part_type="text", text="Hello!")],
+            ))
+            await asyncio.sleep(0.05)
 
         mock_post_ctx.assert_called_once()
-        assert "abc" in mock_post_ctx.call_args[0][0]
+        body = json.loads(mock_post_ctx.call_args[1]["data"])
+        assert body["message"] == "Hello!"
+        assert body["replyTo"] == ""
+        assert body["referenceId"] is not None
+        assert body["silent"] is False
+        assert "convtoken" in mock_post_ctx.call_args[0][0]
 
 
 class TestStartStop:
