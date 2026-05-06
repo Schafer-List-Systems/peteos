@@ -5,7 +5,7 @@ import sys
 import uuid
 from typing import Optional
 
-from peteos.channel import Channel
+from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
 from peteos.logger import get_logger
 

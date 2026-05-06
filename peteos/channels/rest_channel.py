@@ -5,7 +5,7 @@ import uuid
 import aiohttp
 from aiohttp import web
 
-from peteos.channel import Channel
+from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
 
 

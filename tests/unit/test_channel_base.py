@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from peteos.channel import Channel
+from peteos.channels.channel import Channel
 
 
 # Helper for testing abstract Channel (not collected by pytest)

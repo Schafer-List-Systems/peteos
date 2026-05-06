@@ -6,7 +6,7 @@ import uuid
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from peteos import channel
+from peteos.channels.channel import Channel
 from peteos.agent import Agent
 from peteos.channels import InteractiveShellChannel
 from peteos.role import Role
@@ -15,8 +15,8 @@ from peteos.rolemanager import RoleManager
 
 def _cleanup_channels():
     """Clean up channel registry."""
-    for name in list(channel.Channel._registry.keys()):
-        channel.Channel._registry.pop(name)
+    for name in list(Channel._registry.keys()):
+        Channel._registry.pop(name)
 
 
 class TestShellChannelInit:

@@ -5,7 +5,7 @@ import uuid
 from collections import deque
 from typing import Any, Dict, List, Optional, Set, Tuple, AsyncIterator
 
-from peteos.channel import Channel
+from peteos.channels.channel import Channel
 from peteos.chatbot import ChatBotManager, Message
 from peteos.logger import get_logger
 from peteos.role import Role
