@@ -279,6 +279,13 @@ class NextcloudTalkChannel(Channel):
     async def _send_to_nextcloud(self, conversation_token: str, message_text: str) -> None:
         """Send a message to a Nextcloud Talk conversation.
 
+        Per the official Nextcloud Talk Bots API:
+        - Endpoint: POST /ocs/v2.php/apps/spreed/api/v1/bot/{TOKEN}/message
+          where TOKEN is the conversation token, NOT the bot ID
+        - Content-Type: application/json
+        - Body: {"message": "..."}
+        - Signature: HMAC-SHA256 of random_header + raw request body
+
         Args:
             conversation_token: The conversation to send to.
             message_text: The message text (Markdown supported).
@@ -287,22 +294,25 @@ class NextcloudTalkChannel(Channel):
             import aiohttp
 
             random_nonce = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
-            form_body = f"message={message_text}&replyTo=&silent=false"
+            json_body = json.dumps({"message": message_text})
+            # Sign random + raw message text (same as official bash example)
             signature = hmac.new(
                 self._bot_secret.encode(),
-                (random_nonce + form_body).encode(),
+                (random_nonce + message_text).encode(),
                 hashlib.sha256,
             ).hexdigest()
 
             url = (
-                f"{self._nextcloud_url}/ocs/v2.php/apps/spreed/api/v1/bot/{self._bot_id}/message"
+                f"{self._nextcloud_url}/ocs/v2.php/apps/spreed/api/v1/bot/{conversation_token}/message"
             )
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url,
-                    data=form_body,
+                    data=json_body,
                     headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
                         "OCS-APIRequest": "true",
                         "X-Nextcloud-Talk-Bot-Random": random_nonce,
                         "X-Nextcloud-Talk-Bot-Signature": signature,
