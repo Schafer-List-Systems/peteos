@@ -180,6 +180,11 @@ class TestEventDispatch:
         assert channel._rooms["conv1"] == session_uuid
         assert channel._session_conversations[session_uuid] == "conv1"
 
+        # Await the thinking reaction task to prevent RuntimeWarning
+        # _send_reaction will fail (no real aiohttp) but we need to drain the task
+        with patch("aiohttp.ClientSession"):
+            await asyncio.sleep(0.05)
+
     @pytest.mark.asyncio
     async def test_handle_join(self, agent):
         agent.role_manager = RoleManager()
