@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""
+Interactive Shell Example
+
+This example demonstrates how to use the InteractiveShellChannel to interact
+with an Agent using the queue-based architecture.
+
+Usage:
+    PYTHONPATH=/home/frygge/projects/private/peteos python examples/shell_example.py
+
+Configure the ChatBotManager in setup_components() by adding your backend(s):
+    await chatbot_manager.add_backend("name", "http://your-backend:port")
+"""
+
+from peteos.agent import Agent
+from peteos.channels import InteractiveShellChannel
+from peteos.chatbot.manager import ChatBotManager
+from peteos.logger import setup_logging
+from peteos.role import Role
+from peteos.rolemanager import RoleManager
+from peteos.toolmanager import ToolManager
+
+
+async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json"):
+    """Setup ChatBotManager from configuration file.
+
+    Args:
+        config_file: Path to JSON configuration file with backend definitions.
+
+    Returns:
+        Configured ChatBotManager with all backends loaded.
+
+    Raises:
+        FileNotFoundError: If configuration file doesn't exist.
+        RuntimeError: If backend connection fails.
+    """
+    chatbot_manager = ChatBotManager()
+
+    try:
+        await chatbot_manager.load_from_file(config_file)
+        print(f"Loaded backend configuration from {config_file}")
+    except FileNotFoundError:
+        print(f"Note: Config file {config_file} not found. Starting without backends.")
+    except RuntimeError as e:
+        print(f"Error: Backend connection failed: {e}")
+        raise
+
+    return chatbot_manager
+
+
+def setup_role_manager():
+    """Setup RoleManager with available roles.
+
+    Returns:
+        Configured RoleManager with roles loaded from roles/ directory.
+    """
+    role_manager = RoleManager()
+
+    try:
+        loaded_roles = role_manager.load_from_dir("roles")
+        print(f"Loaded roles: {', '.join(loaded_roles)}")
+    except FileNotFoundError:
+        print("Note: No roles directory found. Creating default 'test' role.")
+        role_manager.register_role(
+            Role(name="test", description="Default test role", model=".*")
+        )
+
+    return role_manager
+
+
+def setup_tool_manager():
+    """Setup ToolManager with example tools.
+
+    Returns:
+        Configured ToolManager with read and eval_python tools.
+    """
+    tool_manager = ToolManager()
+    namespaces: dict[str, dict] = {}
+
+    def read(filename: str) -> str:
+        """Read a file and return its contents as a string.
+
+        Args:
+            filename: The path to the file to read.
+        """
+        try:
+            with open(filename, "r") as f:
+                return f.read()
+        except Exception as e:
+            return f"Error: {type(e).__name__}: {e}"
+
+    def eval_python(python_string: str, namespace_name: str = "") -> str:
+        """Execute Python code and return stdout and return_value.
+
+        The return value is captured by setting _result in the code.
+        Use the same namespace_name across calls to maintain state (variables defined in one call are available in subsequent calls).
+        Omit namespace_name or pass '' for a fresh anonymous namespace destroyed after each call.
+        Pass 'globals' to execute in the module's global namespace (sharing module-level imports and definitions).
+        Pass a named namespace_name for persistent state.
+
+        Args:
+            python_string: A string containing valid Python code to execute.
+            namespace_name: The namespace name for state persistence. Empty string for ephemeral (default).
+        """
+        import io
+        import sys
+
+        if namespace_name == "globals":
+            ns: dict = globals()
+        elif namespace_name == "":
+            ns = {}
+        else:
+            ns = namespaces.get(namespace_name)
+            if ns is None:
+                namespaces[namespace_name] = {}
+                ns = namespaces[namespace_name]
+
+        stdout_capture = io.StringIO()
+        old_stdout = sys.stdout
+        return_value = None
+        try:
+            sys.stdout = stdout_capture
+            code = compile(python_string, "<eval>", "exec")
+            exec(code, ns)
+            return_value = ns.get("_result")
+        except Exception as e:
+            return_value = f"Error: {type(e).__name__}: {e}"
+        finally:
+            sys.stdout = old_stdout
+
+        stdout = stdout_capture.getvalue()
+        return f"stdout: {stdout!r}\nreturn_value: {return_value!r}"
+
+    tool_manager.register_tool(func=read)
+    tool_manager.register_tool(func=eval_python)
+
+    return tool_manager
+
+
+async def main():
+    """Main entry point."""
+    # Configure logging
+    setup_logging(level="INFO", debug=False)
+
+    print("=" * 60)
+    print("  Peteos Interactive Shell Example")
+    print("=" * 60)
+    print()
+
+    # Setup components
+    role_manager = setup_role_manager()
+    chatbot_manager = await setup_chatbot_manager()
+    tool_manager = setup_tool_manager()
+
+    # Create the Agent
+    agent = Agent(role_manager, chatbot_manager, tool_manager)
+
+    # Start the Agent's event loop
+    await agent.start()
+    print("Agent event loop started")
+    print()
+
+    # Create the shell channel
+    shell = InteractiveShellChannel("shell", agent)
+
+    print("-" * 60)
+    print()
+    print("Available commands:")
+    print("  /new <role>  - Create a new session")
+    print("  /list        - List all sessions")
+    print("  /select <uuid> - Select a session as active")
+    print("  /messages    - Show recent messages")
+    print("  /quit        - Exit the shell")
+    print()
+    print("Type any text (without /) to send a message to the active session.")
+    print()
+    print("-" * 60)
+    print()
+
+    # Run the shell interactively with custom prompt (blocks until /quit)
+    await run_interactive_shell(shell)
+
+    print()
+    print("Goodbye!")
+
+    # Cleanup
+    await agent.stop()
+    print("Agent event loop stopped")
+
+
+async def run_interactive_shell(shell):
+    """Run the shell with a custom prompt showing session info.
+
+    This is an application-level feature - the prompt helps users identify
+    which session/agent they're talking to.
+    """
+    import asyncio
+
+    # Notification task for active session
+    notification_task = None
+
+    try:
+        await shell.start()
+
+        while shell._running:
+            # Print prompt before reading input
+            prompt = _get_prompt(shell)
+            print(prompt, end="", flush=True)
+
+            # Start notification consumer if we have an active session
+            if shell._active_session_uuid is not None and notification_task is None:
+                notification_task = asyncio.create_task(
+                    shell._consume_notifications(shell._active_session_uuid)
+                )
+
+            # Read input in parallel with notifications
+            try:
+                line = await asyncio.get_event_loop().run_in_executor(
+                    None, shell._get_input_line
+                )
+            except Exception:
+                shell._running = False
+                break
+
+            if line is None:
+                break
+
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith("/"):
+                should_continue, output = shell.handle_command(line)
+                shell.send(output)
+                if not should_continue:
+                    break
+            else:
+                # Forward message to active session via Agent's queue
+                if shell._active_session_uuid is None:
+                    shell.send("No session selected. Use /new <role> or /select <uuid>.")
+                    continue
+
+                try:
+                    shell._post_message_to_agent(shell._active_session_uuid, line)
+                except Exception as e:
+                    shell.send(f"Error: {type(e).__name__}: {str(e)}")
+
+    finally:
+        await shell.stop()
+        if notification_task and not notification_task.done():
+            notification_task.cancel()
+            try:
+                await notification_task
+            except asyncio.CancelledError:
+                pass
+
+
+def _get_prompt(shell) -> str:
+    """Get the prompt string for the shell."""
+    if shell._active_session_uuid:
+        short_uuid = str(shell._active_session_uuid)[:8]
+        session = shell._agent.get_session(shell._active_session_uuid)
+        role_name = session.role.name if session else "agent"
+        return f"{short_uuid} @{role_name} >> "
+    return ">> "
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

@@ -1,0 +1,9 @@
+{
+    "backends": [
+        {
+            "name": "local-anthropic",
+            "url": "http://192.168.12.20:3001",
+            "api_type": "anthropic"
+        }
+    ]
+}

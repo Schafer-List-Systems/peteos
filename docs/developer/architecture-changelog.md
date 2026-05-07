@@ -157,6 +157,23 @@
 - No framework components implemented yet
 - Documentation structure established
 
+## [2026-04-09] - Uniform Delta Protocol
+- Created `docs/developer/uniform-delta-protocol.md`: general-purpose protocol for merging/accumulating JSON structures over incremental delta streams
+- Design: provider-agnostic protocol for streaming data accumulation (not specific to OpenAI/Anthropic)
+- Core concepts: delta events, uniform delta format, translation functions, merge function
+- Fail-closed behavior: raises errors for arrays without index fields, numeric values, unknown patterns
+- Control metadata pattern: `index` field is metadata for merge position, not accumulated into result
+- Position pointer pattern: some protocols use index as event-level position pointer (Anthropic) vs. inside array items (OpenAI)
+- Implementation: `merge_delta_into_target()` in `peteos/utils/dict_path.py`, provider-specific translation in response classes
+- Added to architecture-changelog.md
+
+## [2026-04-04] - Chat History Design
+- Created `docs/developer/chat-history-design.md`: complete specification for ChatHistory class
+- Decisions: MessageContent always list, Tools use canonical JSON Schema, System as message at position 0
+- Defines Message, ContentPart, ToolDefinition classes with clear structure
+- Documents translation rules for OpenAI, Anthropic, Gemini, Cohere APIs
+- Reserved field for response_format constraints (OpenAI JSON mode, Gemini responseSchema)
+
 ## [2026-03-27] - New Session:
 - session id: 810fb120-e4e5-4e32-9718-88bbcaf7641a
 - model: qwen3.5-35b-a3b

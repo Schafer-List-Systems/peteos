@@ -5,8 +5,8 @@ import uuid
 import aiohttp
 from aiohttp import web
 
-from peteos.channel import Channel
-from peteos.chatbot import Message
+from peteos.channels.channel import Channel
+from peteos.chatbot import Message, ContentPart
 
 
 class RESTApiChannel(Channel):
@@ -72,17 +72,22 @@ class RESTApiChannel(Channel):
         if self._runner:
             await self._runner.cleanup()
 
-    def send(self, message: str) -> None:
+    def send(self, message: Message) -> None:
         """Send a message through the WebSocket stream.
 
         Args:
-            message: The message to send.
+            message: The Message to send.
         """
         # Find all subscriptions for the active session
         if self._active_session_uuid:
             queue = self._subscriptions.get(self._active_session_uuid)
             if queue:
-                asyncio.create_task(queue.put(json.dumps({"type": "message", "content": message})))
+                asyncio.create_task(queue.put(json.dumps({
+                    "type": "message",
+                    "role": message.role,
+                    "content": message.text,
+                    "metadata": message.metadata,
+                })))
 
     def receive(self) -> str | None:
         """Receive a message from the queue (async context required).
@@ -110,7 +115,10 @@ class RESTApiChannel(Channel):
             if session is None:
                 return web.json_response({"error": "Session not found"}, status=404)
 
-            message = Message(content={"role": "user", "content": content})
+            message = Message(
+                role="user",
+                content=[ContentPart(part_type="text", text=content)]
+            )
             await session.queue_message(message)
 
             return web.json_response({"status": "message_queued"})
@@ -215,7 +223,10 @@ class RESTApiChannel(Channel):
 
                         session = self._agent.get_session(self._active_session_uuid)
                         if session:
-                            message = Message(content={"role": "user", "content": data.get("content", "")})
+                            message = Message(
+                                role="user",
+                                content=[ContentPart(part_type="text", text=data.get("content", ""))]
+                            )
                             await session.queue_message(message)
 
                     elif data.get("type") == "subscribe":

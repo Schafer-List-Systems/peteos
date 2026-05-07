@@ -9,6 +9,7 @@ from peteos.chatbot import ChatBot
 from peteos.chatbot import ChatBotManager
 from peteos.chatbot import ChatHistory
 from peteos.chatbot import Message
+from peteos.chatbot import ContentPart
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
@@ -105,9 +106,10 @@ class TestREPLRunBasicConversation:
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        chat_history.append_message(
-            Message(content={"role": "user", "content": "Hello!"})
-        )
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Hello!")]
+        ))
 
         class MockResponse:
             def __init__(self):
@@ -138,9 +140,10 @@ class TestREPLRunBasicConversation:
 
         # Should have 2 messages: user, assistant answer
         assert len(chat_history.messages) == 2
-        assert chat_history.messages[0].content["role"] == "user"
-        assert chat_history.messages[1].content["role"] == "assistant"
-        assert chat_history.messages[1].content.get("text") == "Hello! How can I help?"
+        assert chat_history.messages[0].content[0].type == "text"
+        assert chat_history.messages[0].content[0].text == "Hello!"
+        assert chat_history.messages[1].content[0].type == "text"
+        assert chat_history.messages[1].content[0].text == "Hello! How can I help?"
         assert call_count[0] == 1
 
     @pytest.mark.asyncio
@@ -149,9 +152,10 @@ class TestREPLRunBasicConversation:
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        chat_history.append_message(
-            Message(content={"role": "user", "content": "Solve 2+2"})
-        )
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Solve 2+2")]
+        ))
 
         reasoning_content = "Let me calculate this step by step..."
         text_content = "4"
@@ -182,10 +186,12 @@ class TestREPLRunBasicConversation:
 
         # Should have: user, assistant (with reasoning and text in one message)
         assert len(chat_history.messages) == 2
-        assert chat_history.messages[0].content["role"] == "user"
-        assert chat_history.messages[1].content["role"] == "assistant"
-        assert chat_history.messages[1].content.get("reasoning") == reasoning_content
-        assert chat_history.messages[1].content.get("text") == text_content
+        assert chat_history.messages[0].content[0].type == "text"
+        # Reasoning is added first, text second in content_parts order
+        assert chat_history.messages[1].content[0].type == "reasoning"
+        assert chat_history.messages[1].content[0].data.get("reasoning") == reasoning_content
+        assert chat_history.messages[1].content[1].type == "text"
+        assert chat_history.messages[1].content[1].text == text_content
 
     @pytest.mark.asyncio
     async def test_run_loop_terminates_on_final_answer(self, mock_role, mock_chatbot_manager, mock_chatbot):
@@ -193,9 +199,10 @@ class TestREPLRunBasicConversation:
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        chat_history.append_message(
-            Message(content={"role": "user", "content": "Hello!"})
-        )
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Hello!")]
+        ))
 
         call_count = [0]
 
@@ -243,9 +250,10 @@ class TestREPLRunWithToolCalls:
 
         tool_manager.register_tool(func=get_weather)
 
-        chat_history.append_message(
-            Message(content={"role": "user", "content": "What's the weather?"})
-        )
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="What's the weather?")]
+        ))
 
         final_answer = "It's sunny in London."
 
@@ -265,10 +273,10 @@ class TestREPLRunWithToolCalls:
             async def __anext__(self):
                 raise StopAsyncIteration
 
-        # First call: tool_calls in data
-        # Second call: final answer
+        # First call: tool_calls in content array, second call: final answer
+        # Arguments must be a JSON string (as accumulated during streaming)
         responses = [
-            {"role": "assistant", "text": "", "reasoning": "", "tool_calls": [{"name": "get_weather", "arguments": {"city": "London"}}]},
+            {"role": "assistant", "text": "", "reasoning": "", "content": [{"type": "tool_use", "name": "get_weather", "arguments": "{\"city\":\"London\"}"}]},
             {"role": "assistant", "text": final_answer, "reasoning": ""}
         ]
         response_idx = [0]
@@ -287,16 +295,24 @@ class TestREPLRunWithToolCalls:
 
         # Should have: user, assistant (with tool_calls), tool (result), assistant (final answer)
         assert len(chat_history.messages) == 4
-        assert chat_history.messages[0].content["role"] == "user"
-        # Message 1 is assistant response with role, text, reasoning, and tool_calls
-        assert chat_history.messages[1].content["role"] == "assistant"
-        assert chat_history.messages[1].content.get("tool_calls") is not None
+        # Message 0 is user
+        assert chat_history.messages[0].role == "user"
+        # Message 1 is assistant response with tool_calls in content array
+        assert chat_history.messages[1].role == "assistant"
+        # Tool calls are in content array with type="tool_use"
+        tool_calls = [
+            item for item in chat_history.messages[1].content
+            if isinstance(item, ContentPart) and item.type == "tool_calls"
+        ]
+        assert len(tool_calls) == 1
+        assert tool_calls[0].data["tool_calls"][0]["name"] == "get_weather"
         # Message 2 is tool result
-        assert chat_history.messages[2].content["role"] == "tool"
-        assert chat_history.messages[2].content["name"] == "get_weather"
+        assert chat_history.messages[2].role == "tool_result"
+        assert chat_history.messages[2].content[0].type == "tool_result"
+        assert chat_history.messages[2].content[0].data["name"] == "get_weather"
         # Message 3 is final answer
-        assert chat_history.messages[3].content["role"] == "assistant"
-        assert final_answer in chat_history.messages[3].content.get("text", "")
+        assert chat_history.messages[3].role == "assistant"
+        assert chat_history.messages[3].content[0].text == final_answer
 
     @pytest.mark.asyncio
     async def test_run_tool_call_loop_continues(self, mock_role, mock_chatbot_manager, mock_chatbot):
@@ -309,9 +325,10 @@ class TestREPLRunWithToolCalls:
 
         tool_manager.register_tool(func=add)
 
-        chat_history.append_message(
-            Message(content={"role": "user", "content": "Add 2+2"})
-        )
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Add 2+2")]
+        ))
 
         call_count = [0]
 
@@ -330,8 +347,8 @@ class TestREPLRunWithToolCalls:
                 raise StopAsyncIteration
 
         responses = [
-            {"text": "", "reasoning": "", "tool_calls": [{"name": "add", "arguments": {"a": 2, "b": 2}}]},  # First: tool call
-            {"text": "The answer is 4", "reasoning": ""}  # Second: final answer
+            {"role": "assistant", "text": "", "reasoning": "", "content": [{"type": "tool_use", "name": "add", "arguments": "{\"a\":2,\"b\":2}"}]},  # First: tool call
+            {"role": "assistant", "text": "The answer is 4", "reasoning": ""}  # Second: final answer
         ]
         response_idx = [0]
 
@@ -351,6 +368,14 @@ class TestREPLRunWithToolCalls:
         assert response_idx[0] == 2
         # user, assistant (tool), tool (result), assistant (answer)
         assert len(chat_history.messages) == 4
+        # Verify assistant response has tool_calls in content array
+        assert chat_history.messages[1].role == "assistant"
+        tool_calls = [
+            item for item in chat_history.messages[1].content
+            if isinstance(item, ContentPart) and item.type == "tool_calls"
+        ]
+        assert len(tool_calls) == 1
+        assert tool_calls[0].data["tool_calls"][0]["name"] == "add"
 
 
 class TestREPLRunInterrupt:
@@ -362,9 +387,10 @@ class TestREPLRunInterrupt:
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        chat_history.append_message(
-            Message(content={"role": "user", "content": "Hello!"})
-        )
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Hello!")]
+        ))
 
         class MockResponse:
             def __init__(self):

@@ -34,7 +34,8 @@ class HTTPClient:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             async with client.stream("POST", url, json=body) as response:
                 async for line in response.aiter_lines():
-                    yield line
+                    if line:
+                        yield line
 
     async def get(self, url: str) -> dict:
         """

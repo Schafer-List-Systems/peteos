@@ -1,0 +1,4 @@
+{
+    "required_tools": ["get_weather", "calculate"],
+    "model": "qwen/qwen3.5-35b-a3b"
+}

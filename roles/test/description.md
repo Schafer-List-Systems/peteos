@@ -1,0 +1,1 @@
+A simple test role for interactive shell testing.

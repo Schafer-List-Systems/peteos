@@ -12,8 +12,7 @@ from peteos.channels import RESTApiChannel
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 
-# Access channel registry directly
-from peteos import channel
+from peteos.channels.channel import Channel
 
 
 class MockTransport:
@@ -32,8 +31,8 @@ class MockTransport:
 def setup_agent():
     """Create agent with test roles."""
     # Clean up channels
-    for name in list(channel.Channel._registry.keys()):
-        channel.Channel._registry.pop(name)
+    for name in list(Channel._registry.keys()):
+        Channel._registry.pop(name)
     role_manager = RoleManager()
     role_manager.register_role(Role(name="test", description="Test role"))
     role_manager.register_role(Role(name="assistant", description="Assistant role"))
@@ -49,14 +48,14 @@ class TestRESTChannelInit:
     def setup_method(self):
         """Set up agent."""
         # Clean up channels
-        for name in list(channel.Channel._registry.keys()):
-            channel.Channel._registry.pop(name)
+        for name in list(Channel._registry.keys()):
+            Channel._registry.pop(name)
         RoleManager()
 
     def teardown_method(self):
         """Clean up."""
-        for name in list(channel.Channel._registry.keys()):
-            channel.Channel._registry.pop(name)
+        for name in list(Channel._registry.keys()):
+            Channel._registry.pop(name)
 
     def test_channel_creation(self):
         """Test creating a REST channel."""

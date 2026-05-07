@@ -1,11 +1,12 @@
 """Unit tests for InteractiveShellChannel."""
 
+import asyncio
 import uuid
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
-from peteos import channel
+from peteos.channels.channel import Channel
 from peteos.agent import Agent
 from peteos.channels import InteractiveShellChannel
 from peteos.role import Role
@@ -14,8 +15,8 @@ from peteos.rolemanager import RoleManager
 
 def _cleanup_channels():
     """Clean up channel registry."""
-    for name in list(channel.Channel._registry.keys()):
-        channel.Channel._registry.pop(name)
+    for name in list(Channel._registry.keys()):
+        Channel._registry.pop(name)
 
 
 class TestShellChannelInit:
@@ -29,18 +30,22 @@ class TestShellChannelInit:
         """Clean up."""
         _cleanup_channels()
 
-    def test_shell_channel_creation(self):
+    @pytest.mark.asyncio
+    async def test_shell_channel_creation(self):
         """Test creating a shell channel."""
         role_manager = RoleManager()
         chatbot_manager = MagicMock()
         tool_manager = MagicMock()
 
         agent = Agent(role_manager, chatbot_manager, tool_manager)
-        channel = InteractiveShellChannel("shell", agent)
+        shell_channel = InteractiveShellChannel("shell", agent)
 
-        assert channel.name == "shell"
-        assert channel._running is True
-        assert channel.active_session_uuid is None
+        assert shell_channel.name == "shell"
+        assert shell_channel._running is False  # start() must be called first
+        assert shell_channel.active_session_uuid is None
+
+        # Cleanup
+        shell_channel._running = False
 
     def test_shell_channel_registered_with_agent(self):
         """Test shell channel is registered with agent."""
@@ -80,7 +85,8 @@ class TestShellChannelCommands:
         should_continue, output = channel.handle_command("/new test")
 
         assert should_continue is True
-        assert "Session created" in output
+        # Session creation is now logged, not displayed
+        assert output == ""
         assert self.agent.get_session(channel.active_session_uuid) is not None
 
     def test_command_new_missing_role(self):
@@ -122,7 +128,8 @@ class TestShellChannelCommands:
         should_continue, output = channel.handle_command(f"/select {session_uuid}")
 
         assert should_continue is True
-        assert "Active session" in output
+        # Session selection is now logged, not displayed
+        assert output == ""
         assert channel.active_session_uuid == session_uuid
 
     def test_command_select_invalid_uuid(self):
@@ -181,7 +188,8 @@ class TestShellChannelCommands:
         should_continue, output = channel.handle_command("/NEW test")
 
         assert should_continue is True
-        assert "Session created" in output
+        # Session creation is now logged, not displayed
+        assert output == ""
 
     def test_non_command_forwarded(self):
         """Test non-command lines are forwarded as messages."""
@@ -226,18 +234,23 @@ class TestShellChannelRun:
 
     def test_run_displays_welcome(self):
         """Test run displays welcome message."""
-        from unittest.mock import patch
+        from unittest.mock import AsyncMock, patch, MagicMock
         channel = InteractiveShellChannel("shell", self.agent)
         output = []
         def mock_send(msg):
             output.append(msg)
         channel.send = mock_send
 
-        # Mock input to immediately return quit command
-        with patch.object(channel, 'receive', return_value="/quit"):
-            channel.run()
+        # Start the channel to get welcome message
+        # Need to set active session so send() will format output
+        channel._active_session_uuid = uuid.UUID("12345678-1234-1234-1234-123456789012")
+
+        asyncio.run(channel.start())
 
         assert any("Connected" in msg or "Commands" in msg for msg in output)
+
+        # Stop the channel
+        asyncio.run(channel.stop())
 
     def test_run_handles_quit(self):
         """Test run exits on quit command."""

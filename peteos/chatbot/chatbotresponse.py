@@ -1,9 +1,14 @@
 """Response classes for ChatBot with streaming support."""
 
 import json
-from typing import AsyncGenerator, AsyncIterator, Dict, Any, List
+from typing import Any, Dict, AsyncGenerator, AsyncIterator
 
 from peteos.utils import get_value_at_path as _get_value_at_path
+from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
+from peteos.utils.delta_merge import translate_delta_event as _translate_delta_event
+from peteos.logger import get_logger
+
+_logger = get_logger(__name__)
 
 
 class ChatBotResponse:
@@ -91,22 +96,12 @@ class GenericChatBotResponse(ChatBotResponse):
 
     def _accumulate_event(self, event: Dict[str, Any]) -> None:
         """
-        Accumulate translated event into response dict.
+        Accumulate translated event into response dict using delta merge.
 
         Args:
-            event: Translated event with target keys.
+            event: Translated event with target keys (and preserved index fields).
         """
-        for key, value in event.items():
-            if value is not None:
-                existing = self._data.get(key, "")
-                if isinstance(existing, str):
-                    self._data[key] = str(existing) + str(value)
-                elif isinstance(existing, list):
-                    self._data[key].append(value)
-                elif isinstance(existing, dict):
-                    self._data[key].update(value)
-                else:
-                    self._data[key] = value
+        _merge_delta_into_target(self._data, event)
 
     def _event_generator(self) -> AsyncIterator[tuple[str, Any]]:
         """
@@ -118,6 +113,7 @@ class GenericChatBotResponse(ChatBotResponse):
         Input SSE lines:
             data: {"choices": [{"delta": {"content": "Hello"}}]}
             data: {"type": "message_start", "message": {"content": [...], "reasoning": "R"}}
+            error: {"error": "some error message"}
 
         Output tuples:
             ("text", "Hello")
@@ -125,17 +121,44 @@ class GenericChatBotResponse(ChatBotResponse):
         """
         async def _stream_generator():
             async for line in self._stream:
-                if line.startswith("data: ") and line.strip() != "[DONE]":
+                # Check for [DONE] first (can be "data: [DONE]" or just "[DONE]")
+                if line.strip() == "[DONE]" or line == "data: [DONE]\n" or line == "data: [DONE]":
+                    _logger.debug("Received [DONE] signal")
+                    break
+                if line.startswith("data: "):
                     data = line[6:]
                     if data.strip():
                         try:
-                            event = json.loads(data)
-                            for key, chunk in self._process_event(event).items():
+                            raw_event = json.loads(data)
+                            _logger.debug("Raw SSE event: %s", raw_event)
+                            translated = self._process_event(raw_event)
+                            _logger.debug("SSE event translated: %s", translated)
+                            for key, chunk in translated.items():
                                 if chunk is not None:
                                     self._accumulate_event({key: chunk})
+                                    _logger.debug("Accumulated %s: %s", key, chunk)
                                     yield (key, chunk)
                         except json.JSONDecodeError:
-                            pass
+                            _logger.warning("Failed to parse SSE event: %s", line.strip())
+                elif line.startswith("event: "):
+                    # Skip event type markers (e.g., "event: message_start")
+                    # The actual data is on the next line starting with "data: "
+                    # This is expected behavior for SSE streams with event type markers
+                    _logger.debug("Received event marker: %s", line.strip())
+                    continue
+                elif line.startswith("{") or line.startswith("["):
+                    try:
+                        data = json.loads(line)
+                        if isinstance(data, dict) and "error" in data:
+                            self._data["error"] = str(data["error"])
+                            _logger.error("Chatbot error: %s", data["error"])
+                            continue
+                        else:
+                            _logger.warning("Unknown line from chatbot: %s", line.strip())
+                    except json.JSONDecodeError:
+                        _logger.warning("Failed to parse line from chatbot: %s", line.strip())
+                else:
+                    _logger.warning("Unknown line from chatbot: %s", line.strip())
 
         return _stream_generator().__aiter__()
 
@@ -155,48 +178,13 @@ class GenericChatBotResponse(ChatBotResponse):
         """
         Translate an event using configured path translations.
 
+        This uses delta-aware translation that preserves index fields for
+        proper delta merging.
+
         Args:
             event: Raw API response event.
 
         Returns:
-            Translated event with target keys.
+            Translated event with target keys and preserved index fields.
         """
-        translated: Dict[str, Any] = {}
-
-        for path, target in self._translations.items():
-            value = _get_value_at_path(event, path)
-            if value is not None:
-                # Handle array values from wildcard paths
-                if isinstance(value, list):
-                    value = "".join(str(v) for v in value if v)
-                else:
-                    value = str(value)
-                translated[target] = value
-
-        return translated
-
-
-class AnthropicChatBotResponse(GenericChatBotResponse):
-    """Response wrapper for Anthropic API using standard translations.
-
-    The Anthropic API `/v1/messages` endpoint includes role in message_start.
-    However, some LLM backends (non-compliant implementations) skip the role field.
-
-    This class overrides _process_event to default role to 'assistant' when missing from
-    message_start, handling non-compliant backends that omit the role field.
-    """
-
-    def __init__(self, stream: AsyncGenerator[str, None], translations: Dict[str, str]):
-        super().__init__(stream, translations)
-
-    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process an Anthropic event, defaulting role to 'assistant' if missing from message_start.
-
-        The Anthropic API includes role in message_start. This fallback handles
-        non-compliant backends that omit the role field entirely.
-        """
-        if event.get("type") == "message_start" and "role" not in event.get("message", {}):
-            self._data["role"] = "assistant"
-
-        return self._translate_event(event)
+        return _translate_delta_event(event, self._translations)

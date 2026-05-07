@@ -4,10 +4,14 @@ from abc import ABC, abstractmethod
 import json
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
+from peteos.logger import get_logger
 from .httpclient import HTTPClient
-from .chatbotresponse import ChatBotResponse, GenericChatBotResponse, AnthropicChatBotResponse
+from .chatbotconfig import ChatBotConfig
+from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .chathistory import ChatHistory
 from .message import Message
+
+_logger = get_logger(__name__)
 
 
 class ChatBot(ABC):
@@ -17,31 +21,30 @@ class ChatBot(ABC):
     and translate their response schemas into a common interface.
     """
 
-    def __init__(self, http_client: HTTPClient, model: str):
+    def __init__(self, http_client: HTTPClient, config: ChatBotConfig):
         """
         Initialize ChatBot.
 
         Args:
             http_client: HTTP client for making API requests.
-            model: The model identifier to use.
+            config: ChatBot configuration dataclass with all defaults applied.
         """
         self._http_client = http_client
-        self._model = model
+        self._config = config
 
     @abstractmethod
     async def send_message(
         self,
         chat_history: ChatHistory,
-        streaming: bool = True
+        streaming: bool | None = None
     ) -> ChatBotResponse:
         """
         Send a chat history to the LLM and receive a response.
 
         Args:
             chat_history: The ChatHistory to send to the LLM.
-            streaming: If True, returns a streaming response that yields
-                      accumulated text as it arrives. If False, returns
-                      the complete response at once.
+            streaming: If None, uses the instance default.
+                       If True/False, overrides the instance default.
 
         Returns:
             A ChatBotResponse that can be iterated to receive the response.
@@ -61,12 +64,12 @@ class ChatBot(ABC):
     @property
     def model(self) -> str:
         """Get the current model identifier."""
-        return self._model
+        return self._config.model
 
     @model.setter
     def model(self, value: str) -> None:
         """Set a new model identifier."""
-        self._model = value
+        self._config.model = value
 
 
 class GenericChatBot(ChatBot):
@@ -99,36 +102,30 @@ class GenericChatBot(ChatBot):
     def __init__(
         self,
         http_client: HTTPClient,
-        model: str,
-        base_url: str = "",
-        chat_endpoint: str = "/v1/chat/completions",
-        models_endpoint: str = "/v1/models",
-        response_translations: Optional[Dict[str, str]] = None,
-        request_translations: Optional[Dict[str, str]] = None,
-        **defaults
+        config: ChatBotConfig,
     ):
-        super().__init__(http_client, model)
-        self._base_url = base_url
-        self._chat_endpoint = chat_endpoint
-        self._models_endpoint = models_endpoint
-        self._translations = response_translations or {}
-        self._request_translations = request_translations or {}
-        self._defaults = defaults
+        super().__init__(http_client, config)
 
     async def send_message(
         self,
         chat_history: ChatHistory,
-        streaming: bool = True
+        streaming: bool | None = None
     ) -> ChatBotResponse:
-        """Send a chat history to the LLM and receive a response."""
+        """Send a chat history to the LLM and receive a response.
+
+        Args:
+            chat_history: The ChatHistory to send to the LLM.
+            streaming: If None, uses the instance default.
+        """
+        streaming_mode = self._config.streaming if streaming is None else streaming
         body = self._build_body(chat_history, streaming)
 
-        if streaming:
-            stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
-            return GenericChatBotResponse(stream, self._translations)
+        if streaming_mode:
+            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            return GenericChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            return GenericChatBotResponse.from_json(response_data, self._translations)
+            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            return GenericChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _translate_message_fields(self, msg_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -143,42 +140,71 @@ class GenericChatBot(ChatBot):
         Returns:
             Message content dict with API-specific keys.
         """
+        request_translations = self._config.request_translations or {}
         translated: Dict[str, Any] = {}
         for key, value in msg_data.items():
-            if key in self._request_translations:
-                translated[self._request_translations[key]] = value
+            if key in request_translations:
+                translated[request_translations[key]] = value
             else:
                 translated[key] = value
         return translated
 
-    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
-        """Build request body from chat history and defaults."""
-        body = dict(self._defaults)
-        body["model"] = self._model
-        body["stream"] = streaming
+    def _build_body(self, chat_history: ChatHistory, streaming: bool | None = None) -> Dict[str, Any]:
+        """Build request body from chat history and defaults.
 
-        # Build messages array - translate uniform keys to API keys
+        Override in subclasses for API-specific request format.
+
+        Args:
+            chat_history: The chat history to send.
+            streaming: Override the default streaming mode. None uses the
+                instance default set in __init__.
+        """
+        body = dict(chat_history.generation_config)
+        body["model"] = self._config.model
+        body["stream"] = self._config.streaming if streaming is None else streaming
+
+        # Build messages array from ChatHistory
         messages = []
-        system_content = None
+        system_parts = []
+        tools = []
+
+        request_translations = self._config.request_translations or {}
 
         for msg in chat_history.messages:
-            # Translate message content keys
-            msg_data = self._translate_message_fields(msg.content)
-            role = msg_data.get("role", "user")
+            role = msg.role
 
             if role == "system":
-                # Extract system content separately
-                system_content = msg_data.get("content", msg_data)
-            else:
-                messages.append(msg_data)
+                # Extract system content parts
+                system_parts.extend(msg.content)
+            elif role == "tool":
+                # Extract tool definitions
+                for part in msg.content:
+                    if part.type == "tool":
+                        tools.append(part.data)
+            elif role in ("user", "assistant"):
+                # Conversation messages - build message dict from ContentPart fields
+                # Use translation table to map uniform keys to API-specific keys
+                msg_dict = {"role": role}
+                for part in msg.content:
+                    # part.data contains fields like "text", "reasoning", etc.
+                    # Use translation to map to API-specific key
+                    for key, value in part.data.items():
+                        if key in request_translations:
+                            api_key = request_translations[key]
+                        else:
+                            api_key = key
+                        msg_dict[api_key] = value
+                messages.append(msg_dict)
 
         body["messages"] = messages
 
         # Add system if present
-        if system_content:
-            # Check if system is in our defaults (Anthropic style)
-            if "system" not in body:
-                body["system"] = system_content
+        if system_parts:
+            body["system"] = system_parts
+
+        # Add tools if present
+        if tools:
+            body["tools"] = tools
 
         return body
 
@@ -187,117 +213,3 @@ class GenericChatBot(ChatBot):
         # For now, return just the configured model
         # Could be extended to fetch from models_endpoint
         return [self._model]
-
-
-class OpenAIChatBot(GenericChatBot):
-    """ChatBot implementation for OpenAI-compatible API."""
-
-    # Default translation configuration for OpenAI API
-    RESPONSE_TRANSLATIONS = {
-        "choices[*].delta.role": "role",
-        "choices[*].message.content": "text",
-        "choices[*].message.reasoning": "reasoning",
-        "choices[*].message.thinking": "reasoning",
-        "choices[*].delta.content": "text",
-        "choices[*].delta.reasoning": "reasoning",
-        "choices[*].delta.thinking": "reasoning",
-        "choices[*].delta.tool_calls": "tool_calls",
-        "choices[*].message.tool_calls": "tool_calls",
-    }
-
-    REQUEST_TRANSLATIONS = {
-        "text": "content",
-        "reasoning": "reasoning",
-        "tool_calls": "tool_calls",
-    }
-
-    def __init__(self, http_client: HTTPClient, model: str, base_url: str):
-        """
-        Initialize OpenAIChatBot.
-
-        Args:
-            http_client: HTTP client for making API requests.
-            model: The OpenAI model identifier (e.g., "gpt-4").
-            base_url: The OpenAI API base URL.
-        """
-        super().__init__(
-            http_client=http_client,
-            model=model,
-            base_url=base_url,
-            chat_endpoint="/v1/chat/completions",
-            models_endpoint="/v1/models",
-            response_translations=self.RESPONSE_TRANSLATIONS,
-            request_translations=self.REQUEST_TRANSLATIONS,
-        )
-
-class AnthropicChatBot(GenericChatBot):
-    """ChatBot implementation for Anthropic-compatible API."""
-
-    # Default translation configuration for Anthropic API
-    # stream=True (streaming): content via content_block_start/content_block_delta events
-    # stream=False (non-streaming): role, content array at top level
-    # Real Anthropic API: {"role": "assistant", "content": [{"type": "text", "text": "..."}], ...}
-    # Qwen local API:      {"type": "message", "role": "assistant", "content": [...], ...}
-    RESPONSE_TRANSLATIONS = {
-        # stream=True entries (streaming mode)
-        "message_start.message.role": "role",              # role in message_start event
-        "content_block_delta.delta.text": "text",          # text chunks
-        "content_block_delta.delta.thinking": "reasoning", # reasoning chunks
-        "content_block_start.content_block.text": "text",  # text block start
-        "content_block_start.content_block.thinking": "reasoning",  # thinking block start
-        "content_block_start.content_block.reasoning": "reasoning",  # reasoning block start
-        # stream=False entries (non-streaming mode)
-        "role": "role",                                    # role at top level
-        "content[*].text": "text",                         # content array at top level
-        "content[*].thinking": "reasoning",                # content array with thinking
-    }
-
-    REQUEST_TRANSLATIONS = {
-        "text": "content",
-        "reasoning": "reasoning",
-        "tool_calls": "tool_calls",
-    }
-
-    def __init__(self, http_client: HTTPClient, model: str, base_url: str, max_tokens: int = 4096):
-        """
-        Initialize AnthropicChatBot.
-
-        Args:
-            http_client: HTTP client for making API requests.
-            model: The Anthropic model identifier (e.g., "claude-3-opus-20240229").
-            base_url: The Anthropic API base URL.
-            max_tokens: Maximum tokens to generate (default: 4096).
-        """
-        super().__init__(
-            http_client=http_client,
-            model=model,
-            base_url=base_url,
-            chat_endpoint="/v1/messages",
-            models_endpoint="/v1/models",
-            response_translations=self.RESPONSE_TRANSLATIONS,
-            request_translations=self.REQUEST_TRANSLATIONS,
-        )
-        self._max_tokens = max_tokens
-
-    async def send_message(
-        self,
-        chat_history: ChatHistory,
-        streaming: bool = True,
-        **kwargs
-    ) -> ChatBotResponse:
-        """Send a chat history to Anthropic-compatible API."""
-        body = self._build_body(chat_history, streaming)
-        body.update(kwargs)
-
-        if streaming:
-            stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
-            return AnthropicChatBotResponse(stream, self._translations)
-        else:
-            response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            return AnthropicChatBotResponse.from_json(response_data, self._translations)
-
-    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
-        """Build request body from chat history and defaults."""
-        body = super()._build_body(chat_history, streaming)
-        body["max_tokens"] = self._max_tokens
-        return body
