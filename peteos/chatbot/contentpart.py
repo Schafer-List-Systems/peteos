@@ -56,8 +56,13 @@ class ContentPart:
 
         Returns:
             ContentPart instance.
+
+        Raises:
+            ValueError: If 'type' is missing from data.
         """
-        part_type = data.get("type", "text")
+        part_type = data.get("type")
+        if part_type is None:
+            raise ValueError("ContentPart dict must contain a 'type' field")
         return cls(part_type=part_type, **data)
 
     def __repr__(self) -> str:
