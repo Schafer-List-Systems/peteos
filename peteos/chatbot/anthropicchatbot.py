@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import asdict
-from typing import Any, Dict, Optional, AsyncGenerator, AsyncIterator
+from typing import Any, Dict, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
 from .chatbot import GenericChatBot
