@@ -271,5 +271,11 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 if response.data.get("text"):
                     await self._call_hooks("before_loop_exit", "final_answer")
                     break
-                # Only reasoning text — continue
-                await self._call_hooks("before_loop_continue", [])
+                # Only reasoning text — check hook for continue/exit decision
+                hook_result = await self._call_hooks("before_loop_continue", [])
+                if hook_result is not None:
+                    should_exit, reason = hook_result
+                    if should_exit:
+                        await self._call_hooks("before_loop_exit", reason)
+                        break
+                # Otherwise continue the loop

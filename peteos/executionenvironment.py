@@ -80,7 +80,15 @@ class ExecutionEnvironment(ABC):
 
         This is a concrete implementation that wraps the abstract _run_impl() method
         to provide completion signaling. Derived classes should override _run_impl().
+
+        Guards against concurrent calls: if another run() is already executing,
+        sets _interrupt and returns immediately to prevent race conditions on
+        shared data (chat_history, tool execution, etc.).
         """
+        if not self._completion_signal.is_set():
+            # Another run() is already executing. Prevent concurrent _run_impl().
+            self._interrupt = True
+            return
         self._completion_signal.clear()
         try:
             await self._run_impl()

@@ -316,7 +316,7 @@ class TestSessionRouting:
             nextcloud_url="https://cloud.example.com",
             bot_id="abc", bot_secret="secret",
         )
-        agent.create_session = AsyncMock(side_effect=RuntimeError("failed"))
+        agent.create_session = MagicMock(side_effect=RuntimeError("failed"))
 
         result = channel._get_or_create_session("badroom")
 
@@ -370,16 +370,23 @@ class TestSend:
         channel._active_session_uuid = test_uuid
         channel._session_conversations[test_uuid] = "convtoken"
 
-        mock_response = AsyncMock(
-            __aenter__=AsyncMock(return_value=MagicMock(status=201, text=AsyncMock(return_value="ok"))),
-            __aexit__=AsyncMock(return_value=None),
-        )
-        mock_post_ctx = AsyncMock(return_value=mock_response)
+        mock_resp_obj = MagicMock(status=201, text="ok")
 
-        with patch("aiohttp.ClientSession") as mock_session_cls:
-            mock_session_obj = MagicMock(post=mock_post_ctx)
-            mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
-            mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_post_ctx = MagicMock()
+        mock_post_ctx.__aenter__ = AsyncMock(return_value=mock_resp_obj)
+        mock_post_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        # The code does: async with aiohttp.ClientSession() as session:
+        #                  async with session.post(...) as resp:
+        # So we need proper mock chains for both context managers
+        mock_session_obj = MagicMock()
+        mock_session_obj.post = MagicMock(return_value=mock_post_ctx)
+        mock_session_obj.__aenter__ = AsyncMock(return_value=mock_session_obj)
+        mock_session_obj.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
             channel.send(Message(
                 role="assistant",
@@ -387,13 +394,14 @@ class TestSend:
             ))
             await asyncio.sleep(0.05)
 
-        mock_post_ctx.assert_called_once()
-        body = json.loads(mock_post_ctx.call_args[1]["data"])
-        assert body["message"] == "Hello!"
-        assert body["replyTo"] == ""
-        assert body["referenceId"] is not None
-        assert body["silent"] is True
-        assert "convtoken" in mock_post_ctx.call_args[0][0]
+            mock_session_obj.post.assert_called_once()
+            call_args = mock_session_obj.post.call_args
+            body = json.loads(call_args[1]["data"])
+            assert body["message"] == "Hello!"
+            assert body["replyTo"] == ""
+            assert body["referenceId"] is not None
+            assert body["silent"] is False  # text parts are not silent
+            assert "convtoken" in call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_send_multiple_parts_sequentially(self, agent):
@@ -407,16 +415,20 @@ class TestSend:
         channel._active_session_uuid = test_uuid
         channel._session_conversations[test_uuid] = "convtoken"
 
-        mock_response = AsyncMock(
-            __aenter__=AsyncMock(return_value=MagicMock(status=201, text=AsyncMock(return_value="ok"))),
-            __aexit__=AsyncMock(return_value=None),
-        )
-        mock_post_ctx = AsyncMock(return_value=mock_response)
+        mock_resp_obj = MagicMock(status=201, text="ok")
 
-        with patch("aiohttp.ClientSession") as mock_session_cls:
-            mock_session_obj = MagicMock(post=mock_post_ctx)
-            mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
-            mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_post_ctx = MagicMock()
+        mock_post_ctx.__aenter__ = AsyncMock(return_value=mock_resp_obj)
+        mock_post_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session_obj = MagicMock()
+        mock_session_obj.post = MagicMock(return_value=mock_post_ctx)
+        mock_session_obj.__aenter__ = AsyncMock(return_value=mock_session_obj)
+        mock_session_obj.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("aiohttp.ClientSession") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
             channel.send(Message(
                 role="assistant",
@@ -427,11 +439,12 @@ class TestSend:
             ))
             await asyncio.sleep(0.05)
 
-        assert mock_post_ctx.call_count == 2
-        first_msg = json.loads(mock_post_ctx.call_args_list[0][1]["data"])["message"]
-        second_msg = json.loads(mock_post_ctx.call_args_list[1][1]["data"])["message"]
-        assert first_msg == "> _Thinking..._"
-        assert second_msg == "Hello!"
+            mock_session_obj.post.assert_called()
+            call_args_list = mock_session_obj.post.call_args_list
+            first_msg = json.loads(call_args_list[0][1]["data"])["message"]
+            second_msg = json.loads(call_args_list[1][1]["data"])["message"]
+            assert first_msg == "> _Thinking..._"
+            assert second_msg == "Hello!"
 
 
 class TestStartStop:

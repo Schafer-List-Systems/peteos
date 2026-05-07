@@ -212,8 +212,8 @@ class OpenAIChatBot(GenericChatBot):
                         # part.data contains fields like "text", "reasoning", etc.
                         # Use translation to map to API-specific key
                         for key, value in part.data.items():
-                            if key in self._request_translations:
-                                api_key = self._request_translations[key]
+                            if key in (self._config.request_translations or {}):
+                                api_key = (self._config.request_translations or {})[key]
                             else:
                                 api_key = key
                             msg_dict[api_key] = value

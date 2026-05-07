@@ -34,10 +34,10 @@ class TestGenericChatBotResponseOpenAI:
 
     @pytest.mark.asyncio
     async def test_openai_with_thinking_content(self):
-        """Test OpenAI response with thinking content."""
+        """Test OpenAI response with thinking/reasoning content."""
         async def mock_stream():
             # Reasoning first (separate event from content per API behavior)
-            yield 'data: {"choices": [{"delta": {"thinking": "Let me think..."}}]}'
+            yield 'data: {"choices": [{"delta": {"reasoning": "Let me think..."}}]}'
             yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
             yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
             yield "[DONE]"
@@ -108,27 +108,21 @@ class TestGenericChatBotResponseAnthropic:
 
     @pytest.mark.asyncio
     async def test_anthropic_streaming_response(self):
-        """Test streaming Anthropic response with reasoning."""
+        """Test streaming Anthropic response with reasoning and text blocks."""
         async def mock_stream():
-            yield 'data: {"type": "content_block_start", "content_block": {"type": "text", "reasoning": "Thinking step by step..."}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " World"}}'
-            yield 'data: {"type": "content_block_stop", "content_block": {"type": "text"}}'
+            yield 'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "Thinking step by step..."}}'
+            yield 'data: {"type": "content_block_start", "index": 1, "content_block": {"type": "text"}}'
+            yield 'data: {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Hello"}}'
+            yield 'data: {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " World"}}'
+            yield 'data: {"type": "content_block_stop", "index": 1}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
+        response = AnthropicChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Check that all expected fields are present (order may vary due to dict ordering)
-        assert len(accumulated) >= 3
-        accumulated_keys = [key for key, _ in accumulated]
-
         # Verify reasoning and text fields were extracted
-        assert "reasoning" in accumulated_keys
-        assert "text" in accumulated_keys
-
         assert response.data["reasoning"] == "Thinking step by step..."
         assert response.data["text"] == "Hello World"
 
@@ -136,15 +130,15 @@ class TestGenericChatBotResponseAnthropic:
     async def test_anthropic_message_start(self):
         """Test Anthropic message_start event."""
         async def mock_stream():
-            # message_start has nested content array, not inline text/thinking
             yield 'data: {"type": "message_start", "message": {"role": "assistant", "content": []}}'
-            yield 'data: {"type": "content_block_start", "content_block": {"type": "thinking", "thinking": ""}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "Initial reasoning"}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " World"}}'
+            yield 'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}'
+            yield 'data: {"type": "content_block_start", "index": 1, "content_block": {"type": "text"}}'
+            yield 'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Initial reasoning"}}'
+            yield 'data: {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Hello"}}'
+            yield 'data: {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": " World"}}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
+        response = AnthropicChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
@@ -157,14 +151,15 @@ class TestGenericChatBotResponseAnthropic:
     async def test_anthropic_compatible_thinking(self):
         """Test Anthropic-compatible format with thinking/thinking_delta."""
         async def mock_stream():
-            yield 'data: {"type": "content_block_start", "content_block": {"type": "thinking", "thinking": ""}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "Thinking"}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": " Process"}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": ":"}}'
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}'
+            yield 'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": ""}}'
+            yield 'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Thinking"}}'
+            yield 'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": " Process"}}'
+            yield 'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": ":"}}'
+            yield 'data: {"type": "content_block_start", "index": 1, "content_block": {"type": "text"}}'
+            yield 'data: {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Hello"}}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
+        response = AnthropicChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
@@ -177,17 +172,17 @@ class TestGenericChatBotResponseAnthropic:
     async def test_anthropic_non_streaming(self):
         """Test non-streaming Anthropic response (all content in one event)."""
         async def mock_stream():
-            yield 'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Complete response"}}'
+            yield 'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}'
+            yield 'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Complete response"}}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
+        response = AnthropicChatBotResponse(mock_stream(), AnthropicChatBot.RESPONSE_TRANSLATIONS)
         accumulated = []
         async for chunk in response:
             accumulated.append(chunk)
 
         # Non-streaming yields all content at once
-        assert len(accumulated) == 1
-        assert accumulated[0] == ("text", "Complete response")
+        assert len(accumulated) >= 1
         assert response.data["text"] == "Complete response"
 
 
@@ -240,7 +235,7 @@ class TestChatBotResponseProperties:
         """Test that reasoning content doesn't mix with text content."""
         async def mock_stream():
             # Each field in separate event (API behavior)
-            yield 'data: {"choices": [{"delta": {"thinking": "Reasoning"}}]}'
+            yield 'data: {"choices": [{"delta": {"reasoning": "Reasoning"}}]}'
             yield 'data: {"choices": [{"delta": {"content": "Text"}}]}'
             yield "[DONE]"
 

@@ -81,8 +81,11 @@ def merge_delta_into_target(target: Dict, delta: Any, path: str = "") -> None:
     elif isinstance(delta, dict):
         for key, value in delta.items():
             current_path = f"{path}.{key}" if path else key
-            # If both target[key] and delta[key] are dict/list, recurse
-            if key in target and isinstance(target[key], (dict, list)) and isinstance(value, (dict, list)):
+            # If both target[key] and delta[key] are dicts, recurse
+            # If target[key] is a list and value is a dict with 'index', recurse for merge position
+            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                merge_delta_into_target(target[key], value, current_path)
+            elif key in target and isinstance(target[key], list) and isinstance(value, list):
                 merge_delta_into_target(target[key], value, current_path)
             # String: concatenate for token accumulation
             elif isinstance(value, str):
@@ -99,7 +102,12 @@ def merge_delta_into_target(target: Dict, delta: Any, path: str = "") -> None:
         raise ValueError(f"Standalone scalar at path {path}: {delta!r}")
 
 
-def _set_nested(result: Dict, target_key: str, value: Any) -> None:
+def _set_nested(
+    result: Dict,
+    target_key: str,
+    value: Any,
+    parent_index: int | None = None,
+) -> None:
     """
     Parse target_key with array syntax and set nested value in result.
 
@@ -112,6 +120,7 @@ def _set_nested(result: Dict, target_key: str, value: Any) -> None:
         result: Dictionary to set value into
         target_key: Key with optional array syntax (e.g., "tool_calls[0].index")
         value: Value to set
+        parent_index: Index to propagate to array items (from Anthropic top-level event index)
     """
     # Split by dots to get path parts, preserving array indices
     parts = target_key.split(".")
@@ -130,9 +139,11 @@ def _set_nested(result: Dict, target_key: str, value: Any) -> None:
             if not isinstance(current[base_name], list):
                 current[base_name] = []
 
-            # Expand list if needed
+            # Expand list if needed; use idx as the index for array items
             while len(current[base_name]) <= idx:
-                current[base_name].append({})
+                item: dict = {}
+                item["index"] = idx
+                current[base_name].append(item)
 
             # Move to the array item
             current = current[base_name][idx]
@@ -213,6 +224,6 @@ def translate_delta_event(event: Dict, translations: Dict[str, str]) -> Dict:
                 translated = get_value_at_path(event, remaining_path, type_discriminator=True)
 
         if translated is not None:
-            _set_nested(result, target_key, translated)
+            _set_nested(result, target_key, translated, parent_index=parent_index)
 
     return result
