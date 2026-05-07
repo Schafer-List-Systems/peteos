@@ -25,7 +25,6 @@ class RESTApiChannel(Channel):
         super().__init__(name, agent)
         self._host = host
         self._port = port
-        self._running = False
         self._app: web.Application = None
         self._runner: web.AppRunner = None
         self._site: web.TCPSite = None

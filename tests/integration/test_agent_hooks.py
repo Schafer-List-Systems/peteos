@@ -173,13 +173,17 @@ class TestAgentHooksMessageFormat:
         shell = InteractiveShellChannel("shell", agent)
         shell.select_session(session.uuid)
 
-        # subscribe_to_session returns early when channel is not running,
-        # so manually create the notification queue for this test
-        queue_key = ("shell", session.uuid)
-        agent._notification_queues[queue_key] = asyncio.Queue()
-        if session.uuid not in agent._session_channels:
-            agent._session_channels[session.uuid] = set()
-        agent._session_channels[session.uuid].add(shell)
+        # Subscribe shell to session — this registers it in _session_channels
+        agent._session_channels[session.uuid] = {shell}
+
+        # Track push_event calls
+        notifications_received: list = []
+        original_push_event = shell.push_event
+        def track_push_event(msg):
+            notifications_received.append(msg)
+            # Call original for channel's own event queue handling
+            original_push_event(msg)
+        shell.push_event = track_push_event
 
         # Trigger after_tool_execution hook — it publishes tool_result notifications
         agent._on_after_tool_execution(
@@ -189,11 +193,9 @@ class TestAgentHooksMessageFormat:
             True
         )
 
-        # Check that notification was queued
-        assert queue_key in agent._notification_queues
-        assert agent._notification_queues[queue_key].qsize() > 0
-
-        notification = agent._notification_queues[queue_key].get_nowait()
+        # Check that the notification was pushed to the channel
+        assert len(notifications_received) == 1
+        notification = notifications_received[0]
         assert notification.role == "tool_result"
         assert len(notification.content) > 0
         assert "Sunny and 25C" in notification.content[0].data.get("content", "")

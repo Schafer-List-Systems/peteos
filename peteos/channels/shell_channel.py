@@ -44,7 +44,6 @@ class InteractiveShellChannel(Channel):
             agent: The Agent instance this channel connects to.
         """
         super().__init__(name, agent)
-        self._running = False  # Explicit start/stop lifecycle
 
     def send(self, message: Message | str) -> None:
         """Send a message to the shell.
@@ -89,22 +88,12 @@ class InteractiveShellChannel(Channel):
         return None
 
     async def start(self) -> None:
-        """Start the shell channel.
-
-        Initializes notification consumption for the active session.
-        """
-        if self._running:
-            return
-
-        self._running = True
-        self.send("Connected. Commands: /new, /list, /select, /messages, /quit")
+        """Start the shell channel."""
+        await super().start()
 
     async def stop(self) -> None:
         """Stop the shell channel gracefully."""
-        if not self._running:
-            return
-
-        self._running = False
+        await super().stop()
 
     def select_session(self, session_uuid: uuid.UUID) -> None:
         """
@@ -117,6 +106,15 @@ class InteractiveShellChannel(Channel):
         """
         super().select_session(session_uuid)
         self.subscribe_to_session(session_uuid)
+
+    def _get_prompt(self) -> str:
+        """Get the prompt string for the shell."""
+        if self._active_session_uuid:
+            short_uuid = str(self._active_session_uuid)[:8]
+            session = self._agent.get_session(self._active_session_uuid)
+            role_name = session.role.name if session else "agent"
+            return f"{short_uuid} @{role_name} >> "
+        return ">> "
 
     def handle_command(self, line: str) -> tuple[bool, str]:
         """Handle a shell command.
@@ -199,17 +197,21 @@ class InteractiveShellChannel(Channel):
         3. Posts messages to Agent for non-command input
         4. Consumes notifications from Agent's queue in parallel
         """
+        self.send("Connected. Commands: /new, /list, /select, /messages, /quit")
         await self.start()
 
         try:
-            while self._running:
+            while self.is_running():
+                # Print prompt before reading input
+                prompt = self._get_prompt()
+                print(prompt, end="", flush=True)
+
                 # Read input in parallel with notifications
                 try:
                     line = await asyncio.get_event_loop().run_in_executor(
                         None, self._get_input_line
                     )
                 except Exception:
-                    self._running = False
                     break
 
                 if line is None:

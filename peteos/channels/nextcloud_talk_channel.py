@@ -44,7 +44,6 @@ class NextcloudTalkChannel(Channel):
         self._default_role = default_role
         self._host = host
         self._port = port
-        self._running = False
         self._app: web.Application = None
         self._runner: web.AppRunner = None
         self._site: web.TCPSite = None
@@ -60,6 +59,9 @@ class NextcloudTalkChannel(Channel):
         Returns:
             The server URL to register as the webhook endpoint with Nextcloud.
         """
+        # Start ActiveClass's notification consumption loop
+        await super().start()
+
         self._app = web.Application()
         self._app.router.add_post("/nextcloud-talk-webhook", self._handle_webhook)
 
@@ -71,17 +73,12 @@ class NextcloudTalkChannel(Channel):
 
         actual_port = self._site._server.sockets[0].getsockname()[1]
         self._server_url = f"http://{self._host}:{actual_port}/nextcloud-talk-webhook"
-        self._running = True
 
         return self._server_url
 
     async def stop(self) -> None:
         """Stop the webhook receiver server."""
         self._running = False
-        for task in self._session_consumer_tasks.values():
-            if task and not task.done():
-                task.cancel()
-        self._session_consumer_tasks.clear()
         if self._runner:
             await self._runner.cleanup()
 

@@ -33,17 +33,16 @@ class TestAgentInit:
         """Test creating an Agent."""
         agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
 
-        assert agent._running is False
+        assert agent.is_running() is False
         assert agent._loop_task is None
         assert len(agent._sessions) == 0
         assert len(agent._message_queues) == 0
-        assert len(agent._notification_queues) == 0
 
     def test_agent_not_running(self):
         """Test agent starts not running."""
         agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
 
-        assert agent._running is False
+        assert agent.is_running() is False
 
     def test_agent_channels_registry(self):
         """Test agent maintains channel registry."""
@@ -75,7 +74,7 @@ class TestAgentLifecycle:
 
         await agent.start()
 
-        assert agent._running is True
+        assert agent.is_running() is True
         assert agent._loop_task is not None
         assert not agent._loop_task.done()
 
@@ -89,7 +88,7 @@ class TestAgentLifecycle:
         await agent.start()
         await agent.stop()
 
-        assert agent._running is False
+        assert agent.is_running() is False
 
     @pytest.mark.asyncio
     async def test_agent_start_already_running_raises(self):
@@ -104,12 +103,13 @@ class TestAgentLifecycle:
         await agent.stop()
 
     @pytest.mark.asyncio
-    async def test_agent_stop_not_running_raises(self):
-        """Test stopping a not-running agent raises error."""
+    async def test_agent_stop_not_running_is_noop(self):
+        """Test stopping a not-running agent is a no-op."""
         agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
 
-        with pytest.raises(RuntimeError, match="not running"):
-            await agent.stop()
+        await agent.stop()  # should not raise
+
+        assert agent.is_running() is False
 
 
 class TestAgentSessionManagement:
@@ -282,11 +282,8 @@ class TestAgentNotificationQueues:
         async for _ in agent.subscribe_notifications("shell", session.uuid):
             break
 
-        # Unsubscribe
+        # Unsubscribe — channel should be removed from session's channels
         agent.unsubscribe_notifications("shell", session.uuid)
-
-        # Queue should be cleaned up
-        assert ("shell", session.uuid) not in agent._notification_queues
 
     def test_publish_notification_to_channels(self):
         """Test publishing notification to subscribed channels."""
@@ -296,25 +293,16 @@ class TestAgentNotificationQueues:
 
         session = agent.create_session("test")
 
-        # Manually create notification queue and subscribe channel
-        agent._notification_queues[("shell", session.uuid)] = asyncio.Queue()
-        if session.uuid not in agent._session_channels:
-            agent._session_channels[session.uuid] = set()
-
-        # Create a mock channel and add to session channels
+        # Create a mock channel and subscribe it to the session
         channel = MagicMock()
         channel.name = "shell"
-        agent._session_channels[session.uuid].add(channel)
+        agent._session_channels[session.uuid] = {channel}
 
         # Manually trigger notification publishing
-        agent._publish_notification(session.uuid, "Test notification")
+        agent._publish_notification(session.uuid, Message(role="user", content=[ContentPart(part_type="text", text="Test")]))
 
-        # Check notification was queued
-        queue_key = ("shell", session.uuid)
-        assert queue_key in agent._notification_queues
-        assert not agent._notification_queues[queue_key].empty()
-        notification = agent._notification_queues[queue_key].get_nowait()
-        assert notification == "Test notification"
+        # Check push_event was called on the channel
+        channel.push_event.assert_called_once()
 
 
 class TestAgentHookCallbacks:
