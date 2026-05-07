@@ -20,31 +20,32 @@ class ChatBot(ABC):
     and translate their response schemas into a common interface.
     """
 
-    def __init__(self, http_client: HTTPClient, model: str):
+    def __init__(self, http_client: HTTPClient, model: str, streaming: bool = True):
         """
         Initialize ChatBot.
 
         Args:
             http_client: HTTP client for making API requests.
             model: The model identifier to use.
+            streaming: Whether to use streaming mode by default (default: True).
         """
         self._http_client = http_client
         self._model = model
+        self._streaming = streaming
 
     @abstractmethod
     async def send_message(
         self,
         chat_history: ChatHistory,
-        streaming: bool = True
+        streaming: bool | None = None
     ) -> ChatBotResponse:
         """
         Send a chat history to the LLM and receive a response.
 
         Args:
             chat_history: The ChatHistory to send to the LLM.
-            streaming: If True, returns a streaming response that yields
-                      accumulated text as it arrives. If False, returns
-                      the complete response at once.
+            streaming: If None, uses the instance default.
+                       If True/False, overrides the instance default.
 
         Returns:
             A ChatBotResponse that can be iterated to receive the response.
@@ -108,9 +109,10 @@ class GenericChatBot(ChatBot):
         models_endpoint: str = "/v1/models",
         response_translations: Optional[Dict[str, str]] = None,
         request_translations: Optional[Dict[str, str]] = None,
+        streaming: bool = True,
         **defaults
     ):
-        super().__init__(http_client, model)
+        super().__init__(http_client, model, streaming=streaming)
         self._base_url = base_url
         self._chat_endpoint = chat_endpoint
         self._models_endpoint = models_endpoint
@@ -121,12 +123,18 @@ class GenericChatBot(ChatBot):
     async def send_message(
         self,
         chat_history: ChatHistory,
-        streaming: bool = True
+        streaming: bool | None = None
     ) -> ChatBotResponse:
-        """Send a chat history to the LLM and receive a response."""
+        """Send a chat history to the LLM and receive a response.
+
+        Args:
+            chat_history: The ChatHistory to send to the LLM.
+            streaming: If None, uses the instance default.
+        """
+        streaming_mode = self._streaming if streaming is None else streaming
         body = self._build_body(chat_history, streaming)
 
-        if streaming:
+        if streaming_mode:
             stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
             return GenericChatBotResponse(stream, self._translations)
         else:
@@ -154,14 +162,19 @@ class GenericChatBot(ChatBot):
                 translated[key] = value
         return translated
 
-    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
+    def _build_body(self, chat_history: ChatHistory, streaming: bool | None = None) -> Dict[str, Any]:
         """Build request body from chat history and defaults.
 
         Override in subclasses for API-specific request format.
+
+        Args:
+            chat_history: The chat history to send.
+            streaming: Override the default streaming mode. None uses the
+                instance default set in __init__.
         """
         body = dict(chat_history.generation_config)
         body["model"] = self._model
-        body["stream"] = streaming
+        body["stream"] = self._streaming if streaming is None else streaming
 
         # Build messages array from ChatHistory
         messages = []

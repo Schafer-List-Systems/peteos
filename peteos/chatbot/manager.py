@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Set, Tuple, Any
 from .httpclient import HTTPClient
 from .openaichatbot import OpenAIChatBot
 from .anthropicchatbot import AnthropicChatBot
+from .backendconfig import BackendConfig
 
 
 @dataclass
@@ -35,7 +36,8 @@ class ChatBotManager:
         self,
         name: str,
         url: str,
-        api_type: Optional[str] = None
+        api_type: Optional[str] = None,
+        **kwargs
     ) -> BackendInfo:
         """Add a new backend and auto-detect its capabilities.
 
@@ -44,6 +46,8 @@ class ChatBotManager:
             url: Base URL of the API (e.g., "http://localhost:8000").
             api_type: Optional API type override ("openai" or "anthropic").
                      If not provided, API type is auto-detected.
+            **kwargs: Configuration options (streaming, max_tokens, etc.).
+                     Defaults are applied by BackendConfig.from_dict.
 
         Returns:
             BackendInfo with detected API type and discovered models.
@@ -58,21 +62,29 @@ class ChatBotManager:
         if api_type is not None and api_type not in ("openai", "anthropic"):
             raise ValueError(f"Invalid api_type: {api_type}. Must be 'openai' or 'anthropic'")
 
-        if api_type is None:
-            api_type, models = await self._detect_api_and_list_models(url)
-        else:
-            models = await self._list_models_for_api_type(url, api_type)
+        config = BackendConfig.from_dict({
+            "name": name,
+            "url": url,
+            **{"api_type": api_type},
+            **kwargs,
+        })
 
-        # Create ChatBot instances - let classes use their default endpoints
+        # Auto-detect api_type if not provided
+        if config.api_type is None:
+            config.api_type, models = await self._detect_api_and_list_models(url)
+        else:
+            models = await self._list_models_for_api_type(url, config.api_type)
+
+        # Create ChatBot instances
         chatbots: Dict[str, Any] = {}
         for model_id in models:
-            chatbot = self._create_chatbot(api_type, model_id, url)
+            chatbot = self._create_chatbot(config, model_id)
             chatbots[model_id] = chatbot
 
         backend_info = BackendInfo(
-            name=name,
-            url=url,
-            api_type=api_type,
+            name=config.name,
+            url=config.url,
+            api_type=config.api_type,
             models=chatbots
         )
         self._backends[name] = backend_info
@@ -167,31 +179,35 @@ class ChatBotManager:
 
         return model_ids
 
-    def _create_chatbot(self, api_type: str, model_id: str, base_url: str) -> Any:
+    def _create_chatbot(self, config: BackendConfig, model_id: str) -> Any:
         """Create appropriate ChatBot instance for model.
 
         Args:
-            api_type: "openai" or "anthropic".
+            config: Backend configuration dataclass with all defaults applied.
             model_id: Model identifier.
-            base_url: Base URL of the API.
 
         Returns:
             ChatBot instance.
         """
-        if api_type == "openai":
+        if config.api_type == "openai":
             return OpenAIChatBot(
                 http_client=self._http_client,
                 model=model_id,
-                base_url=base_url
+                base_url=config.url,
+                chat_endpoint=config.chat_endpoint,
+                streaming=config.streaming,
             )
-        elif api_type == "anthropic":
+        elif config.api_type == "anthropic":
             return AnthropicChatBot(
                 http_client=self._http_client,
                 model=model_id,
-                base_url=base_url
+                base_url=config.url,
+                chat_endpoint=config.chat_endpoint,
+                max_tokens=config.max_tokens,
+                streaming=config.streaming,
             )
         else:
-            raise ValueError(f"Unknown API type: {api_type}")
+            raise ValueError(f"Unknown API type: {config.api_type}")
 
     def list_chatbots(self, model_regex: str) -> List[Tuple[str, Any]]:
         """List all ChatBot instances matching a regex pattern.
@@ -218,35 +234,46 @@ class ChatBotManager:
         Clears current state and recreates all backends from the JSON.
         API types can be auto-detected or explicitly specified in config.
 
+        Config format:
+            {
+                "backends": [
+                    {
+                        "name": "my-backend",
+                        "url": "http://localhost:8000",
+                        "api_type": "anthropic",
+                        "streaming": false
+                    }
+                ]
+            }
+
         Args:
             json_obj: Dict with "backends" key containing list of backend configs.
-                     Each backend has "name" and "url", optionally "api_type".
+                     Each backend has "name" and "url", optionally "api_type" and
+                     other config options.
         """
         self._backends.clear()
 
         for backend_config in json_obj.get("backends", []):
-            name = backend_config["name"]
-            url = backend_config["url"]
-            api_type = backend_config.get("api_type")
+            config = BackendConfig.from_dict(backend_config)
 
-            if api_type is not None and api_type not in ("openai", "anthropic"):
-                raise ValueError(f"Invalid api_type in config: {api_type}")
+            if config.api_type is not None and config.api_type not in ("openai", "anthropic"):
+                raise ValueError(f"Invalid api_type in config: {config.api_type}")
 
-            if api_type is None:
-                api_type, models = await self._detect_api_and_list_models(url)
+            if config.api_type is None:
+                config.api_type, models = await self._detect_api_and_list_models(config.url)
             else:
-                models = await self._list_models_for_api_type(url, api_type)
+                models = await self._list_models_for_api_type(config.url, config.api_type)
 
-            # Create ChatBot instances - let classes use their default endpoints
+            # Create ChatBot instances
             chatbots: Dict[str, Any] = {}
             for model_id in models:
-                chatbot = self._create_chatbot(api_type, model_id, url)
+                chatbot = self._create_chatbot(config, model_id)
                 chatbots[model_id] = chatbot
 
-            self._backends[name] = BackendInfo(
-                name=name,
-                url=url,
-                api_type=api_type,
+            self._backends[config.name] = BackendInfo(
+                name=config.name,
+                url=config.url,
+                api_type=config.api_type,
                 models=chatbots
             )
 

@@ -115,7 +115,8 @@ class OpenAIChatBot(GenericChatBot):
         http_client: HTTPClient,
         model: str,
         base_url: str,
-        chat_endpoint: Optional[str] = None
+        chat_endpoint: Optional[str] = None,
+        streaming: bool = True,
     ):
         """
         Initialize OpenAIChatBot.
@@ -125,6 +126,7 @@ class OpenAIChatBot(GenericChatBot):
             model: The OpenAI model identifier (e.g., "gpt-4").
             base_url: The OpenAI API base URL.
             chat_endpoint: API-specific chat endpoint. Defaults to DEFAULT_CHAT_ENDPOINT.
+            streaming: Whether to use streaming mode by default (default: True).
         """
         super().__init__(
             http_client=http_client,
@@ -134,24 +136,26 @@ class OpenAIChatBot(GenericChatBot):
             models_endpoint=self.DEFAULT_MODELS_ENDPOINT,
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
+            streaming=streaming,
         )
 
     async def send_message(
         self,
         chat_history: ChatHistory,
-        streaming: bool = True
+        streaming: bool | None = None,
     ) -> ChatBotResponse:
         """Send a chat history to the LLM and receive a response."""
-        body = self._build_body(chat_history, streaming)
+        streaming_mode = self._streaming if streaming is None else streaming
+        body = self._build_body(chat_history, streaming_mode)
 
-        if streaming:
+        if streaming_mode:
             stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
             return OpenAIChatBotResponse(stream, self._translations)
         else:
             response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
             return OpenAIChatBotResponse.from_json(response_data, self._translations)
 
-    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
+    def _build_body(self, chat_history: ChatHistory, streaming: bool | None = None) -> Dict[str, Any]:
         """Build OpenAI-specific request body.
 
         OpenAI format:
@@ -161,7 +165,7 @@ class OpenAIChatBot(GenericChatBot):
         """
         body = {}
         body["model"] = self._model
-        body["stream"] = streaming
+        body["stream"] = self._streaming if streaming is None else streaming
 
         messages = []
         tools = []
@@ -313,103 +317,3 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
             ]
             if text_parts:
                 self._data["text"] = "".join(text_parts)
-
-    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
-        """Build OpenAI-specific request body.
-
-        OpenAI format:
-        - system messages included in messages[] array with role="system"
-        - tools from tool messages
-        - tool_choice from generation_config
-        """
-        body = {}
-        body["model"] = self._model
-        body["stream"] = streaming
-
-        messages = []
-        tools = []
-
-        for msg in chat_history.messages:
-            role = msg.role
-
-            if role == "tool":
-                # Extract tool definitions and translate parameters to OpenAI format
-                for part in msg.content:
-                    if part.type == "tool":
-                        # part.data: {name, description, parameters}
-                        # Translate parameters to JSON Schema
-                        params = self._translate_tool_params_to_openai(
-                            part.data.get("parameters", {})
-                        )
-                        tool_def = {
-                            "type": "function",
-                            "function": {
-                                "name": part.data.get("name"),
-                                "description": part.data.get("description", ""),
-                                "parameters": params
-                            }
-                        }
-                        tools.append(tool_def)
-            elif role == "tool_result":
-                # Tool result messages - build tool_result dict for API
-                for part in msg.content:
-                    if part.type == "tool_result":
-                        tool_name = part.data.get("name", "unknown")
-                        tool_content = part.data.get("content", "")
-                        success = part.data.get("success", False)
-                        msg_dict = {
-                            "role": "tool",
-                            "name": tool_name,
-                            "content": tool_content
-                        }
-                        messages.append(msg_dict)
-                        break
-            elif role in ("user", "assistant", "system"):
-                # Conversation messages - build message dict from ContentPart fields
-                # Use translation table to map uniform keys to API-specific keys
-                msg_dict = {"role": role}
-                tool_calls = []
-
-                for part in msg.content:
-                    # Handle tool_calls from uniform format to OpenAI format
-                    if part.type == "tool_calls":
-                        for tool_call in part.data.get("tool_calls", []):
-                            # Uniform format: {"type": "tool_use", "name": "...", "arguments": "..."}
-                            # OpenAI format: {"type": "function", "function": {"name": "...", "arguments": "..."}}
-                            tool_calls.append({
-                                "type": "function",
-                                "id": tool_call.get("id"),
-                                "function": {
-                                    "name": tool_call.get("name"),
-                                    "arguments": tool_call.get("arguments", "")
-                                }
-                            })
-                    else:
-                        # part.data contains fields like "text", "reasoning", etc.
-                        # Use translation to map to API-specific key
-                        for key, value in part.data.items():
-                            if key in self._request_translations:
-                                api_key = self._request_translations[key]
-                            else:
-                                api_key = key
-                            msg_dict[api_key] = value
-
-                if tool_calls:
-                    msg_dict["tool_calls"] = tool_calls
-
-                messages.append(msg_dict)
-
-        body["messages"] = messages
-
-        if tools:
-            body["tools"] = tools
-
-        # Copy generation config (includes tool_choice)
-        for key, value in chat_history.generation_config.items():
-            if key not in body:
-                body[key] = value
-
-        _logger.debug("OpenAI request body: %s", json.dumps(body, indent=2))
-        return body
-
-

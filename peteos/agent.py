@@ -449,7 +449,7 @@ class Agent:
         status = "error" if not success else "ok"
         msg = Message(
             role="tool_result",
-            content=[ContentPart(part_type="text", text=result)],
+            content=[ContentPart(part_type="tool_result", content=result)],
             metadata={"tool_status": status},
         )
         self._publish_notification(session_uuid, msg)

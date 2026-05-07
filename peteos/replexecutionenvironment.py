@@ -149,15 +149,14 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             content: Result content as a string.
             success: Whether the execution succeeded.
         """
-        self.chat_history.append_message(
-            Message(
-                role="tool_result",
-                content=[
-                    ContentPart(part_type="tool_result", name=tool_name, content=content),
-                    ContentPart(part_type="bool", success=success),
-                ],
-            )
+        msg = Message(
+            role="tool_result",
+            content=[
+                ContentPart(part_type="tool_result", name=tool_name, content=content),
+                ContentPart(part_type="bool", success=success),
+            ],
         )
+        self.chat_history.append_message(msg)
 
     async def _run_impl(self) -> None:
         """
@@ -169,7 +168,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         """
         while not self._interrupt:
             # --- Phase 1: Call chatbot and collect response ---
-            response = await self.chatbot.send_message(self.chat_history, streaming=True)
+            response = await self.chatbot.send_message(self.chat_history)
             async for _ in response:
                 if self._interrupt:
                     break
@@ -244,6 +243,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                             continue
 
                     try:
+                        # Call the tool
                         result = tool.execute(**args)
                         self._append_tool_result(tool_name=tool_name, content=str(result), success=True)
                         await self._call_hooks("after_tool_execution", tool_call, str(result), True)

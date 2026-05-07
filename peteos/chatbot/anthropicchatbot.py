@@ -137,7 +137,8 @@ class AnthropicChatBot(GenericChatBot):
         model: str,
         base_url: str,
         chat_endpoint: Optional[str] = None,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        streaming: bool = True,
     ):
         """
         Initialize AnthropicChatBot.
@@ -148,6 +149,7 @@ class AnthropicChatBot(GenericChatBot):
             base_url: The Anthropic API base URL.
             chat_endpoint: API-specific chat endpoint. Defaults to DEFAULT_CHAT_ENDPOINT.
             max_tokens: Maximum tokens to generate (default: 4096).
+            streaming: Whether to use streaming mode by default (default: True).
         """
         super().__init__(
             http_client=http_client,
@@ -157,27 +159,31 @@ class AnthropicChatBot(GenericChatBot):
             models_endpoint=self.DEFAULT_MODELS_ENDPOINT,
             response_translations=self.RESPONSE_TRANSLATIONS,
             request_translations=self.REQUEST_TRANSLATIONS,
+            streaming=streaming,
         )
         self._max_tokens = max_tokens
 
     async def send_message(
         self,
         chat_history: ChatHistory,
-        streaming: bool = True,
+        streaming: bool | None = None,
         **kwargs
     ) -> ChatBotResponse:
         """Send a chat history to Anthropic-compatible API."""
+        streaming_mode = self._streaming if streaming is None else streaming
         body = self._build_body(chat_history, streaming)
         body.update(kwargs)
 
-        if streaming:
+        if streaming_mode:
             stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
             return AnthropicChatBotResponse(stream, self._translations)
         else:
             response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
             return AnthropicChatBotResponse.from_json(response_data, self._translations)
 
-    def _build_body(self, chat_history: ChatHistory, streaming: bool) -> Dict[str, Any]:
+    def _build_body(
+        self, chat_history: ChatHistory, streaming: bool | None = None
+    ) -> Dict[str, Any]:
         """Build Anthropic-specific request body.
 
         Anthropic format:
@@ -188,7 +194,7 @@ class AnthropicChatBot(GenericChatBot):
         """
         body = {}
         body["model"] = self._model
-        body["stream"] = streaming
+        body["stream"] = self._streaming if streaming is None else streaming
         body["max_tokens"] = self._max_tokens
 
         messages = []
