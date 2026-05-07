@@ -136,141 +136,130 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             role=role
         )
 
+    def _append_tool_result(
+        self,
+        tool_name: str,
+        content: str,
+        success: bool,
+    ) -> None:
+        """Append a tool result message to the chat history.
+
+        Args:
+            tool_name: Name of the tool that was executed.
+            content: Result content as a string.
+            success: Whether the execution succeeded.
+        """
+        self.chat_history.append_message(
+            Message(
+                role="tool_result",
+                content=[
+                    ContentPart(part_type="tool_result", name=tool_name, content=content),
+                    ContentPart(part_type="bool", success=success),
+                ],
+            )
+        )
+
     async def _run_impl(self) -> None:
         """
         Run the REPL loop.
 
-        Reads input, processes it through the chatbot, and appends output to ChatHistory.
-        Loops until final answer is received or interrupt flag is set.
+        Processes chat history through the chatbot, executes tool calls, and
+        appends output to ChatHistory. Loops until final answer is received
+        or interrupt flag is set.
         """
         while not self._interrupt:
-            # Send chat history to chatbot
-            response = await self.chatbot.send_message(
-                self.chat_history,
-                streaming=True
-            )
-
-            # Collect accumulated response with interrupt checks
+            # --- Phase 1: Call chatbot and collect response ---
+            response = await self.chatbot.send_message(self.chat_history, streaming=True)
             async for _ in response:
                 if self._interrupt:
                     break
 
             if self._interrupt:
-                # Request dropped mid-stream, exit loop
                 await self._call_hooks("before_loop_exit", "interrupt")
                 break
 
-            # Append the full response as a Message to ChatHistory
-            # response.data has format from translation: {text: "...", reasoning: "...", content: [...]}
-            # Role is required - must be present (ChatBot ensures this)
-            # If there's an error from the chatbot, skip appending and exit loop
+            # --- Phase 2: Error handling ---
             if "error" in response.data:
                 _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
                 break
             assert "role" in response.data, f"ChatBot response missing 'role' field: {response.data.keys()}"
 
-            # Build content parts from accumulated response data
-            content_parts = []
+            # --- Phase 3: Build complete content parts ---
+            content_parts: list[ContentPart] = []
 
-            # Add reasoning if present
             if response.data.get("reasoning"):
-                content_parts.append(ContentPart(part_type="reasoning", reasoning=response.data["reasoning"]))
+                content_parts.append(
+                    ContentPart(part_type="reasoning", reasoning=response.data["reasoning"])
+                )
 
-            # Add tool calls from content array if present
-            if "content" in response.data and isinstance(response.data["content"], list):
-                # Filter for tool_use items
-                tool_use_items = [
-                    item for item in response.data["content"]
+            # Extract tool calls once, reuse for both building and executing
+            tool_calls_list: list[dict] = []
+            content_array = response.data.get("content", [])
+            if isinstance(content_array, list):
+                tool_calls_list = [
+                    item for item in content_array
                     if isinstance(item, dict) and item.get("type") == "tool_use"
                 ]
-                if tool_use_items:
-                    content_parts.append(ContentPart(part_type="tool_calls", tool_calls=tool_use_items))
 
-            self.chat_history.append_message(Message(
-                role=response.data["role"],
-                content=content_parts
-            ))
+            if tool_calls_list:
+                content_parts.append(
+                    ContentPart(part_type="tool_calls", tool_calls=tool_calls_list)
+                )
 
-            # Check if response contains tool calls
-            # Tool calls are stored in content array with type="tool_use"
-            content_array = response.data.get("content", [])
-            tool_calls_list = [
-                item for item in content_array
-                if isinstance(item, dict) and item.get("type") == "tool_use"
-            ]
-
-            # Add text content if present
+            # Add text before appending so the Message is complete
             if response.data.get("text"):
                 content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
 
-            _logger.debug("Tool calls detected: %s", tool_calls_list)
-            _logger.debug("response.data keys: %s", list(response.data.keys()))
+            # --- Phase 4: Append message to history ---
+            self.chat_history.append_message(
+                Message(role=response.data["role"], content=content_parts)
+            )
 
+            # --- Phase 5: Execute tool calls (flat logic, no deep nesting) ---
             if tool_calls_list:
-                # Track history length before tool execution
                 history_length_before = len(self.chat_history.messages)
-                _logger.debug("History length before tool execution: %d", history_length_before)
-                # Execute tool calls
+
                 for tool_call in tool_calls_list:
-                    if isinstance(tool_call, dict):
-                        tool_name = tool_call.get("name")
-                        # Parse arguments from JSON string (accumulated during streaming)
-                        args = json.loads(tool_call.get("arguments", "{}"))
+                    tool_name = tool_call.get("name")
+                    args = json.loads(tool_call.get("arguments", "{}"))
+                    tool = self.tool_manager.get_tool(tool_name)
 
-                        tool = self.tool_manager.get_tool(tool_name)
-                        if tool:
-                            # Cast arguments to correct types based on function signature
-                            args = _cast_args_to_types(tool.func, args)
-                            _logger.debug("Casted args for %s: %s", tool_name, args)
+                    if not tool:
+                        self._append_tool_result(
+                            tool_name=tool_name,
+                            content=f"Error: Tool '{tool_name}' not found",
+                            success=False,
+                        )
+                        await self._call_hooks("after_tool_execution", tool_call, f"Error: Tool '{tool_name}' not found", False)
+                        continue
 
-                            # Check if tool execution should be allowed
-                            hook_result = await self._call_hooks("before_tool_execution", tool_call)
-                            if hook_result is not None:
-                                allow, message = hook_result
-                                if not allow:
-                                    # Tool execution disallowed by hook
-                                    self.chat_history.append_message(Message(
-                                        role="tool_result",
-                                        content=[
-                                            ContentPart(part_type="tool_result", name=tool_name, content=message),
-                                            ContentPart(part_type="bool", success=False)
-                                        ]
-                                    ))
-                                    await self._call_hooks("after_tool_execution", tool_call, message, False)
-                                    continue
+                    args = _cast_args_to_types(tool.func, args)
 
-                            try:
-                                result = tool.execute(**args)
-                                self.chat_history.append_message(Message(
-                                    role="tool_result",
-                                    content=[
-                                        ContentPart(part_type="tool_result", name=tool_name, content=str(result)),
-                                        ContentPart(part_type="bool", success=True)
-                                    ]
-                                ))
-                                await self._call_hooks("after_tool_execution", tool_call, str(result), True)
-                            except Exception as e:
-                                self.chat_history.append_message(Message(
-                                    role="tool_result",
-                                    content=[
-                                        ContentPart(part_type="tool_result", name=tool_name, content=f"Error: {type(e).__name__}: {str(e)}"),
-                                        ContentPart(part_type="bool", success=False)
-                                    ]
-                                ))
-                                await self._call_hooks("after_tool_execution", tool_call, str(e), False)
-                        else:
-                            self.chat_history.append_message(Message(
-                                role="tool_result",
-                                content=[
-                                    ContentPart(part_type="tool_result", name=tool_name, content=f"Error: Tool '{tool_name}' not found"),
-                                    ContentPart(part_type="bool", success=False)
-                                ]
-                            ))
-                            await self._call_hooks("after_tool_execution", tool_call, f"Error: Tool '{tool_name}' not found", False)
-                # Loop continues - sends history with tool results back to LLM
-                # Track delta messages (messages added during this iteration)
-                new_message_count = len(self.chat_history.messages) - history_length_before
-                delta_messages = self.chat_history.messages[-new_message_count:] if new_message_count > 0 else []
+                    hook_result = await self._call_hooks("before_tool_execution", tool_call)
+                    if hook_result is not None:
+                        allow, message = hook_result
+                        if not allow:
+                            self._append_tool_result(tool_name=tool_name, content=message, success=False)
+                            await self._call_hooks("after_tool_execution", tool_call, message, False)
+                            continue
+
+                    try:
+                        result = tool.execute(**args)
+                        self._append_tool_result(tool_name=tool_name, content=str(result), success=True)
+                        await self._call_hooks("after_tool_execution", tool_call, str(result), True)
+                    except Exception as e:
+                        self._append_tool_result(
+                            tool_name=tool_name,
+                            content=f"Error: {type(e).__name__}: {str(e)}",
+                            success=False,
+                        )
+                        await self._call_hooks("after_tool_execution", tool_call, str(e), False)
+
+                # Collect delta messages for the continue hook
+                new_count = len(self.chat_history.messages) - history_length_before
+                delta_messages = (
+                    self.chat_history.messages[-new_count:] if new_count > 0 else []
+                )
                 hook_result = await self._call_hooks("before_loop_continue", delta_messages)
                 if hook_result is not None:
                     should_exit, reason = hook_result
@@ -278,11 +267,9 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                         await self._call_hooks("before_loop_exit", reason)
                         break
             else:
-                # Check if response has text content
-                text = response.data.get("text")
-                if text is not None and text:
-                    # Final answer - exit loop
+                # No tool calls
+                if response.data.get("text"):
                     await self._call_hooks("before_loop_exit", "final_answer")
                     break
-                # No tool calls and no text - only reasoning, continue loop
+                # Only reasoning text — continue
                 await self._call_hooks("before_loop_continue", [])

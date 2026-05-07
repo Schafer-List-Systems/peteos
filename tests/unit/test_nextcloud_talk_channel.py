@@ -395,6 +395,45 @@ class TestSend:
         assert body["silent"] is False
         assert "convtoken" in mock_post_ctx.call_args[0][0]
 
+    @pytest.mark.asyncio
+    async def test_send_multiple_parts_sequentially(self, agent):
+        """Test that multiple content parts are sent in order."""
+        test_uuid = uuid.uuid4()
+        channel = NextcloudTalkChannel(
+            name="nextcloud", agent=agent,
+            nextcloud_url="https://cloud.example.com",
+            bot_id="abc", bot_secret="secret",
+        )
+        channel._active_session_uuid = test_uuid
+        channel._session_conversations[test_uuid] = "convtoken"
+
+        mock_response = AsyncMock(
+            __aenter__=AsyncMock(return_value=MagicMock(status=201, text=AsyncMock(return_value="ok"))),
+            __aexit__=AsyncMock(return_value=None),
+        )
+        mock_post_ctx = AsyncMock(return_value=mock_response)
+
+        with patch("aiohttp.ClientSession") as mock_session_cls:
+            mock_session_obj = MagicMock(post=mock_post_ctx)
+            mock_session_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
+            mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            channel.send(Message(
+                role="assistant",
+                content=[
+                    ContentPart(part_type="reasoning", reasoning="Thinking..."),
+                    ContentPart(part_type="text", text="Hello!"),
+                ],
+            ))
+            await asyncio.sleep(0.05)
+
+        assert mock_post_ctx.call_count == 2
+        first_msg = json.loads(mock_post_ctx.call_args_list[0][1]["data"])["message"]
+        second_msg = json.loads(mock_post_ctx.call_args_list[1][1]["data"])["message"]
+        assert "[Reasoning]" in first_msg
+        assert first_msg == "[Reasoning] Thinking..."
+        assert second_msg == "Hello!"
+
 
 class TestStartStop:
     """Test server lifecycle."""

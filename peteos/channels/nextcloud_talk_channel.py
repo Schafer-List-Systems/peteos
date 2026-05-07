@@ -98,11 +98,16 @@ class NextcloudTalkChannel(Channel):
         if not conversation_token:
             return
 
+        if not message.content:
+            return
+
+        payloads = []
         for part in message.content:
             if not self._should_send_part(part, message.role):
                 continue
-            payload = self._format_for_nextcloud(part, message)
-            asyncio.create_task(self._send_to_nextcloud(conversation_token, payload))
+            payloads.append(self._format_for_nextcloud(part, message))
+
+        asyncio.create_task(self._send_all_sequentially(conversation_token, payloads))
 
     def _should_send_part(self, part: ContentPart, msg_role: str) -> bool:
         """Check if a content part should be sent based on enabled/disabled flags."""
@@ -375,3 +380,17 @@ class NextcloudTalkChannel(Channel):
 
         except Exception as e:
             logger.error("Error sending to Nextcloud: %s", e)
+
+    async def _send_all_sequentially(
+        self, conversation_token: str, payloads: list[dict]
+    ) -> None:
+        """Send multiple payloads to Nextcloud sequentially in order.
+
+        Args:
+            conversation_token: The conversation to send to.
+            payloads: List of formatted message payloads to send.
+        """
+        import aiohttp
+
+        for i, payload in enumerate(payloads):
+            await self._send_to_nextcloud(conversation_token, payload)

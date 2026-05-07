@@ -187,10 +187,11 @@ class TestREPLRunBasicConversation:
         # Should have: user, assistant (with reasoning and text in one message)
         assert len(chat_history.messages) == 2
         assert chat_history.messages[0].content[0].type == "text"
-        assert chat_history.messages[1].content[0].type == "text"
-        assert chat_history.messages[1].content[0].text == text_content
-        assert chat_history.messages[1].content[1].type == "reasoning"
-        assert chat_history.messages[1].content[1].data.get("reasoning") == reasoning_content
+        # Reasoning is added first, text second in content_parts order
+        assert chat_history.messages[1].content[0].type == "reasoning"
+        assert chat_history.messages[1].content[0].data.get("reasoning") == reasoning_content
+        assert chat_history.messages[1].content[1].type == "text"
+        assert chat_history.messages[1].content[1].text == text_content
 
     @pytest.mark.asyncio
     async def test_run_loop_terminates_on_final_answer(self, mock_role, mock_chatbot_manager, mock_chatbot):
