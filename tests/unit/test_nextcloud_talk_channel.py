@@ -392,7 +392,7 @@ class TestSend:
         assert body["message"] == "Hello!"
         assert body["replyTo"] == ""
         assert body["referenceId"] is not None
-        assert body["silent"] is False
+        assert body["silent"] is True
         assert "convtoken" in mock_post_ctx.call_args[0][0]
 
     @pytest.mark.asyncio
@@ -430,8 +430,7 @@ class TestSend:
         assert mock_post_ctx.call_count == 2
         first_msg = json.loads(mock_post_ctx.call_args_list[0][1]["data"])["message"]
         second_msg = json.loads(mock_post_ctx.call_args_list[1][1]["data"])["message"]
-        assert "[Reasoning]" in first_msg
-        assert first_msg == "[Reasoning] Thinking..."
+        assert first_msg == "> _Thinking..._"
         assert second_msg == "Hello!"
 
 

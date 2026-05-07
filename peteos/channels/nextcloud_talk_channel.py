@@ -122,29 +122,45 @@ class NextcloudTalkChannel(Channel):
         return True
 
     def _format_for_nextcloud(self, part: ContentPart, message: Message) -> dict:
-        """Format a content part into a Nextcloud-compatible payload."""
+        """Format a content part into a Nextcloud-compatible payload.
+
+        All messages are rendered as Markdown by the Nextcloud Talk API.
+        """
         payload = {
             "message": "",
             "replyTo": "",
             "referenceId": message.id,
-            "silent": False,
+            "silent": part.type == "text",
         }
         if part.type == "text":
             payload["message"] = part.data.get("text", "")
+
         elif part.type == "reasoning":
             reasoning = part.data.get("reasoning", "")
-            payload["message"] = f"[Reasoning] {reasoning}"
+            payload["message"] = f"> _{reasoning}_"
+
         elif part.type in ("tool_calls", "tool_call"):
             tc = part.data.get("tool_call") or part.data.get("tool_calls")
+
             if isinstance(tc, dict):
-                payload["message"] = f"[Tool Call] {tc.get('name', '?')}({tc.get('arguments', {})})"
+                args = tc.get("arguments", "{}")
+                payload["message"] = f"```python\n{tc.get('name', '?')}({args})\n```"
+
             elif isinstance(tc, list):
-                names = [f"{item.get('name', '?')}({item.get('arguments', {})})" for item in tc]
-                payload["message"] = "[Tool Call] " + ", ".join(names)
+                blocks = []
+                for item in tc:
+                    args = item.get("arguments", "{}")
+                    blocks.append(f"{item.get('name', '?')}({args})")
+                payload["message"] = "\n".join(
+                    f"```python\n{block}\n```" for block in blocks
+                )
+
             else:
-                payload["message"] = "[Tool Call] (no data)"
+                payload["message"] = "```python\n(no data)\n```"
+
         elif part.type == "tool_result":
             payload["message"] = part.data.get("content", "")
+
         return payload
 
     def receive(self) -> str | None:
