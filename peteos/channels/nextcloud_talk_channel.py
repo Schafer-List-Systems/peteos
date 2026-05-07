@@ -111,29 +111,8 @@ class NextcloudTalkChannel(Channel):
                 continue
             payloads.append(self._format_for_nextcloud(part, message))
 
-        is_final_answer = self._is_final_answer(message)
+        is_final_answer = message.metadata.get("finish", False)
         asyncio.create_task(self._send_all_sequentially(conversation_token, payloads, is_final_answer))
-
-    def _is_final_answer(self, message: Message) -> bool:
-        """Check if a message is a final answer (text-only assistant response).
-
-        A final answer is an assistant message whose only sendable content
-        part is text (no tool calls, tool results, reasoning, etc.).
-
-        Args:
-            message: The Message to evaluate.
-
-        Returns:
-            True if this is a final answer message.
-        """
-        if message.role != "assistant":
-            return False
-        for part in message.content:
-            if part.type == "text":
-                continue
-            if self._should_send_part(part, message.role):
-                return False
-        return True
 
     def _should_send_part(self, part: ContentPart, msg_role: str) -> bool:
         """Check if a content part should be sent based on enabled/disabled flags."""
@@ -290,16 +269,14 @@ class NextcloudTalkChannel(Channel):
             message_id = obj.get("id")
             if message_id:
                 self._incoming_message_ids[session.uuid] = message_id
+                # Send thinking reaction immediately, before processing
+                await self._send_reaction(conversation_token, message_id, "🤔")
 
             user_message = Message(
                 role="user",
                 content=[ContentPart(part_type="text", text=message_text)],
             )
             await session.queue_message(user_message)
-
-            # Send thinking reaction to the incoming message
-            if message_id:
-                await self._send_reaction(conversation_token, message_id, "🤔")
 
     async def _handle_reaction(self, event: dict) -> None:
         """Handle reaction added (Like event)."""

@@ -478,7 +478,8 @@ class Agent:
     ) -> None:
         """Hook callback fired when the loop exits.
 
-        Publishes the final answer to all subscribed channels.
+        Publishes the final answer to all subscribed channels with a
+        "finish" flag so channels can apply final-answer reactions.
 
         Args:
             session_uuid: The UUID of the session.
@@ -490,7 +491,13 @@ class Agent:
             if history:
                 last_msg = history[-1]
                 if last_msg.role == "assistant":
-                    self._publish_notification(session_uuid, last_msg)
+                    # Tag the message so channels know this is the final answer
+                    final_msg = Message(
+                        role=last_msg.role,
+                        content=last_msg.content,
+                        metadata={**last_msg.metadata, "finish": True}
+                    )
+                    self._publish_notification(session_uuid, final_msg)
 
     def _publish_notification(
         self,
