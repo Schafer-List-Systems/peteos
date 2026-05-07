@@ -54,4 +54,5 @@ http_client.md
 
 # internal TODO list
 TODO.md
+config/chatbot_config.json
 roles/test/config.json
