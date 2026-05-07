@@ -173,29 +173,30 @@ class TestAgentHooksMessageFormat:
         shell = InteractiveShellChannel("shell", agent)
         shell.select_session(session.uuid)
 
-        # Create a tool_result message
-        tool_result_message = Message(
-            role="tool_result",
-            content=[
-                ContentPart(
-                    part_type="tool_result",
-                    name="weather_tool",
-                    content="Sunny and 25C",
-                    success=True
-                )
-            ]
+        # subscribe_to_session returns early when channel is not running,
+        # so manually create the notification queue for this test
+        queue_key = ("shell", session.uuid)
+        agent._notification_queues[queue_key] = asyncio.Queue()
+        if session.uuid not in agent._session_channels:
+            agent._session_channels[session.uuid] = set()
+        agent._session_channels[session.uuid].add(shell)
+
+        # Trigger after_tool_execution hook — it publishes tool_result notifications
+        agent._on_after_tool_execution(
+            session.uuid,
+            {"name": "weather_tool", "arguments": {}},
+            "Sunny and 25C",
+            True
         )
 
-        # Trigger the hook
-        agent._on_before_loop_continue(session.uuid, [tool_result_message])
-
         # Check that notification was queued
-        queue_key = ("shell", session.uuid)
         assert queue_key in agent._notification_queues
         assert agent._notification_queues[queue_key].qsize() > 0
 
         notification = agent._notification_queues[queue_key].get_nowait()
-        assert "weather_tool" in notification
-        assert "success" in notification
+        assert notification.role == "tool_result"
+        assert len(notification.content) > 0
+        assert "Sunny and 25C" in notification.content[0].data.get("content", "")
+        assert notification.metadata.get("tool_status") == "ok"
 
         await agent.stop()

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from peteos.chatbot import ChatHistory
-from peteos.chatbot import Message
+from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.session import Session
@@ -58,7 +58,7 @@ def test_session_init_with_custom_chat_history():
     tool_manager = ToolManager()
     role = Role(name="test", description="A test role")
     chat_history = ChatHistory()
-    chat_history.append_message(Message(content={"role": "user", "content": "Hi"}))
+    chat_history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="Hi")]))
 
     session = Session(
         role=role,
@@ -93,12 +93,14 @@ def test_session_load_from_json():
         "role": "test",
         "chat_history": [
             {
-                "content": {"role": "user", "content": "Hello"},
+                "content": [{"type": "text", "text": "Hello"}],
+                "role": "user",
                 "creation_timestamp": "2026-03-31T12:00:00",
                 "id": "msg-1"
             },
             {
-                "content": {"role": "assistant", "text": "Hi!"},
+                "content": [{"type": "text", "text": "Hi!"}],
+                "role": "assistant",
                 "creation_timestamp": "2026-03-31T12:00:01",
                 "id": "msg-2"
             }
@@ -115,8 +117,8 @@ def test_session_load_from_json():
     assert session.uuid.hex == "810fb120e4e54e32971888bbcaf7641a"
     assert session.role.name == "test"
     assert len(session.chat_history.messages) == 2
-    assert session.chat_history.messages[0].content["role"] == "user"
-    assert session.chat_history.messages[1].content["text"] == "Hi!"
+    assert session.chat_history.messages[0].role == "user"
+    assert session.chat_history.messages[1].text == "Hi!"
 
 
 def test_session_load_from_json_without_uuid():
@@ -238,7 +240,8 @@ def test_session_load_from_file():
             "role": "test",
             "chat_history": [
                 {
-                    "content": {"role": "user", "content": "Hello from file"},
+                    "content": [{"type": "text", "text": "Hello from file"}],
+                    "role": "user",
                     "creation_timestamp": "2026-03-31T12:00:00",
                     "id": "msg-file-1"
                 }
@@ -257,7 +260,7 @@ def test_session_load_from_file():
         assert session.uuid.hex == "810fb120e4e54e32971888bbcaf7641a"
         assert session.role.name == "test"
         assert len(session.chat_history.messages) == 1
-        assert session.chat_history.messages[0].content["role"] == "user"
+        assert session.chat_history.messages[0].role == "user"
 
 
 def test_session_load_from_file_without_timestamps():
@@ -275,7 +278,8 @@ def test_session_load_from_file_without_timestamps():
             "role": "test",
             "chat_history": [
                 {
-                    "content": {"role": "user", "content": "No timestamp"},
+                    "role": "user",
+                    "content": [{"type": "text", "text": "No timestamp"}],
                     "id": "msg-no-ts"
                 }
             ]

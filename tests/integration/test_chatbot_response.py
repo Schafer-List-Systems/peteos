@@ -11,6 +11,7 @@ from aiohttp import web
 
 from peteos.chatbot import OpenAIChatBot, AnthropicChatBot, GenericChatBotResponse, ChatHistory, GenericChatBot
 from peteos.chatbot.httpclient import HTTPClient
+from peteos.chatbot.chatbotconfig import ChatBotConfig
 
 
 class TestOpenAIChatBotResponse:
@@ -20,7 +21,8 @@ class TestOpenAIChatBotResponse:
     async def test_openai_response_has_role_field(self):
         """Test that OpenAIChatBot adds role to response.data."""
         http_client = HTTPClient()
-        chatbot = OpenAIChatBot(http_client, "test-model", base_url="http://test:8000")
+        config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
+        chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
 
         # Mock SSE response for OpenAI format
@@ -48,7 +50,8 @@ class TestOpenAIChatBotResponse:
     async def test_openai_response_non_streaming_has_role(self):
         """Test that non-streaming OpenAI response also has role."""
         http_client = HTTPClient()
-        chatbot = OpenAIChatBot(http_client, "test-model", base_url="http://test:8000")
+        config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
+        chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
 
         # Mock JSON response with role in message - needs to match OpenAI format
@@ -76,7 +79,8 @@ class TestAnthropicChatBotResponse:
     async def test_anthropic_response_has_role_field(self):
         """Test that AnthropicChatBot adds role to response.data."""
         http_client = HTTPClient()
-        chatbot = AnthropicChatBot(http_client, "test-model", base_url="http://test:8000")
+        config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
+        chatbot = AnthropicChatBot(http_client, config)
         chat_history = ChatHistory()
 
         # Mock SSE response for Anthropic format
@@ -107,10 +111,10 @@ class TestGenericChatBotResponse:
     async def test_response_data_structure(self):
         """Test that response.data has correct structure."""
         http_client = HTTPClient()
-        chatbot = GenericChatBot(
-            http_client,
-            "test-model",
-            base_url="http://test:8000",
+        config = ChatBotConfig(
+            name="test",
+            url="http://test:8000",
+            model="test-model",
             chat_endpoint="/v1/chat/completions",
             models_endpoint="/v1/models",
             response_translations={
@@ -118,6 +122,7 @@ class TestGenericChatBotResponse:
                 "choices[*].delta.role": "role"
             }
         )
+        chatbot = GenericChatBot(http_client, config)
         chat_history = ChatHistory()
 
         mock_sse_data = [
@@ -148,7 +153,8 @@ class TestChatBotResponseIntegration:
     async def test_response_valid_for_execution_environment(self):
         """Test that response format satisfies ExecutionEnvironment requirements."""
         http_client = HTTPClient()
-        chatbot = OpenAIChatBot(http_client, "test-model", base_url="http://test:8000")
+        config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
+        chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
 
         # Mock response

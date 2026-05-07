@@ -9,7 +9,7 @@ import pytest
 from peteos.agent import Agent
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
-from peteos.chatbot import Message
+from peteos.chatbot import Message, ContentPart
 from peteos.toolmanager import ToolManager
 
 
@@ -224,7 +224,7 @@ class TestAgentMessageQueue:
         agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
 
         session = agent.create_session("test")
-        message = Message(content={"role": "user", "content": "Hello"})
+        message = Message(role="user", content=[ContentPart(part_type="text", text="Hello")])
 
         agent.post_message(session.uuid, message)
 
@@ -238,7 +238,7 @@ class TestAgentMessageQueue:
         agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
 
         session_uuid = uuid.UUID("810fb120-e4e5-4e32-9718-88bbcaf7641a")
-        message = Message(content={"role": "user", "content": "Hello"})
+        message = Message(role="user", content=[ContentPart(part_type="text", text="Hello")])
 
         with pytest.raises(KeyError):
             agent.post_message(session_uuid, message)
@@ -360,8 +360,8 @@ class TestAgentHookCallbacks:
 
         session = agent.create_session("test")
         delta_messages = [
-            Message(content={"role": "tool", "name": "test_tool", "content": "result", "success": True}),
-            Message(content={"role": "assistant", "text": "Hello"})
+            Message(role="tool", content=[ContentPart(part_type="tool", name="test_tool", description="test", parameters={})]),
+            Message(role="assistant", content=[ContentPart(part_type="text", text="Hello")])
         ]
 
         # Should not raise
@@ -374,7 +374,7 @@ class TestAgentHookCallbacks:
         session = agent.create_session("test")
         # Add a history message
         session.chat_history.append_message(
-            Message(content={"role": "assistant", "text": "Final answer"})
+            Message(role="assistant", content=[ContentPart(part_type="text", text="Final answer")])
         )
 
         # Should not raise

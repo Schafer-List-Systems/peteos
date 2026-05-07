@@ -1,0 +1,4 @@
+{
+    "required_tools": ["example_tool_1", "example_tool_2"],
+    "model": "example-model"
+}

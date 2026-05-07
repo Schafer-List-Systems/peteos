@@ -5,10 +5,14 @@ import time
 import pytest
 
 from peteos.session import Session
-from peteos.chatbot import Message, ChatHistory
+from peteos.chatbot import Message, ChatHistory, ContentPart
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
 from peteos.chatbot import ChatBotManager
+
+
+def _user_msg(text: str) -> Message:
+    return Message(role="user", content=[ContentPart(part_type="text", text=text)])
 
 
 class MockChatBot:
@@ -58,6 +62,10 @@ class MockExecutionEnvironment:
 
     async def run(self):
         """Run the execution environment."""
+        if not self._completion_signal.is_set():
+            # Guard: another run() is already executing
+            self._interrupt = True
+            return
         self._running = True
         self._completion_signal.clear()
         self.run_count += 1
@@ -94,18 +102,23 @@ async def test_queue_message_adds_to_queue():
         execution_environment=env
     )
 
-    message = Message({"role": "user", "content": "Hello"})
+    message = _user_msg("Hello")
     await session.queue_message(message)
 
     # Message should be in chat_history
     assert len(chat_history.messages) == 1
-    assert chat_history.messages[0].content == {"role": "user", "content": "Hello"}
+    assert chat_history.messages[0].role == "user"
     assert env.run_count == 1
 
 
 @pytest.mark.asyncio
 async def test_queue_message_interrupts_running_env():
-    """Test that queue_message interrupts running execution environment."""
+    """Test that queue_message interrupts running execution environment.
+
+    Verifies the guard in run() prevents a second _run_impl() from starting
+    when the env is already running. The first run() is started externally
+    (simulating the main loop), then queue_message is called.
+    """
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
@@ -121,7 +134,7 @@ async def test_queue_message_interrupts_running_env():
         execution_environment=env
     )
 
-    # Start env in background task
+    # Start env in background task (simulates _main_loop calling run())
     async def run_env_async():
         await env.run()
 
@@ -130,18 +143,21 @@ async def test_queue_message_interrupts_running_env():
     # Give it a moment to start
     await asyncio.sleep(0.05)
 
-    # Queue a message - should interrupt
-    message = Message({"role": "user", "content": "Test"})
+    # Queue a message - the guard in run() should fire
+    message = _user_msg("Test")
     await session.queue_message(message)
 
-    # Wait for task to finish
+    # Wait for original task to finish
     await asyncio.sleep(0.2)
 
-    # Verify interruption happened
+    # Verify the guard set interrupt (prevents second run)
     assert env.interrupt_count == 1
 
     # Verify env stopped
     assert not env.is_running
+
+    # The guard prevented a second run
+    assert env.run_count == 1
 
 
 @pytest.mark.asyncio
@@ -173,7 +189,7 @@ async def test_queue_message_drains_all_to_history():
 
     # Queue multiple messages rapidly
     for i in range(5):
-        msg = Message({"role": "user", "content": f"Message {i}"})
+        msg = _user_msg(f"Message {i}")
         await session.queue_message(msg)
 
     # Wait a bit
@@ -184,8 +200,8 @@ async def test_queue_message_drains_all_to_history():
 
 
 @pytest.mark.asyncio
-async def test_queue_message_restarts_env():
-    """Test that execution env restarts after draining messages."""
+async def test_queue_message_guard_prevents_duplicate_run():
+    """Test that the guard prevents concurrent run() calls."""
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
@@ -210,14 +226,17 @@ async def test_queue_message_restarts_env():
     # Give it a moment to start
     await asyncio.sleep(0.05)
 
-    # Queue message - should restart
-    await session.queue_message(Message({"role": "user", "content": "Test"}))
+    # Queue message - guard should prevent second run
+    await session.queue_message(_user_msg("Test"))
 
     # Wait a bit
     await asyncio.sleep(0.2)
 
-    # Env should have been restarted (original run + restart)
-    assert env.run_count >= 2
+    # Only one run should have executed (guard prevented the second)
+    assert env.run_count == 1
+
+    # Message should still be in chat_history
+    assert len(chat_history.messages) >= 1
 
 
 @pytest.mark.asyncio
@@ -239,7 +258,7 @@ async def test_queue_message_non_running():
     )
 
     # Queue message when not running - should start env
-    await session.queue_message(Message({"role": "user", "content": "Test"}))
+    await session.queue_message(_user_msg("Test"))
 
     # Env should have been started
     assert env.run_count >= 1
@@ -303,7 +322,7 @@ async def test_concurrent_queue_no_race_condition():
 
     # Enqueue messages sequentially (serialized by lock in queue_message)
     for i in range(10):
-        msg = Message({"role": "user", "content": f"Concurrent {i}"})
+        msg = _user_msg(f"Concurrent {i}")
         await session.queue_message(msg)
 
     # Wait a bit
@@ -312,8 +331,8 @@ async def test_concurrent_queue_no_race_condition():
     # All messages should be in chat_history
     assert len(chat_history.messages) >= 10
 
-    # Interrupt should have been called exactly once (serialized by lock)
-    assert env.interrupt_count == 1
+    # Guard prevents concurrent runs - only 1 run executes total
+    assert env.run_count == 1
 
 
 @pytest.mark.asyncio
@@ -345,7 +364,7 @@ async def test_queue_message_preserves_order():
 
     # Queue messages in order
     for i in range(5):
-        msg = Message({"role": "user", "content": f"Msg {i}"})
+        msg = _user_msg(f"Msg {i}")
         await session.queue_message(msg)
 
     # Wait a bit

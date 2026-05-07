@@ -9,6 +9,7 @@ Verifies:
 import pytest
 from peteos.chatbot.openaichatbot import OpenAIChatBot, OpenAIChatBotResponse
 from peteos.chatbot.anthropicchatbot import AnthropicChatBot, AnthropicChatBotResponse
+from peteos.chatbot.chatbotconfig import ChatBotConfig
 from peteos.utils.delta_merge import merge_delta_into_target, translate_delta_event
 from peteos.chatbot.message import Message
 from peteos.chatbot.contentpart import ContentPart
@@ -30,6 +31,15 @@ class MockHTTPClient:
         self.request_history.append(("STREAM_POST", url, body))
 
 
+def _make_config(api_type, model, base_url):
+    return ChatBotConfig(
+        name=f"test-{api_type}",
+        url=base_url,
+        api_type=api_type,
+        model=model,
+    )
+
+
 class TestOpenAIToolCallTranslation:
     """Test OpenAI tool call translation."""
 
@@ -38,8 +48,7 @@ class TestOpenAIToolCallTranslation:
         http_client = MockHTTPClient()
         chatbot = OpenAIChatBot(
             http_client=http_client,
-            model="gpt-4",
-            base_url="http://test-backend:8000"
+            config=_make_config("openai", "gpt-4", "http://test-backend:8000")
         )
 
         event = {
@@ -70,8 +79,7 @@ class TestOpenAIToolCallTranslation:
         http_client = MockHTTPClient()
         chatbot = OpenAIChatBot(
             http_client=http_client,
-            model="gpt-4",
-            base_url="http://test-backend:8000"
+            config=_make_config("openai", "gpt-4", "http://test-backend:8000")
         )
 
         # First tool call event has all fields including id, type, name
@@ -113,8 +121,7 @@ class TestOpenAIToolCallTranslation:
         http_client = MockHTTPClient()
         chatbot = OpenAIChatBot(
             http_client=http_client,
-            model="gpt-4",
-            base_url="http://test-backend:8000"
+            config=_make_config("openai", "gpt-4", "http://test-backend:8000")
         )
 
         # Simulate actual SSE events from OpenAI backend
@@ -168,8 +175,7 @@ class TestAnthropicToolCallTranslation:
         http_client = MockHTTPClient()
         chatbot = AnthropicChatBot(
             http_client=http_client,
-            model="claude-3-opus",
-            base_url="http://test-backend:8000"
+            config=_make_config("anthropic", "claude-3-opus", "http://test-backend:8000")
         )
 
         event = {
@@ -196,8 +202,7 @@ class TestAnthropicToolCallTranslation:
         http_client = MockHTTPClient()
         chatbot = AnthropicChatBot(
             http_client=http_client,
-            model="claude-3-opus",
-            base_url="http://test-backend:8000"
+            config=_make_config("anthropic", "claude-3-opus", "http://test-backend:8000")
         )
 
         events = [
@@ -234,8 +239,7 @@ class TestAnthropicToolCallTranslation:
         http_client = MockHTTPClient()
         chatbot = AnthropicChatBot(
             http_client=http_client,
-            model="claude-3-opus",
-            base_url="http://test-backend:8000"
+            config=_make_config("anthropic", "claude-3-opus", "http://test-backend:8000")
         )
 
         event = {
@@ -255,15 +259,13 @@ class TestUniformProtocolAlignment:
         openai_client = MockHTTPClient()
         openai_chatbot = OpenAIChatBot(
             http_client=openai_client,
-            model="gpt-4",
-            base_url="http://test-backend:8000"
+            config=_make_config("openai", "gpt-4", "http://test-backend:8000")
         )
 
         anthropic_client = MockHTTPClient()
         anthropic_chatbot = AnthropicChatBot(
             http_client=anthropic_client,
-            model="claude-3-opus",
-            base_url="http://test-backend:8000"
+            config=_make_config("anthropic", "claude-3-opus", "http://test-backend:8000")
         )
 
         # OpenAI first tool call event (has id, type, name)
@@ -328,8 +330,7 @@ class TestRequestBuilding:
         http_client = MockHTTPClient()
         chatbot = OpenAIChatBot(
             http_client=http_client,
-            model="gpt-4",
-            base_url="http://test-backend:8000"
+            config=_make_config("openai", "gpt-4", "http://test-backend:8000")
         )
 
         messages = [
@@ -369,8 +370,7 @@ class TestRequestBuilding:
         http_client = MockHTTPClient()
         chatbot = AnthropicChatBot(
             http_client=http_client,
-            model="claude-3-opus",
-            base_url="http://test-backend:8000"
+            config=_make_config("anthropic", "claude-3-opus", "http://test-backend:8000")
         )
 
         messages = [

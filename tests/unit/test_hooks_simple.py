@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from peteos.chatbot import ChatHistory, Message
+from peteos.chatbot import ChatHistory, Message, ContentPart
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
@@ -235,7 +235,7 @@ class TestHookCalling:
         tool_manager = ToolManager()
 
         mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
-        chat_history.append_message(Message(content={"role": "user", "content": "Hello!"}))
+        chat_history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="Hello!")]))
 
         exit_calls = []
 
@@ -250,7 +250,7 @@ class TestHookCalling:
                 self._data = {
                     "role": "assistant",
                     "text": "",
-                    "tool_calls": [{"name": "test_tool", "arguments": {}}]
+                    "content": [{"type": "tool_use", "name": "test_tool", "arguments": "{}"}]
                 }
             @property
             def data(self): return self._data

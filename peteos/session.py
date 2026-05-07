@@ -168,7 +168,7 @@ class Session:
 
         messages = [
             Message.from_dict(
-                msg["content"],
+                {"role": msg.get("role", "user"), "content": msg.get("content", [])},
                 creation_timestamp=datetime.fromisoformat(msg["creation_timestamp"]) if "creation_timestamp" in msg else None,
                 message_id=msg.get("id")
             )
