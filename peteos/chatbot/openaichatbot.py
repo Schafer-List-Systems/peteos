@@ -243,7 +243,72 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
     Translates OpenAI SSE events to uniform delta format.
     Special handling: OpenAI tool_calls are converted to uniform content array
     with type="tool_use" for backwards compatibility with existing code.
+
+    For non-streaming, overrides from_json to extract fields from the
+    complete response format (choices array with message role/content).
     """
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any], translations: Dict[str, str]) -> "OpenAIChatBotResponse":
+        """Create a response from a complete OpenAI non-streaming response.
+
+        Args:
+            data: Complete OpenAI API response.
+            translations: Path translation configuration (unused for non-streaming).
+
+        Returns:
+            OpenAIChatBotResponse with extracted fields.
+        """
+        async def events():
+            yield "data: {}"
+            yield "[DONE]"
+        response = cls(events(), translations)
+        response._data = {}
+
+        choices = data.get("choices", [])
+        if choices and isinstance(choices, list) and choices:
+            message = choices[0].get("message", {})
+            # Extract role
+            if "role" in message:
+                response._data["role"] = message["role"]
+            # Extract content
+            content = message.get("content", "")
+            if isinstance(content, str) and content:
+                response._data["content"] = [{"index": 0, "type": "text", "content": content}]
+                response._data["text"] = content
+            elif isinstance(content, list):
+                response._data["content"] = content
+                text_parts = [
+                    item.get("content", "")
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "text"
+                ]
+                if text_parts:
+                    response._data["text"] = "".join(text_parts)
+            # Extract tool_calls
+            if "tool_calls" in message and message["tool_calls"]:
+                tool_calls = []
+                for tc in message["tool_calls"]:
+                    if isinstance(tc, dict):
+                        tool_calls.append({
+                            "type": "tool_use",
+                            "id": tc.get("id"),
+                            "name": tc.get("function", {}).get("name"),
+                            "arguments": tc.get("function", {}).get("arguments", ""),
+                        })
+                if tool_calls:
+                    response._data["tool_calls"] = tool_calls
+            # Extract reasoning
+            if "reasoning" in message and message["reasoning"]:
+                response._data["reasoning"] = message["reasoning"]
+
+        # Extract stop_reason from choices[0].finish_reason
+        if choices and isinstance(choices, list) and choices:
+            finish_reason = choices[0].get("finish_reason")
+            if finish_reason:
+                response._data["stop_reason"] = finish_reason
+
+        return response
 
     @staticmethod
     def _set_tool_call_types(translated: Dict[str, Any]) -> None:

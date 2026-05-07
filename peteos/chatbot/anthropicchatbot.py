@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import asdict
-from typing import Any, Dict, Optional, AsyncGenerator
+from typing import Any, Dict, Optional, AsyncGenerator, AsyncIterator
 
 from peteos.logger import get_logger
 from .chatbot import GenericChatBot
@@ -14,6 +14,12 @@ from .httpclient import HTTPClient
 from .message import Message
 
 _logger = get_logger(__name__)
+
+
+async def augmented_yield():
+    """Yields nothing - AnthropicChatBotResponse.from_json populates _data directly."""
+    return
+    yield
 
 
 class AnthropicChatBot(GenericChatBot):
@@ -285,7 +291,79 @@ class AnthropicChatBotResponse(GenericChatBotResponse):
     Uses generic delta translation and merging from parent class.
     Anthropic's index field is top-level metadata (not in arrays), so it's
     simply ignored during translation.
+
+    For non-streaming, overrides from_json to extract fields from the
+    complete response format (role, content array, stop_reason).
     """
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any], translations: Dict[str, str]) -> "AnthropicChatBotResponse":
+        """Create a response from a complete Anthropic non-streaming response.
+
+        Anthropic non-streaming returns a complete message, not SSE deltas.
+        Extract role, build content array (converting input->arguments for
+        tool_use items), and copy stop_reason directly.
+
+        Args:
+            data: Complete Anthropic API response.
+            translations: Path translation configuration (unused for non-streaming).
+
+        Returns:
+            AnthropicChatBotResponse with extracted fields.
+        """
+        response = cls(augmented_yield(), translations)
+        response._data = {}
+
+        # Extract role
+        if "role" in data:
+            response._data["role"] = data["role"]
+
+        # Build uniform content array from content
+        if "content" in data and isinstance(data["content"], list):
+            content_array = []
+            for item in data["content"]:
+                if isinstance(item, dict):
+                    content_item = {"type": item.get("type", "text")}
+                    if item.get("type") == "tool_use":
+                        # Convert input dict to arguments JSON string
+                        if "id" in item:
+                            content_item["id"] = item["id"]
+                        if "name" in item:
+                            content_item["name"] = item["name"]
+                        if "input" in item:
+                            content_item["arguments"] = json.dumps(item["input"])
+                    elif item.get("type") == "thinking":
+                        # thinking blocks use "thinking" key, not "text"
+                        content_item["content"] = item.get("thinking", "")
+                    else:
+                        # text blocks
+                        content_item["content"] = item.get("text", "")
+                    content_array.append(content_item)
+            response._data["content"] = content_array
+
+            # Extract text for backwards compatibility
+            text_parts = [
+                item.get("content", "")
+                for item in content_array
+                if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            if text_parts:
+                response._data["text"] = "".join(text_parts)
+
+            # Extract reasoning from thinking blocks
+            reasoning_parts = [
+                item.get("content", "")
+                for item in content_array
+                if isinstance(item, dict) and item.get("type") == "thinking"
+            ]
+            if reasoning_parts:
+                response._data["reasoning"] = "".join(reasoning_parts)
+
+        # Extract stop_reason
+        if "stop_reason" in data:
+            response._data["stop_reason"] = data["stop_reason"]
+
+        return response
 
     def _accumulate_event(self, event: Dict[str, Any]) -> None:
         """
