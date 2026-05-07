@@ -46,13 +46,16 @@ class InteractiveShellChannel(Channel):
         super().__init__(name, agent)
         self._running = False  # Explicit start/stop lifecycle
 
-    def send(self, message: Message) -> None:
+    def send(self, message: Message | str) -> None:
         """Send a message to the shell.
 
         Args:
-            message: The Message to display.
+            message: The Message to display, or a plain string.
         """
-        print(message.text)
+        if isinstance(message, str):
+            print(message)
+        else:
+            print(message.text)
 
     def _post_message_to_agent(self, session_uuid: uuid.UUID, content: str) -> None:
         """Post a message to the Agent's message queue.
@@ -94,7 +97,7 @@ class InteractiveShellChannel(Channel):
             return
 
         self._running = True
-        self.send(f"Connected. Commands: /new, /list, /select, /messages, /quit")
+        self.send("Connected. Commands: /new, /list, /select, /messages, /quit")
 
     async def stop(self) -> None:
         """Stop the shell channel gracefully."""
