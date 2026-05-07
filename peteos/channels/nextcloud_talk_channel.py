@@ -130,7 +130,7 @@ class NextcloudTalkChannel(Channel):
             "message": "",
             "replyTo": "",
             "referenceId": message.id,
-            "silent": part.type == "text",
+            "silent": part.type != "text",
         }
         if part.type == "text":
             payload["message"] = part.data.get("text", "")
@@ -159,7 +159,13 @@ class NextcloudTalkChannel(Channel):
                 payload["message"] = "```python\n(no data)\n```"
 
         elif part.type == "tool_result":
-            payload["message"] = part.data.get("content", "")
+            content = part.data.get("content", "")
+            if isinstance(content, (dict, list)):
+                payload["message"] = "```json\n" + json.dumps(content, indent=2) + "\n```"
+            elif isinstance(content, str):
+                payload["message"] = content
+            else:
+                payload["message"] = str(content)
 
         return payload
 
