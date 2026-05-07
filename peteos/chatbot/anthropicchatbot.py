@@ -1,10 +1,12 @@
 """Anthropic-compatible ChatBot implementation."""
 
 import json
+from dataclasses import asdict
 from typing import Any, Dict, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
 from .chatbot import GenericChatBot
+from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .chathistory import ChatHistory
 from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
@@ -131,37 +133,16 @@ class AnthropicChatBot(GenericChatBot):
             "required": required_params,
         }
 
-    def __init__(
-        self,
-        http_client: HTTPClient,
-        model: str,
-        base_url: str,
-        chat_endpoint: Optional[str] = None,
-        max_tokens: int = 4096,
-        streaming: bool = True,
-    ):
-        """
-        Initialize AnthropicChatBot.
-
-        Args:
-            http_client: HTTP client for making API requests.
-            model: The Anthropic model identifier (e.g., "claude-3-opus-20240229").
-            base_url: The Anthropic API base URL.
-            chat_endpoint: API-specific chat endpoint. Defaults to DEFAULT_CHAT_ENDPOINT.
-            max_tokens: Maximum tokens to generate (default: 4096).
-            streaming: Whether to use streaming mode by default (default: True).
-        """
-        super().__init__(
-            http_client=http_client,
-            model=model,
-            base_url=base_url,
-            chat_endpoint=chat_endpoint or self.DEFAULT_CHAT_ENDPOINT,
-            models_endpoint=self.DEFAULT_MODELS_ENDPOINT,
-            response_translations=self.RESPONSE_TRANSLATIONS,
-            request_translations=self.REQUEST_TRANSLATIONS,
-            streaming=streaming,
-        )
-        self._max_tokens = max_tokens
+    def __init__(self, http_client: HTTPClient, config: ChatBotConfig):
+        # Fill in API-specific defaults if not present in config
+        bot_cfg = asdict(config)
+        if bot_cfg.get("chat_endpoint") is None:
+            bot_cfg["chat_endpoint"] = self.DEFAULT_CHAT_ENDPOINT
+        if bot_cfg.get("response_translations") is None:
+            bot_cfg["response_translations"] = self.RESPONSE_TRANSLATIONS
+        if bot_cfg.get("request_translations") is None:
+            bot_cfg["request_translations"] = self.REQUEST_TRANSLATIONS
+        super().__init__(http_client, ChatBotConfig.from_dict(bot_cfg))
 
     async def send_message(
         self,
@@ -170,16 +151,16 @@ class AnthropicChatBot(GenericChatBot):
         **kwargs
     ) -> ChatBotResponse:
         """Send a chat history to Anthropic-compatible API."""
-        streaming_mode = self._streaming if streaming is None else streaming
+        streaming_mode = self._config.streaming if streaming is None else streaming
         body = self._build_body(chat_history, streaming)
         body.update(kwargs)
 
         if streaming_mode:
-            stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
-            return AnthropicChatBotResponse(stream, self._translations)
+            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            return AnthropicChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            return AnthropicChatBotResponse.from_json(response_data, self._translations)
+            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            return AnthropicChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(
         self, chat_history: ChatHistory, streaming: bool | None = None
@@ -193,9 +174,9 @@ class AnthropicChatBot(GenericChatBot):
         - tool_choice in Anthropic format
         """
         body = {}
-        body["model"] = self._model
-        body["stream"] = self._streaming if streaming is None else streaming
-        body["max_tokens"] = self._max_tokens
+        body["model"] = self._config.model
+        body["stream"] = self._config.streaming if streaming is None else streaming
+        body["max_tokens"] = self._config.max_tokens
 
         messages = []
         system_parts = []

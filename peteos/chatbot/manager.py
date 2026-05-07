@@ -9,6 +9,7 @@ from .httpclient import HTTPClient
 from .openaichatbot import OpenAIChatBot
 from .anthropicchatbot import AnthropicChatBot
 from .backendconfig import BackendConfig
+from .chatbotconfig import ChatBotConfig
 
 
 @dataclass
@@ -189,23 +190,14 @@ class ChatBotManager:
         Returns:
             ChatBot instance.
         """
+        chatbot_config = ChatBotConfig.from_dict({
+            **vars(config),
+            "model": model_id,
+        })
         if config.api_type == "openai":
-            return OpenAIChatBot(
-                http_client=self._http_client,
-                model=model_id,
-                base_url=config.url,
-                chat_endpoint=config.chat_endpoint,
-                streaming=config.streaming,
-            )
+            return OpenAIChatBot(self._http_client, chatbot_config)
         elif config.api_type == "anthropic":
-            return AnthropicChatBot(
-                http_client=self._http_client,
-                model=model_id,
-                base_url=config.url,
-                chat_endpoint=config.chat_endpoint,
-                max_tokens=config.max_tokens,
-                streaming=config.streaming,
-            )
+            return AnthropicChatBot(self._http_client, chatbot_config)
         else:
             raise ValueError(f"Unknown API type: {config.api_type}")
 

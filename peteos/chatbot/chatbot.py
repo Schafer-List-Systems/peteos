@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
 from .httpclient import HTTPClient
+from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .chathistory import ChatHistory
 from .message import Message
@@ -20,18 +21,16 @@ class ChatBot(ABC):
     and translate their response schemas into a common interface.
     """
 
-    def __init__(self, http_client: HTTPClient, model: str, streaming: bool = True):
+    def __init__(self, http_client: HTTPClient, config: ChatBotConfig):
         """
         Initialize ChatBot.
 
         Args:
             http_client: HTTP client for making API requests.
-            model: The model identifier to use.
-            streaming: Whether to use streaming mode by default (default: True).
+            config: ChatBot configuration dataclass with all defaults applied.
         """
         self._http_client = http_client
-        self._model = model
-        self._streaming = streaming
+        self._config = config
 
     @abstractmethod
     async def send_message(
@@ -65,12 +64,12 @@ class ChatBot(ABC):
     @property
     def model(self) -> str:
         """Get the current model identifier."""
-        return self._model
+        return self._config.model
 
     @model.setter
     def model(self, value: str) -> None:
         """Set a new model identifier."""
-        self._model = value
+        self._config.model = value
 
 
 class GenericChatBot(ChatBot):
@@ -103,22 +102,9 @@ class GenericChatBot(ChatBot):
     def __init__(
         self,
         http_client: HTTPClient,
-        model: str,
-        base_url: str = "",
-        chat_endpoint: str = "/v1/chat/completions",
-        models_endpoint: str = "/v1/models",
-        response_translations: Optional[Dict[str, str]] = None,
-        request_translations: Optional[Dict[str, str]] = None,
-        streaming: bool = True,
-        **defaults
+        config: ChatBotConfig,
     ):
-        super().__init__(http_client, model, streaming=streaming)
-        self._base_url = base_url
-        self._chat_endpoint = chat_endpoint
-        self._models_endpoint = models_endpoint
-        self._translations = response_translations or {}
-        self._request_translations = request_translations or {}
-        self._defaults = defaults
+        super().__init__(http_client, config)
 
     async def send_message(
         self,
@@ -131,15 +117,15 @@ class GenericChatBot(ChatBot):
             chat_history: The ChatHistory to send to the LLM.
             streaming: If None, uses the instance default.
         """
-        streaming_mode = self._streaming if streaming is None else streaming
+        streaming_mode = self._config.streaming if streaming is None else streaming
         body = self._build_body(chat_history, streaming)
 
         if streaming_mode:
-            stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
-            return GenericChatBotResponse(stream, self._translations)
+            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            return GenericChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            return GenericChatBotResponse.from_json(response_data, self._translations)
+            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            return GenericChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _translate_message_fields(self, msg_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -154,10 +140,11 @@ class GenericChatBot(ChatBot):
         Returns:
             Message content dict with API-specific keys.
         """
+        request_translations = self._config.request_translations or {}
         translated: Dict[str, Any] = {}
         for key, value in msg_data.items():
-            if key in self._request_translations:
-                translated[self._request_translations[key]] = value
+            if key in request_translations:
+                translated[request_translations[key]] = value
             else:
                 translated[key] = value
         return translated
@@ -173,13 +160,15 @@ class GenericChatBot(ChatBot):
                 instance default set in __init__.
         """
         body = dict(chat_history.generation_config)
-        body["model"] = self._model
-        body["stream"] = self._streaming if streaming is None else streaming
+        body["model"] = self._config.model
+        body["stream"] = self._config.streaming if streaming is None else streaming
 
         # Build messages array from ChatHistory
         messages = []
         system_parts = []
         tools = []
+
+        request_translations = self._config.request_translations or {}
 
         for msg in chat_history.messages:
             role = msg.role
@@ -200,8 +189,8 @@ class GenericChatBot(ChatBot):
                     # part.data contains fields like "text", "reasoning", etc.
                     # Use translation to map to API-specific key
                     for key, value in part.data.items():
-                        if key in self._request_translations:
-                            api_key = self._request_translations[key]
+                        if key in request_translations:
+                            api_key = request_translations[key]
                         else:
                             api_key = key
                         msg_dict[api_key] = value

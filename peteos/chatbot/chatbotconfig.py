@@ -1,12 +1,17 @@
-"""Backend configuration dataclass for chatbot backends."""
+"""ChatBot configuration dataclass for per-chatbot settings."""
 
 from dataclasses import dataclass, fields, MISSING
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
+
+from .backendconfig import BackendConfig
 
 
 @dataclass
-class BackendConfig:
-    """Configuration for a single backend.
+class ChatBotConfig(BackendConfig):
+    """Configuration for a single ChatBot instance.
+
+    Inherits backend config (url, api_type, etc.) and adds
+    per-chatbot options like translations and model selection.
 
     All defaults are defined here so there is a single source of truth.
     The config object is built once from the JSON and passed down through
@@ -20,29 +25,28 @@ class BackendConfig:
         models_endpoint: Custom models endpoint (default: API-specific).
         streaming: Use streaming mode by default.
         max_tokens: Maximum tokens to generate (Anthropic default: 4096).
+        model: Model identifier for this ChatBot instance.
+        response_translations: Per-chatbot SSE event translations.
+        request_translations: Per-chatbot request key translations.
     """
 
-    name: str
-    url: str
-    api_type: Optional[str] = None
-    chat_endpoint: Optional[str] = None
-    models_endpoint: Optional[str] = None
-    streaming: bool = True
-    max_tokens: int = 4096
+    model: Optional[str] = None
+    response_translations: Optional[Dict[str, str]] = None
+    request_translations: Optional[Dict[str, str]] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BackendConfig":
-        """Create a BackendConfig from a JSON dict, applying defaults.
+    def from_dict(cls, data: Dict[str, Any]) -> "ChatBotConfig":
+        """Create a ChatBotConfig from a JSON dict, applying defaults.
 
         All default values are read from the dataclass fields so there is
         only one source of truth. Fields present in the dict override the
         defaults. Only dataclass field names from the JSON are accepted.
 
         Args:
-            data: Raw config dict from JSON. Must include 'name' and 'url'.
+            data: Raw config dict from JSON.
 
         Returns:
-            BackendConfig with defaults applied.
+            ChatBotConfig with defaults applied.
         """
         field_names = {f.name for f in fields(cls)}
         defaults = {

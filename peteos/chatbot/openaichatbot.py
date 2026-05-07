@@ -1,10 +1,12 @@
 """OpenAI-compatible ChatBot implementation."""
 
 import json
+from dataclasses import asdict
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
 from .chatbot import GenericChatBot
+from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .httpclient import HTTPClient
 from .chathistory import ChatHistory
@@ -110,34 +112,16 @@ class OpenAIChatBot(GenericChatBot):
             "required": required_params,
         }
 
-    def __init__(
-        self,
-        http_client: HTTPClient,
-        model: str,
-        base_url: str,
-        chat_endpoint: Optional[str] = None,
-        streaming: bool = True,
-    ):
-        """
-        Initialize OpenAIChatBot.
-
-        Args:
-            http_client: HTTP client for making API requests.
-            model: The OpenAI model identifier (e.g., "gpt-4").
-            base_url: The OpenAI API base URL.
-            chat_endpoint: API-specific chat endpoint. Defaults to DEFAULT_CHAT_ENDPOINT.
-            streaming: Whether to use streaming mode by default (default: True).
-        """
-        super().__init__(
-            http_client=http_client,
-            model=model,
-            base_url=base_url,
-            chat_endpoint=chat_endpoint or self.DEFAULT_CHAT_ENDPOINT,
-            models_endpoint=self.DEFAULT_MODELS_ENDPOINT,
-            response_translations=self.RESPONSE_TRANSLATIONS,
-            request_translations=self.REQUEST_TRANSLATIONS,
-            streaming=streaming,
-        )
+    def __init__(self, http_client: HTTPClient, config: ChatBotConfig):
+        # Fill in API-specific defaults if not present in config
+        bot_cfg = asdict(config)
+        if bot_cfg.get("chat_endpoint") is None:
+            bot_cfg["chat_endpoint"] = self.DEFAULT_CHAT_ENDPOINT
+        if bot_cfg.get("response_translations") is None:
+            bot_cfg["response_translations"] = self.RESPONSE_TRANSLATIONS
+        if bot_cfg.get("request_translations") is None:
+            bot_cfg["request_translations"] = self.REQUEST_TRANSLATIONS
+        super().__init__(http_client, ChatBotConfig.from_dict(bot_cfg))
 
     async def send_message(
         self,
@@ -145,15 +129,15 @@ class OpenAIChatBot(GenericChatBot):
         streaming: bool | None = None,
     ) -> ChatBotResponse:
         """Send a chat history to the LLM and receive a response."""
-        streaming_mode = self._streaming if streaming is None else streaming
-        body = self._build_body(chat_history, streaming_mode)
+        streaming_mode = self._config.streaming if streaming is None else streaming
+        body = self._build_body(chat_history, streaming)
 
         if streaming_mode:
-            stream = self._http_client.stream_post(f"{self._base_url}{self._chat_endpoint}", body)
-            return OpenAIChatBotResponse(stream, self._translations)
+            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            return OpenAIChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._http_client.post(f"{self._base_url}{self._chat_endpoint}", body)
-            return OpenAIChatBotResponse.from_json(response_data, self._translations)
+            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            return OpenAIChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(self, chat_history: ChatHistory, streaming: bool | None = None) -> Dict[str, Any]:
         """Build OpenAI-specific request body.
@@ -164,8 +148,8 @@ class OpenAIChatBot(GenericChatBot):
         - tool_choice from generation_config
         """
         body = {}
-        body["model"] = self._model
-        body["stream"] = self._streaming if streaming is None else streaming
+        body["model"] = self._config.model
+        body["stream"] = self._config.streaming if streaming is None else streaming
 
         messages = []
         tools = []
