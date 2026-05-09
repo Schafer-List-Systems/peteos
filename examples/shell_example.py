@@ -177,7 +177,8 @@ async def main():
     print("-" * 60)
     print()
 
-    # Run the shell interactively (blocks until /quit)
+    # Start the shell (creates input loop task) and then run (blocks until /quit)
+    await shell.start()
     await shell.run()
 
     print()

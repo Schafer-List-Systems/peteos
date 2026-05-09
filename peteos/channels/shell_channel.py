@@ -88,8 +88,13 @@ class InteractiveShellChannel(Channel):
         return None
 
     async def start(self) -> None:
-        """Start the shell channel."""
+        """Start the shell channel.
+
+        Starts the background notification consumption loop via super().start()
+        and the input reading loop via asyncio.create_task().
+        """
         await super().start()
+        asyncio.create_task(self.read_input_loop())
 
     async def stop(self) -> None:
         """Stop the shell channel gracefully."""
@@ -188,55 +193,46 @@ class InteractiveShellChannel(Channel):
         else:
             return (True, f"Unknown command: {command}. Use /list for available commands.")
 
-    async def run(self) -> None:
-        """Run the shell interaction loop.
-
-        This is the main async loop that:
-        1. Reads user input via blocking input() (in executor)
-        2. Processes commands
-        3. Posts messages to Agent for non-command input
-        4. Consumes notifications from Agent's queue in parallel
-        """
+    async def read_input_loop(self) -> None:
+        """Read user input and send events to the channel's queue."""
         self.send("Connected. Commands: /new, /list, /select, /messages, /quit")
-        await self.start()
 
-        try:
-            while self.is_running():
-                # Print prompt before reading input
-                prompt = self._get_prompt()
-                print(prompt, end="", flush=True)
+        while self.is_running():
+            # Print prompt before reading input
+            prompt = self._get_prompt()
+            print(prompt, end="", flush=True)
 
-                # Read input in parallel with notifications
-                try:
-                    line = await asyncio.get_event_loop().run_in_executor(
-                        None, self._get_input_line
-                    )
-                except Exception:
+            # Read input in parallel with notifications
+            try:
+                line = await asyncio.get_event_loop().run_in_executor(
+                    None, self._get_input_line
+                )
+            except Exception:
+                break
+
+            if line is None:
+                break
+
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith("/"):
+                should_continue, output = self.handle_command(line)
+                self.send(output)
+                if not should_continue:
                     break
-
-                if line is None:
-                    break
-
-                line = line.strip()
-                if not line:
+            else:
+                # Push user input as an event to the channel queue.
+                # The Channel.run() loop consumes events via _wait() and
+                # processes them by calling send(). For non-command input,
+                # we need to forward to the agent's message queue directly
+                # since this is a shell-specific flow.
+                if self._active_session_uuid is None:
+                    self.send("No session selected. Use /new <role> or /select <uuid>.")
                     continue
 
-                if line.startswith("/"):
-                    should_continue, output = self.handle_command(line)
-                    self.send(output)
-                    if not should_continue:
-                        break
-                else:
-                    # Forward message to active session via Agent's queue
-                    if self._active_session_uuid is None:
-                        self.send("No session selected. Use /new <role> or /select <uuid>.")
-                        continue
-
-                    try:
-                        session_uuid = self._active_session_uuid
-                        self._post_message_to_agent(session_uuid, line)
-                    except Exception as e:
-                        self.send(f"Error: {type(e).__name__}: {str(e)}")
-
-        finally:
-            await self.stop()
+                try:
+                    self._post_message_to_agent(self._active_session_uuid, line)
+                except Exception as e:
+                    self.send(f"Error: {type(e).__name__}: {str(e)}")
