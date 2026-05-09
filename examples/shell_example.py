@@ -155,11 +155,6 @@ async def main():
     # Create the Agent
     agent = Agent(role_manager, chatbot_manager, tool_manager)
 
-    # Start the Agent's event loop
-    await agent.start()
-    print("Agent event loop started")
-    print()
-
     # Create the shell channel
     shell = InteractiveShellChannel("shell", agent)
 
@@ -183,10 +178,6 @@ async def main():
 
     print()
     print("Goodbye!")
-
-    # Cleanup
-    await agent.stop()
-    print("Agent event loop stopped")
 
 
 if __name__ == "__main__":

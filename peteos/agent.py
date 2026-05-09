@@ -1,11 +1,10 @@
-"""Agent - Central hub for message routing and event loop management."""
+"""Agent - Central hub for session management and notifications."""
 
 import asyncio
 import uuid
 from collections import deque
-from typing import Any, Dict, List, Optional, Set, Tuple, AsyncIterator
+from typing import Any, Dict, List, Optional, Set, AsyncIterator
 
-from peteos.activeclass import ActiveClass
 from peteos.channels.channel import Channel
 from peteos.chatbot import ChatBotManager, Message, ContentPart
 from peteos.logger import get_logger
@@ -17,37 +16,16 @@ from peteos.toolmanager import ToolManager
 _logger = get_logger(__name__)
 
 
-class Agent(ActiveClass):
-    """Central hub for message routing and session management.
+class Agent:
+    """Central hub for session management and event loop management.
 
-    The Agent manages concurrent sessions and channels with full decoupling:
-    - Channels post messages to the Agent's per-session message queues
-    - Agent's event loop processes messages and routes them to sessions
+    The Agent manages sessions and channels with full decoupling:
+    - Channels post messages directly to the Session's queue (non-blocking)
+    - Session's event loop processes messages and drives the execution environment
     - Sessions trigger hooks that publish notifications to per-channel queues
     - Channels consume notifications from their own notification queues
 
-    The event loop runs in a background thread to prevent blocking user input
-    from blocking session processing.
-
-    Thread Model:
-        - Agent event loop: runs in dedicated background thread
-        - Channels: each runs in its own thread (shell blocking input, REST async)
-
-    Threading Guarantees:
-        - All queue operations are thread-safe via asyncio.Queue
-        - No shared mutable state between components
-        - Each Agent instance is completely isolated
-
-    Example:
-        >>> agent = Agent(role_manager, chatbot_manager, tool_manager)
-        >>> await agent.start()
-        >>> session = agent.create_session("test")
-        >>> shell = InteractiveShellChannel("shell", agent)
-        >>> await shell.start()
-        >>> shell.send_message_to_session(session.uuid, "Hello!")
-        >>> # ... process messages ...
-        >>> await shell.stop()
-        >>> await agent.stop()
+    The session's event loop runs in a background task (created by start()).
     """
 
     def __init__(
@@ -56,26 +34,12 @@ class Agent(ActiveClass):
         chatbot_manager: ChatBotManager,
         tool_manager: ToolManager
     ):
-        """Initialize Agent.
-
-        Args:
-            role_manager: The RoleManager instance to use.
-            chatbot_manager: The ChatBotManager instance to use.
-            tool_manager: The ToolManager instance to use.
-        """
-        super().__init__()
         self._role_manager = role_manager
         self._chatbot_manager = chatbot_manager
         self._tool_manager = tool_manager
 
         # Session management
         self._sessions: Dict[uuid.UUID, Session] = {}
-
-        # Per-session message queues for incoming messages
-        self._message_queues: Dict[uuid.UUID, asyncio.Queue] = {}
-
-        # Per-session events to signal message availability (avoids 10ms polling)
-        self._session_events: Dict[uuid.UUID, asyncio.Event] = {}
 
         # Track which channels are subscribed to which sessions
         self._session_channels: Dict[uuid.UUID, Set[Channel]] = {}
@@ -84,103 +48,27 @@ class Agent(ActiveClass):
         self._channels: Dict[str, Channel] = {}
 
     def register_channel(self, channel: Channel) -> None:
-        """Register a channel with the agent.
-
-        Args:
-            channel: The channel to register.
-        """
+        """Register a channel with the agent."""
         self._channels[channel.name] = channel
 
     def deregister_channel(self, name: str) -> None:
-        """Deregister a channel from the agent.
-
-        Args:
-            name: The channel name to deregister.
-        """
+        """Deregister a channel from the agent."""
         if name in self._channels:
             del self._channels[name]
 
     def get_channel(self, name: str) -> Channel | None:
-        """Get a channel by name.
-
-        Args:
-            name: The channel name.
-
-        Returns:
-            The Channel instance, or None if not found.
-        """
+        """Get a channel by name."""
         return self._channels.get(name)
 
     def list_channels(self) -> Dict[str, Channel]:
-        """List all registered channels.
-
-        Returns:
-            A dictionary mapping channel names to Channel instances.
-        """
+        """List all registered channels."""
         return dict(self._channels)
 
-    async def run(self) -> None:
-        """Main event loop that processes messages and notifications.
-
-        This loop runs in a background thread and:
-        1. Awaits signal events when queues are empty (no polling)
-        2. Drains all pending messages from signaled sessions
-        3. Routes messages to their respective sessions
-        4. Handles hook notifications from sessions
-        5. Publishes notifications to channel queues
-        """
-        # Tasks awaiting on per-session events; maps session_uuid -> Task[None]
-        _wait_tasks: dict[uuid.UUID, asyncio.Task] = {}
-
-        async def _wait_for_event(session_uuid: uuid.UUID, event: asyncio.Event) -> None:
-            await event.wait()
-
-        while self._running:
-            # Build or maintain wait tasks for sessions with active events
-            for session_uuid, event in self._session_events.items():
-                if session_uuid not in _wait_tasks:
-                    _wait_tasks[session_uuid] = asyncio.create_task(
-                        _wait_for_event(session_uuid, event)
-                    )
-
-            if not _wait_tasks:
-                await asyncio.sleep(0.01)
-                continue
-
-            # Wait for any wait task to complete
-            done, _ = await asyncio.wait(
-                _wait_tasks.values(), return_when=asyncio.FIRST_COMPLETED
-            )
-
-            # Collect session uuids whose events fired
-            session_uuids_ready: set[uuid.UUID] = set()
-            for task in done:
-                # Find which session this task belongs to
-                for su, t in list(_wait_tasks.items()):
-                    if t is task:
-                        session_uuids_ready.add(su)
-                        del _wait_tasks[su]
-                        break
-
-            # Drain ALL pending messages for ALL signaled sessions in one
-            # pass so messages don't sit while we process one session at a
-            # time.
-            for session_uuid in session_uuids_ready:
-                event = self._session_events.get(session_uuid)
-                if event:
-                    event.clear()
-                queue = self._message_queues.get(session_uuid)
-                session = self._sessions.get(session_uuid)
-                if not queue or not session:
-                    continue
-                while not queue.empty():
-                    message = queue.get_nowait()
-                    await session.queue_message(message)
-
-    def create_session(self, role_name: str) -> Session:
+    async def create_session(self, role_name: str) -> Session:
         """Create a new session with the specified role.
 
-        Creates per-session message queue and registers hooks for notifications.
+        Creates per-session queue and registers hooks for notifications.
+        Also starts the session's event loop.
 
         Args:
             role_name: The name of the role to use for this session.
@@ -202,10 +90,6 @@ class Agent(ActiveClass):
         )
         self._sessions[session.uuid] = session
 
-        # Create message queue and signal event for this session
-        self._message_queues[session.uuid] = asyncio.Queue()
-        self._session_events[session.uuid] = asyncio.Event()
-
         # Initialize channel tracking
         self._session_channels[session.uuid] = set()
 
@@ -224,44 +108,27 @@ class Agent(ActiveClass):
                           self._on_before_loop_exit,
                           session.uuid)
 
+        # Start the session's event loop
+        await session.start()
+
         return session
 
     def get_session(self, session_uuid: uuid.UUID) -> Session | None:
-        """Get a session by its UUID.
-
-        Args:
-            session_uuid: The UUID of the session to retrieve.
-
-        Returns:
-            The Session instance if found, None otherwise.
-        """
+        """Get a session by its UUID."""
         return self._sessions.get(session_uuid)
 
     def list_sessions(self) -> Dict[uuid.UUID, Session]:
-        """List all sessions.
-
-        Returns:
-            A dictionary mapping UUIDs to Session instances.
-        """
+        """List all sessions."""
         return dict(self._sessions)
 
-    def destroy_session(self, session_uuid: uuid.UUID) -> bool:
+    async def destroy_session(self, session_uuid: uuid.UUID) -> bool:
         """Destroy a session by its UUID.
 
-        Cleans up message queue, signal event, and notification queues for this session.
-
-        Args:
-            session_uuid: The UUID of the session to destroy.
-
-        Returns:
-            True if the session was found and destroyed, False otherwise.
+        Cleans up channel tracking and stops the session's event loop.
         """
         if session_uuid in self._sessions:
-            # Clean up message queue and signal event
-            if session_uuid in self._message_queues:
-                del self._message_queues[session_uuid]
-            if session_uuid in self._session_events:
-                del self._session_events[session_uuid]
+            session = self._sessions[session_uuid]
+            await session.stop()
 
             # Clean up channel tracking
             if session_uuid in self._session_channels:
@@ -271,26 +138,6 @@ class Agent(ActiveClass):
             return True
         return False
 
-    def post_message(self, session_uuid: uuid.UUID, message: Message) -> None:
-        """Post a message to a session's message queue and signal the event.
-
-        Non-blocking queue put. If the queue is full, this will block
-        until space is available (default behavior of asyncio.Queue).
-
-        Args:
-            session_uuid: The UUID of the target session.
-            message: The message to post.
-
-        Raises:
-            KeyError: If the session does not exist.
-        """
-        queue = self._message_queues.get(session_uuid)
-        if queue is None:
-            raise KeyError(f"Session {session_uuid} not found")
-        queue.put_nowait(message)
-        if session_uuid in self._session_events:
-            self._session_events[session_uuid].set()
-
     def subscribe_notifications(
         self,
         channel_name: str,
@@ -299,32 +146,18 @@ class Agent(ActiveClass):
         """Subscribe to notifications for a session from a channel.
 
         Returns an async iterator that yields notification messages.
-        The iterator runs until the Agent is stopped.
-
-        Uses a local queue to capture notifications pushed via push_event.
-
-        Args:
-            channel_name: The name of the subscribing channel.
-            session_uuid: The UUID of the session to subscribe to.
-
-        Yields:
-            Notification messages from the session.
         """
         local_queue: asyncio.Queue[str] = asyncio.Queue()
 
         # Track this channel as subscribed to this session
         if session_uuid not in self._session_channels:
             self._session_channels[session_uuid] = set()
-        self._session_channels[session_uuid].add(
-            Channel.get_by_name(channel_name) if Channel.get_by_name(channel_name) else None
-        )
 
         # Store a reference to a callback that will push events into this queue
-        # We monkey-patch push_event for this test by registering a notification sink
         notification_sink: list[asyncio.Queue] = getattr(self, '_notification_sinks', None) or []
 
         async def notification_generator() -> AsyncIterator[str]:
-            while self._running:
+            while True:
                 try:
                     msg = await local_queue.get()
                     yield msg
@@ -338,15 +171,7 @@ class Agent(ActiveClass):
         channel_name: str,
         session_uuid: uuid.UUID
     ) -> None:
-        """Unsubscribe from notifications for a session.
-
-        Removes the channel from the session's subscribed channels.
-
-        Args:
-            channel_name: The name of the unsubscribing channel.
-            session_uuid: The UUID of the session to unsubscribe from.
-        """
-        # Remove channel from session's subscribed channels
+        """Unsubscribe from notifications for a session."""
         if session_uuid in self._session_channels:
             channel = Channel.get_by_name(channel_name)
             if channel and channel in self._session_channels[session_uuid]:
@@ -360,10 +185,6 @@ class Agent(ActiveClass):
         """Hook callback fired before each tool execution.
 
         Publishes notification to all subscribed channels.
-
-        Args:
-            session_uuid: The UUID of the session making the tool call.
-            tool_call: Dict containing 'name' and 'arguments' of the tool.
 
         Returns:
             Tuple (allow: bool, message: str) - For now, always allows.
@@ -383,16 +204,7 @@ class Agent(ActiveClass):
         result: str,
         success: bool
     ) -> None:
-        """Hook callback fired after tool execution completes.
-
-        Publishes notification to all subscribed channels.
-
-        Args:
-            session_uuid: The UUID of the session that executed the tool.
-            tool_call: Dict containing 'name' and 'arguments' of the tool.
-            result: The tool result as a string.
-            success: Whether the tool execution succeeded.
-        """
+        """Hook callback fired after tool execution completes."""
         status = "error" if not success else "ok"
         msg = Message(
             role="tool_result",
@@ -406,14 +218,7 @@ class Agent(ActiveClass):
         session_uuid: uuid.UUID,
         delta_messages: List[Message]
     ) -> None:
-        """Hook callback fired when the loop continues after tool calls.
-
-        Publishes intermediate messages to subscribed channels.
-
-        Args:
-            session_uuid: The UUID of the session.
-            delta_messages: List of messages added during this iteration.
-        """
+        """Hook callback fired when the loop continues after tool calls."""
         for msg in delta_messages:
             if msg.role == "assistant" and msg.text:
                 self._publish_notification(session_uuid, msg)
@@ -423,22 +228,13 @@ class Agent(ActiveClass):
         session_uuid: uuid.UUID,
         reason: str
     ) -> None:
-        """Hook callback fired when the loop exits.
-
-        Publishes the final answer to all subscribed channels with a
-        "finish" flag so channels can apply final-answer reactions.
-
-        Args:
-            session_uuid: The UUID of the session.
-            reason: The reason for exit (e.g., "final_answer" or "interrupt").
-        """
+        """Hook callback fired when the loop exits."""
         session = self.get_session(session_uuid)
         if session:
             history = session.chat_history.messages
             if history:
                 last_msg = history[-1]
                 if last_msg.role == "assistant":
-                    # Tag the message so channels know this is the final answer
                     final_msg = Message(
                         role=last_msg.role,
                         content=last_msg.content,
@@ -451,15 +247,7 @@ class Agent(ActiveClass):
         session_uuid: uuid.UUID,
         message: Message
     ) -> None:
-        """Publish a notification to all subscribed channels.
-
-        Thread-safe notification broadcasting to all channels subscribed
-        to this session.
-
-        Args:
-            session_uuid: The UUID of the session.
-            message: The Message to publish.
-        """
+        """Publish a notification to all subscribed channels."""
         channels = self._session_channels.get(session_uuid, set())
         for channel in channels:
             if channel:

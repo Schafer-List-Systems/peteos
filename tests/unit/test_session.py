@@ -32,6 +32,8 @@ def test_session_init():
     assert session.chat_history is not None
     assert session.chatbot_manager == chatbot_manager
     assert isinstance(session.execution_environment, REPLExecutionEnvironment)
+    assert session.event_queue is not None
+    assert session._event_trigger is not None
 
 
 def test_session_init_with_custom_uuid():

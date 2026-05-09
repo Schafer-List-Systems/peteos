@@ -48,12 +48,17 @@ def agent():
     role_manager.register_role(Role(name="test", description="Test"))
     chatbot_manager = MagicMock()
     tool_manager = MagicMock()
-    return MagicMock(
+    agent_mock = MagicMock(
         role_manager=role_manager,
-        create_session=MagicMock(),
+        create_session=AsyncMock(),
         get_session=MagicMock(),
         register_channel=MagicMock(),
     )
+    # Make get_session return a valid session for subscribe_to_session mock
+    mock_session = MagicMock()
+    mock_session.uuid = uuid.UUID("12345678-1234-5678-1234-567812345678")
+    agent_mock.get_session.return_value = mock_session
+    return agent_mock
 
 
 def _make_signature(body: str, secret: str, random_nonce: str) -> str:
@@ -155,7 +160,8 @@ class TestEventDispatch:
         session_uuid = uuid.uuid4()
         session_mock = MagicMock(uuid=session_uuid)
         session_mock.queue_message = AsyncMock(return_value=None)
-        agent.create_session = MagicMock(return_value=session_mock)
+        session_mock.start = AsyncMock(return_value=None)
+        agent.create_session = AsyncMock(return_value=session_mock)
         agent.get_session = MagicMock(return_value=session_mock)
 
         channel = NextcloudTalkChannel(
@@ -191,7 +197,9 @@ class TestEventDispatch:
         agent.role_manager.register_role(Role(name="test", description="Test"))
 
         session_uuid = uuid.uuid4()
-        agent.create_session = MagicMock(return_value=MagicMock(uuid=session_uuid))
+        session_mock = MagicMock(uuid=session_uuid)
+        agent.create_session = AsyncMock(return_value=session_mock)
+        agent.get_session = MagicMock(return_value=session_mock)
 
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
@@ -282,7 +290,8 @@ class TestEventDispatch:
 class TestSessionRouting:
     """Test session lookup and creation."""
 
-    def test_existing_session_reused(self, agent):
+    @pytest.mark.asyncio
+    async def test_existing_session_reused(self, agent):
         existing_uuid = uuid.uuid4()
         existing_session = MagicMock(uuid=existing_uuid)
         channel = NextcloudTalkChannel(
@@ -293,12 +302,13 @@ class TestSessionRouting:
         channel._rooms["tok1"] = existing_uuid
         agent.get_session = MagicMock(return_value=existing_session)
 
-        result = channel._get_or_create_session("tok1")
+        result = await channel._get_or_create_session("tok1")
 
         assert result is existing_session
         agent.create_session.assert_not_called()
 
-    def test_new_session_created(self, agent):
+    @pytest.mark.asyncio
+    async def test_new_session_created(self, agent):
         new_uuid = uuid.uuid4()
         new_session = MagicMock(uuid=new_uuid)
         channel = NextcloudTalkChannel(
@@ -306,24 +316,26 @@ class TestSessionRouting:
             nextcloud_url="https://cloud.example.com",
             bot_id="abc", bot_secret="secret",
         )
-        agent.create_session = MagicMock(return_value=new_session)
+        agent.create_session = AsyncMock(return_value=new_session)
+        agent.get_session = MagicMock(return_value=new_session)
 
-        result = channel._get_or_create_session("newroom")
+        result = await channel._get_or_create_session("newroom")
 
         assert result is new_session
         agent.create_session.assert_called_once_with("test")
         assert channel._rooms["newroom"] == new_uuid
         assert channel._session_conversations[new_uuid] == "newroom"
 
-    def test_failed_session_creation_returns_none(self, agent):
+    @pytest.mark.asyncio
+    async def test_failed_session_creation_returns_none(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
             nextcloud_url="https://cloud.example.com",
             bot_id="abc", bot_secret="secret",
         )
-        agent.create_session = MagicMock(side_effect=RuntimeError("failed"))
+        agent.create_session = AsyncMock(side_effect=RuntimeError("failed"))
 
-        result = channel._get_or_create_session("badroom")
+        result = await channel._get_or_create_session("badroom")
 
         assert result is None
         assert "badroom" not in channel._rooms

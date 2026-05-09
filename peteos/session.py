@@ -1,46 +1,64 @@
+"""Session - A session with an execution environment."""
+
+from __future__ import annotations
+
 import asyncio
 import json
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime
-import uuid
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
+import uuid
+
+from peteos.activeclass import ActiveClass
 from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
-from peteos.replexecutionenvironment import REPLExecutionEnvironment
+from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
+from peteos.replexecutionenvironment import REPLExecutionEnvironment
 
-class Session:
-    """A session with an execution environment."""
+_logger = get_logger(__name__)
+
+
+@dataclass
+class ApprovalEvent:
+    """Event pushed to Session.event_queue to signal approval of a tool call."""
+    tool_call: dict
+    approved: bool = True
+
+
+class ToolApprovalPending(Exception):
+    """Raised when a tool call requires user approval."""
+    def __init__(self, tool_call: dict) -> None:
+        self.tool_call = tool_call
+        super().__init__("Tool approval pending")
+
+
+class Session(ActiveClass):
+    """A session with an execution environment.
+
+    Session extends ActiveClass so it has its own event loop for:
+    - Processing incoming user messages
+    - Driving the execution environment
+    - Waiting for tool call approval from channels
+
+    The event loop runs continuously once started. Messages are queued
+    via queue_message() which is non-blocking.
+    """
 
     @staticmethod
     def _initialize_chat_history(role: Role, tool_manager: ToolManager) -> ChatHistory:
-        """
-        Initialize chat history with role system prompt and tool list.
-
-        This is a central place for creating chat history with context from
-        the role system prompt and available tools. The system prompt and
-        tool list are prepended to the chat history as the first messages.
-
-        Args:
-            role: The Role instance containing system prompt and required tools.
-            tool_manager: The ToolManager instance with available tools.
-
-        Returns:
-            ChatHistory with system prompt and tool list prepended.
-        """
         chat_history = ChatHistory()
 
-        # Add system prompt from role
         if role.system_prompt:
             chat_history.append_message(Message(
                 role="system",
                 content=[ContentPart(part_type="text", text=role.system_prompt)]
             ))
 
-        # Add tool definitions from tool manager
         tool_list = tool_manager.get_tool_list()
         for tool in tool_list:
             chat_history.append_message(Message(
@@ -64,21 +82,7 @@ class Session:
         session_uuid: Optional[uuid.UUID] = None,
         execution_environment: Optional[REPLExecutionEnvironment] = None
     ):
-        """
-        Initialize Session.
-
-        Note: Use load_from_json() or load_from_file() to create Session instances.
-        The constructor is intentionally kept flexible for internal use.
-
-        Args:
-            role: The Role instance to use (obligatory).
-            tool_manager: The ToolManager instance to use.
-            chatbot_manager: The ChatBotManager instance to use.
-            chat_history: Optional ChatHistory instance. Creates one with system
-                prompt and tool list if None.
-            session_uuid: Optional UUID. Generates one if None.
-            execution_environment: Optional execution environment. Creates REPL one if None.
-        """
+        super().__init__()
         self.uuid = session_uuid if session_uuid is not None else uuid.uuid4()
         self.role = role
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
@@ -88,46 +92,90 @@ class Session:
             chatbot_manager=chatbot_manager,
             chat_history=self.chat_history,
             tool_manager=tool_manager,
-            role=role
+            role=role,
+            session=self,
         )
 
         self._message_queue: deque[Message] = deque()
         self._queue_lock = asyncio.Lock()
 
+    async def start(self) -> None:
+        await super().start()
+
+    async def stop(self) -> None:
+        await super().stop()
+
     async def queue_message(self, message: Message) -> None:
-        """
-        Queue a message for processing.
+        """Queue a message for processing.
 
-        If the execution environment is running, this function:
-        1. Adds the message to the queue
-        2. Interrupts the execution environment
-        3. Waits for it to stop
-        4. Drains ALL queued messages to chat_history
-        5. Restarts the execution environment
-
-        If the execution environment is NOT running, the message is added
-        directly to chat_history and the env is started.
-
-        Uses a lock to ensure thread-safe concurrent enqueues.
+        Non-blocking. Pushes to event_queue and starts the event loop if not running.
+        The Session.run() loop processes the message and runs the
+        execution environment.
 
         Args:
             message: The message to queue.
         """
         async with self._queue_lock:
-            # Add message to queue
             self._message_queue.append(message)
+            if not self.is_running():
+                await self.start()
+            self.push_event(message)
 
-            if self.execution_environment.is_running:
-                # Interrupt
-                self.execution_environment.set_interrupt()
+    async def run(self) -> None:
+        """Main event loop for the session.
 
-            # Drain ALL queued messages to chat_history
+        Processes incoming messages and tool approval events.
+        """
+        while self.is_running():
+            event = await self._wait()
+            if event is None:
+                continue
+            if isinstance(event, Message):
+                await self._handle_message(event)
+            elif isinstance(event, ApprovalEvent):
+                await self._handle_approval(event)
+
+    async def _handle_message(self, message: Message) -> None:
+        """Process a user message: drain all queued messages, drive execution."""
+        # queue_message already appended the triggered message to _message_queue
+        # Drain ALL queued messages (the triggered one + any concurrent ones)
+        async with self._queue_lock:
             while self._message_queue:
                 msg = self._message_queue.popleft()
                 self.chat_history.append_message(msg)
 
-            # Start/restart execution env
-            await self.execution_environment.run()
+        await self._run_session_loop()
+
+    async def _run_session_loop(self) -> None:
+        """Run step loop until done, tool_pending, or interrupted."""
+        while self.is_running():
+            status, data = await self.execution_environment.step()
+            if status == "done":
+                break
+            elif status == "tool_pending":
+                tool_call = data["tool_call"]
+                approval = await self._wait()
+                if isinstance(approval, ApprovalEvent):
+                    await self._handle_approval(approval)
+                # If wrong event type, continue loop to step() again
+            # "continue" -> loop back to step()
+
+    async def _handle_approval(self, event: ApprovalEvent) -> None:
+        """Handle an approval/denial event for a pending tool call."""
+        if event.approved:
+            await self.execution_environment.execute_pending_tool(event.tool_call)
+        else:
+            tool_name = event.tool_call.get("name", "unknown")
+            msg = Message(
+                role="tool_result",
+                content=[ContentPart(
+                    part_type="tool_result",
+                    name=tool_name,
+                    content="Tool call was denied by user.",
+                )],
+            )
+            self.chat_history.append_message(msg)
+            await self._call_hooks("after_tool_execution", event.tool_call, "Tool call was denied by user.", False)
 
     @staticmethod
     def load_from_json(
@@ -136,21 +184,6 @@ class Session:
         role_manager: RoleManager,
         tool_manager: ToolManager
     ) -> "Session":
-        """
-        Creates a new session from a JSON dict.
-
-        Args:
-            json_data: JSON dict with session data (uuid, role name, chat_history).
-            chatbot_manager: ChatBotManager instance for session construction.
-            role_manager: RoleManager instance to lookup Role by name.
-            tool_manager: ToolManager instance to validate required tools.
-
-        Returns:
-            A new Session instance.
-
-        Raises:
-            ValueError: If required tools are missing from tool_manager.
-        """
         uuid_str = json_data.get("uuid")
         role_name = json_data["role"]
         chat_history_data = json_data.get("chat_history", [])
@@ -180,12 +213,11 @@ class Session:
 
         session_uuid = uuid.UUID(uuid_str) if uuid_str else None
 
-        # Determine execution environment from role config (default to REPL)
         env = REPLExecutionEnvironment(
             chatbot_manager=chatbot_manager,
             chat_history=chat_history,
             tool_manager=tool_manager,
-            role=role
+            role=role,
         )
 
         return Session(
@@ -194,7 +226,7 @@ class Session:
             chatbot_manager=chatbot_manager,
             chat_history=chat_history,
             session_uuid=session_uuid,
-            execution_environment=env
+            execution_environment=env,
         )
 
     @staticmethod
@@ -204,23 +236,11 @@ class Session:
         role_manager: RoleManager,
         tool_manager: ToolManager
     ) -> "Session":
-        """
-        Creates a new session from a JSON file.
-
-        Args:
-            file_path: Path to the JSON file to load the session from.
-            chatbot_manager: ChatBotManager instance for session construction.
-            role_manager: RoleManager instance to lookup Role by name.
-            tool_manager: ToolManager instance to validate required tools.
-
-        Returns:
-            A new Session instance.
-        """
         with open(file_path, "r") as f:
             json_data = json.load(f)
         return Session.load_from_json(
             json_data,
             chatbot_manager,
             role_manager,
-            tool_manager
+            tool_manager,
         )

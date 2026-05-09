@@ -57,20 +57,23 @@ class InteractiveShellChannel(Channel):
             print(message.text)
 
     def _post_message_to_agent(self, session_uuid: uuid.UUID, content: str) -> None:
-        """Post a message to the Agent's message queue.
+        """Post a message directly to the session's event queue.
 
-        Non-blocking queue put. If queue is full, blocks until space available.
+        Non-blocking. The session's event loop processes the message.
+        Since this method is sync (called from the input loop), uses
+        asyncio.create_task to call the async queue_message.
 
         Args:
             session_uuid: The UUID of the target session.
             content: The message content from the user.
         """
-        if self._agent:
+        session = self._agent.get_session(session_uuid)
+        if session:
             message = Message(
                 role="user",
                 content=[ContentPart(part_type="text", text=content)]
             )
-            self._agent.post_message(session_uuid, message)
+            asyncio.create_task(session.queue_message(message))
 
     def _get_input_line(self) -> Optional[str]:
         """Synchronous input reader for use with run_in_executor."""
@@ -138,10 +141,19 @@ class InteractiveShellChannel(Channel):
             if not args:
                 return (True, "Usage: /new <role>")
             try:
-                session = self._agent.create_session(args.strip())
-                self.select_session(session.uuid)
-                _logger.debug(f"Session created: {session.uuid}")
-                return (True, "")
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(
+                        self._handle_new_session(args.strip())
+                    )
+                    return (True, "")
+                else:
+                    session = loop.run_until_complete(
+                        self._agent.create_session(args.strip())
+                    )
+                    self.select_session(session.uuid)
+                    _logger.debug("Session created: %s", session.uuid)
+                    return (True, "")
             except ValueError as e:
                 return (True, str(e))
 
@@ -164,7 +176,7 @@ class InteractiveShellChannel(Channel):
                 if session is None:
                     return (True, f"Session not found: {session_uuid}")
                 self.select_session(session_uuid)
-                _logger.debug(f"Active session: {session_uuid}")
+                _logger.debug("Active session: %s", session_uuid)
                 return (True, "")
             except ValueError:
                 return (True, f"Invalid UUID: {args}")
@@ -192,6 +204,12 @@ class InteractiveShellChannel(Channel):
 
         else:
             return (True, f"Unknown command: {command}. Use /list for available commands.")
+
+    async def _handle_new_session(self, role_name: str) -> None:
+        """Async helper for /new command."""
+        session = await self._agent.create_session(role_name)
+        self.select_session(session.uuid)
+        _logger.debug("Session created: %s", session.uuid)
 
     async def read_input_loop(self) -> None:
         """Read user input and send events to the channel's queue."""

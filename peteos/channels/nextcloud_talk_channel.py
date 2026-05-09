@@ -260,7 +260,7 @@ class NextcloudTalkChannel(Channel):
             logger.warning("Empty message from %s", display_name)
             return
 
-        session = self._get_or_create_session(conversation_token)
+        session = await self._get_or_create_session(conversation_token)
         if session:
             self._active_session_uuid = session.uuid
             message_id = obj.get("id")
@@ -299,7 +299,7 @@ class NextcloudTalkChannel(Channel):
         display_name = actor.get("displayName", actor.get("name", actor.get("id", "unknown")))
         logger.info("Bot added to room by %s, conversation=%s", display_name, conversation_token)
 
-        session = self._get_or_create_session(conversation_token)
+        session = await self._get_or_create_session(conversation_token)
         if session:
             self._active_session_uuid = session.uuid
 
@@ -319,7 +319,7 @@ class NextcloudTalkChannel(Channel):
             self.unsubscribe_from_session(session_uuid)
         logger.info("Removed mapping for conversation %s", conversation_token)
 
-    def _get_or_create_session(self, conversation_token: str):
+    async def _get_or_create_session(self, conversation_token: str):
         """Get existing session or create a new one for a conversation.
 
         Args:
@@ -335,7 +335,7 @@ class NextcloudTalkChannel(Channel):
             return session
 
         try:
-            session = self._agent.create_session(self._default_role)
+            session = await self._agent.create_session(self._default_role)
             self._rooms[conversation_token] = session.uuid
             self._session_conversations[session.uuid] = conversation_token
             self._subscribe_session(session.uuid)
