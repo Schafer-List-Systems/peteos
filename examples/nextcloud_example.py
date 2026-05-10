@@ -154,47 +154,15 @@ def setup_tool_manager():
 def load_nextcloud_config(config_file: str = "examples/config/nextcloud_config.json"):
     """Load Nextcloud Talk bot configuration from a JSON file.
 
-    Expected format:
-    {
-        "nextcloud_url": "https://cloud.example.com",
-        "bot_id": "mybot",
-        "bot_secret": "your-shared-secret",
-        "default_role": "test",
-        "host": "0.0.0.0",
-        "port": 8766
-    }
-
-    IMPORTANT: Store secrets in examples/config/nextcloud_config.json and
-    add that file to .gitignore. Never commit secrets to version control.
-
-    Also required: enable features after bot installation:
-    ./occ talk:bot:state <bot-id> 1 --feature webhook --feature response --feature reaction
-
-    Args:
-        config_file: Path to the JSON configuration file.
-
-    Returns:
-        Dictionary with Nextcloud configuration values.
-
-    Raises:
-        FileNotFoundError: If configuration file doesn't exist.
-        KeyError: If required fields are missing.
+    Delegates to NextcloudTalkChannel.load_config() with error message formatting.
     """
     try:
-        with open(config_file, "r") as f:
-            config = json.load(f)
+        return NextcloudTalkChannel.load_config(config_file)
     except FileNotFoundError:
         print(f"Error: Config file {config_file} not found.")
         print("Create it from the template:")
         print(f"  cp examples/config/nextcloud_config.json.example {config_file}")
         raise
-
-    required = ["nextcloud_url", "bot_id", "bot_secret"]
-    missing = [k for k in required if k not in config]
-    if missing:
-        raise KeyError(f"Missing required config fields: {', '.join(missing)}")
-
-    return config
 
 
 async def main():
@@ -230,25 +198,13 @@ async def main():
 
     # Load Nextcloud configuration
     try:
-        nc_config = load_nextcloud_config(args.nextcloud_config)
+        config = load_nextcloud_config(args.nextcloud_config)
     except (FileNotFoundError, KeyError) as e:
         print(f"Aborting: {e}")
         return
 
     # Create the Nextcloud Talk channel
-    nextcloud = NextcloudTalkChannel(
-        name="nextcloud",
-        agent=agent,
-        nextcloud_url=nc_config["nextcloud_url"],
-        bot_id=nc_config["bot_id"],
-        bot_secret=nc_config["bot_secret"],
-        default_role=nc_config.get("default_role", "test"),
-        host=nc_config.get("host", "0.0.0.0"),
-        port=nc_config.get("port", 8766),
-        show_reasoning=nc_config.get("show_reasoning", True),
-        show_tool_calls=nc_config.get("show_tool_calls", True),
-        show_tool_results=nc_config.get("show_tool_results", True),
-    )
+    nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=config)
 
     # Start the webhook receiver
     webhook_url = await nextcloud.start()

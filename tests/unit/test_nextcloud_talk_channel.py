@@ -61,6 +61,20 @@ def agent():
     return agent_mock
 
 
+def _make_config(**overrides) -> dict:
+    """Create a minimal Nextcloud config dict with defaults."""
+    config = {
+        "nextcloud_url": "https://cloud.example.com",
+        "bot_id": "abc123",
+        "bot_secret": "secret",
+        "host": "0.0.0.0",
+        "port": 0,
+        "default_role": "test",
+        **overrides,
+    }
+    return config
+
+
 def _make_signature(body: str, secret: str, random_nonce: str) -> str:
     return hmac.new(
         secret.encode(),
@@ -80,17 +94,13 @@ class TestNextcloudTalkChannelInit:
         channel = NextcloudTalkChannel(
             name="nextcloud",
             agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc123",
-            bot_secret="secret",
-            host="0.0.0.0",
-            port=9999,
+            config=_make_config(host="0.0.0.0", port=9999),
         )
 
         assert channel.name == "nextcloud"
-        assert channel._nextcloud_url == "https://cloud.example.com"
-        assert channel._bot_id == "abc123"
-        assert channel._bot_secret == "secret"
+        assert channel._config["nextcloud_url"] == "https://cloud.example.com"
+        assert channel._config["bot_id"] == "abc123"
+        assert channel._config["bot_secret"] == "secret"
         assert channel._running is False
         assert channel._rooms == {}
         assert channel._session_conversations == {}
@@ -98,8 +108,7 @@ class TestNextcloudTalkChannelInit:
     def test_channel_registered_with_agent(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc123", bot_secret="secret",
+            config=_make_config(),
         )
 
         agent.register_channel.assert_called_with(channel)
@@ -111,8 +120,7 @@ class TestSignatureVerification:
     def test_valid_signature(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc123", bot_secret="mysecret",
+            config=_make_config(bot_secret="mysecret"),
         )
 
         body = '{"type":"Create"}'
@@ -124,8 +132,7 @@ class TestSignatureVerification:
     def test_invalid_signature(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc123", bot_secret="mysecret",
+            config=_make_config(bot_secret="mysecret"),
         )
 
         body = '{"type":"Create"}'
@@ -136,8 +143,7 @@ class TestSignatureVerification:
     def test_signature_with_wrong_secret(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc123", bot_secret="secret_a",
+            config=_make_config(bot_secret="secret_a"),
         )
 
         body = '{"type":"Create"}'
@@ -145,7 +151,7 @@ class TestSignatureVerification:
         signature = _make_signature(body, "secret_a", random_nonce)
 
         # Channel with different secret should reject
-        channel._bot_secret = "secret_b"
+        channel._config["bot_secret"] = "secret_b"
         assert channel._verify_signature(body.encode(), random_nonce, signature) is False
 
 
@@ -166,8 +172,7 @@ class TestEventDispatch:
 
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
 
         event = {
@@ -203,8 +208,7 @@ class TestEventDispatch:
 
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
 
         event = {
@@ -221,8 +225,7 @@ class TestEventDispatch:
     async def test_handle_leave(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         channel._rooms["myroom"] = uuid.uuid4()
 
@@ -239,8 +242,7 @@ class TestEventDispatch:
     async def test_handle_like_reaction(self, agent, caplog):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         caplog.set_level(logging.INFO)
 
@@ -256,8 +258,7 @@ class TestEventDispatch:
     async def test_handle_undo_reaction(self, agent, caplog):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         caplog.set_level(logging.INFO)
 
@@ -273,8 +274,7 @@ class TestEventDispatch:
     async def test_empty_message_ignored(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
 
         event = {
@@ -296,8 +296,7 @@ class TestSessionRouting:
         existing_session = MagicMock(uuid=existing_uuid)
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         channel._rooms["tok1"] = existing_uuid
         agent.get_session = MagicMock(return_value=existing_session)
@@ -313,8 +312,7 @@ class TestSessionRouting:
         new_session = MagicMock(uuid=new_uuid)
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         agent.create_session = AsyncMock(return_value=new_session)
         agent.get_session = MagicMock(return_value=new_session)
@@ -330,8 +328,7 @@ class TestSessionRouting:
     async def test_failed_session_creation_returns_none(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         agent.create_session = AsyncMock(side_effect=RuntimeError("failed"))
 
@@ -347,8 +344,7 @@ class TestReceive:
     def test_receive_returns_none(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         assert channel.receive() is None
 
@@ -359,8 +355,7 @@ class TestSend:
     def test_send_no_active_session(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         # _active_session_uuid is None by default
         channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]))  # Should not raise
@@ -369,8 +364,7 @@ class TestSend:
         test_uuid = uuid.uuid4()
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         channel._active_session_uuid = test_uuid
         # No mapping in _session_conversations
@@ -381,8 +375,7 @@ class TestSend:
         test_uuid = uuid.uuid4()
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         channel._active_session_uuid = test_uuid
         channel._session_conversations[test_uuid] = "convtoken"
@@ -426,8 +419,7 @@ class TestSend:
         test_uuid = uuid.uuid4()
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
+            config=_make_config(),
         )
         channel._active_session_uuid = test_uuid
         channel._session_conversations[test_uuid] = "convtoken"
@@ -471,9 +463,7 @@ class TestStartStop:
     async def test_start_returns_server_url(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
-            host="0.0.0.0", port=0,
+            config=_make_config(port=0),
         )
 
         url = await channel.start()
@@ -488,9 +478,7 @@ class TestStartStop:
     async def test_stop_cleans_up(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
-            nextcloud_url="https://cloud.example.com",
-            bot_id="abc", bot_secret="secret",
-            host="0.0.0.0", port=0,
+            config=_make_config(port=0),
         )
 
         await channel.start()

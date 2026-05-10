@@ -31,23 +31,10 @@ class NextcloudTalkChannel(Channel):
         self,
         name: str,
         agent,
-        nextcloud_url: str,
-        bot_id: str,
-        bot_secret: str,
-        default_role: str = "test",
-        host: str = "0.0.0.0",
-        port: int = 8766,
-        show_reasoning: bool = True,
-        show_tool_calls: bool = True,
-        show_tool_results: bool = True,
+        config: dict,
     ):
         super().__init__(name, agent)
-        self._nextcloud_url = nextcloud_url.rstrip("/")
-        self._bot_id = bot_id
-        self._bot_secret = bot_secret
-        self._default_role = default_role
-        self._host = host
-        self._port = port
+        self._config = config
         self._app: web.Application = None
         self._runner: web.AppRunner = None
         self._site: web.TCPSite = None
@@ -59,9 +46,38 @@ class NextcloudTalkChannel(Channel):
         self._tool_call_ids: dict[str, list[str]] = {}  # referenceId -> [tool_call_ids]
         self._sent_message_sessions: dict[str, uuid.UUID] = {}  # referenceId -> session_uuid
         self._sent_messages: list[dict] = []  # Local history: [{referenceId, message, tool_call_ids, session_uuid}]
-        self._show_reasoning = show_reasoning
-        self._show_tool_calls = show_tool_calls
-        self._show_tool_results = show_tool_results
+
+    @staticmethod
+    def load_config(config_file: str = "examples/config/nextcloud_config.json") -> dict:
+        """Load and validate Nextcloud config from JSON file.
+
+        Required fields: nextcloud_url, bot_id, bot_secret.
+        Optional fields with defaults: default_role, host, port,
+        show_reasoning, show_tool_calls, show_tool_results.
+
+        Args:
+            config_file: Path to the JSON configuration file.
+
+        Returns:
+            Dict with validated config values and defaults applied.
+
+        Raises:
+            FileNotFoundError: If configuration file doesn't exist.
+            KeyError: If required fields are missing.
+        """
+        with open(config_file, "r") as f:
+            config = json.load(f)
+        config.setdefault("default_role", "test")
+        config.setdefault("host", "0.0.0.0")
+        config.setdefault("port", 8766)
+        config.setdefault("show_reasoning", True)
+        config.setdefault("show_tool_calls", True)
+        config.setdefault("show_tool_results", True)
+        required = ["nextcloud_url", "bot_id", "bot_secret"]
+        missing = [k for k in required if k not in config]
+        if missing:
+            raise KeyError(f"Missing required config fields: {', '.join(missing)}")
+        return config
 
     async def start(self) -> str:
         """Start the webhook receiver server.
@@ -78,11 +94,11 @@ class NextcloudTalkChannel(Channel):
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
 
-        self._site = web.TCPSite(self._runner, self._host, self._port)
+        self._site = web.TCPSite(self._runner, self._config["host"], self._config["port"])
         await self._site.start()
 
         actual_port = self._site._server.sockets[0].getsockname()[1]
-        self._server_url = f"http://{self._host}:{actual_port}/nextcloud-talk-webhook"
+        self._server_url = f"http://{self._config['host']}:{actual_port}/nextcloud-talk-webhook"
 
         return self._server_url
 
@@ -137,13 +153,13 @@ class NextcloudTalkChannel(Channel):
 
     def _should_send_part(self, part: ContentPart, msg_role: str) -> bool:
         """Check if a content part should be sent based on enabled/disabled flags."""
-        if part.type == "reasoning" and not self._show_reasoning:
+        if part.type == "reasoning" and not self._config.get("show_reasoning", True):
             return False
-        if part.type == "tool_calls" and not self._show_tool_calls:
+        if part.type == "tool_calls" and not self._config.get("show_tool_calls", True):
             return False
-        if part.type == "tool_call" and not self._show_tool_calls:
+        if part.type == "tool_call" and not self._config.get("show_tool_calls", True):
             return False
-        if part.type == "tool_result" and not self._show_tool_results:
+        if part.type == "tool_result" and not self._config.get("show_tool_results", True):
             return False
         return True
 
@@ -253,7 +269,7 @@ class NextcloudTalkChannel(Channel):
             True if signature is valid.
         """
         computed = hmac.new(
-            self._bot_secret.encode(),
+            self._config["bot_secret"].encode(),
             random_nonce.encode() + body,
             hashlib.sha256,
         ).hexdigest()
@@ -462,7 +478,7 @@ class NextcloudTalkChannel(Channel):
             return session
 
         try:
-            session = await self._agent.create_session(self._default_role)
+            session = await self._agent.create_session(self._config["default_role"])
             self._rooms[conversation_token] = session.uuid
             self._session_conversations[session.uuid] = conversation_token
             self._subscribe_session(session.uuid)
@@ -507,13 +523,13 @@ class NextcloudTalkChannel(Channel):
             random_nonce = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
             # Sign random + message text (same as official bash example)
             signature = hmac.new(
-                self._bot_secret.encode(),
+                self._config["bot_secret"].encode(),
                 (random_nonce + payload["message"]).encode(),
                 hashlib.sha256,
             ).hexdigest()
 
             url = (
-                f"{self._nextcloud_url}/ocs/v2.php/apps/spreed/api/v1/bot/{conversation_token}/message"
+                f"{self._config["nextcloud_url"].rstrip("/")}/ocs/v2.php/apps/spreed/api/v1/bot/{conversation_token}/message"
             )
 
             async with aiohttp.ClientSession() as session:
@@ -603,13 +619,13 @@ class NextcloudTalkChannel(Channel):
             # Per Nextcloud Talk Bots API bash implementation: HMAC-SHA256 of
             # random + full JSON body
             signature = hmac.new(
-                self._bot_secret.encode(),
+                self._config["bot_secret"].encode(),
                 (random_nonce + emoji).encode(),
                 hashlib.sha256,
             ).hexdigest()
 
             url = (
-                f"{self._nextcloud_url}/ocs/v2.php/apps/spreed/api/v1/bot/{conversation_token}/reaction/{message_id}"
+                f"{self._config["nextcloud_url"].rstrip("/")}/ocs/v2.php/apps/spreed/api/v1/bot/{conversation_token}/reaction/{message_id}"
             )
 
             async with aiohttp.ClientSession() as session:
