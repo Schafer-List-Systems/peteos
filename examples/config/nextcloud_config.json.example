@@ -4,5 +4,8 @@
     "bot_secret": "your-shared-secret",
     "default_role": "test",
     "host": "0.0.0.0",
-    "port": 8766
+    "port": 8766,
+    "show_reasoning": true,
+    "show_tool_calls": true,
+    "show_tool_results": true
 }

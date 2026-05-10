@@ -245,6 +245,9 @@ async def main():
         default_role=nc_config.get("default_role", "test"),
         host=nc_config.get("host", "0.0.0.0"),
         port=nc_config.get("port", 8766),
+        show_reasoning=nc_config.get("show_reasoning", True),
+        show_tool_calls=nc_config.get("show_tool_calls", True),
+        show_tool_results=nc_config.get("show_tool_results", True),
     )
 
     # Start the webhook receiver
