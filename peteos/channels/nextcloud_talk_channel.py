@@ -37,6 +37,9 @@ class NextcloudTalkChannel(Channel):
         default_role: str = "test",
         host: str = "0.0.0.0",
         port: int = 8766,
+        show_reasoning: bool = True,
+        show_tool_calls: bool = True,
+        show_tool_results: bool = True,
     ):
         super().__init__(name, agent)
         self._nextcloud_url = nextcloud_url.rstrip("/")
@@ -56,6 +59,9 @@ class NextcloudTalkChannel(Channel):
         self._tool_call_ids: dict[str, list[str]] = {}  # referenceId -> [tool_call_ids]
         self._sent_message_sessions: dict[str, uuid.UUID] = {}  # referenceId -> session_uuid
         self._sent_messages: list[dict] = []  # Local history: [{referenceId, message, tool_call_ids, session_uuid}]
+        self._show_reasoning = show_reasoning
+        self._show_tool_calls = show_tool_calls
+        self._show_tool_results = show_tool_results
 
     async def start(self) -> str:
         """Start the webhook receiver server.
