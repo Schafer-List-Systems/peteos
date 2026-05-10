@@ -233,7 +233,7 @@ class Session(ActiveClass):
                 )],
             )
             self.chat_history.append_message(msg)
-            await self._call_hooks("after_tool_execution", event.tool_call, denial_msg, False)
+            await self.execution_environment._call_hooks("after_tool_execution", event.tool_call, denial_msg, False)
             self._pending_tool_calls.remove(record)
             # Re-enter the session loop to continue
             await self._run_session_loop()
