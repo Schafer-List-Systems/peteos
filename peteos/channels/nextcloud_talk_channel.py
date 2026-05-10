@@ -100,7 +100,7 @@ class NextcloudTalkChannel(Channel):
         actual_port = self._site._server.sockets[0].getsockname()[1]
         self._server_url = f"http://{self._config['host']}:{actual_port}/nextcloud-talk-webhook"
 
-        # Pre-join configured rooms and send greetings
+        # Pre-join configured rooms
         for room_token in self._config.get("auto_join_rooms", []):
             await self._pre_join_room(room_token)
 
@@ -280,15 +280,13 @@ class NextcloudTalkChannel(Channel):
         return hmac.compare_digest(computed, signature)
 
     async def _pre_join_room(self, token: str) -> None:
-        """Pre-join a room from config: create session, send greeting."""
+        """Pre-join a room from config: create session and register mapping."""
         try:
             session = await self._agent.create_session(self._config["default_role"])
             self._rooms[token] = session.uuid
             self._session_conversations[session.uuid] = token
-            self._subscribe_session(session.uuid)
+            self.subscribe_to_session(session.uuid)
             logger.info("Pre-joined room %s with session %s", token, session.uuid)
-            await self._send_to_nextcloud(token, "Hello, I am online now.")
-            logger.info("Sent greeting to room %s", token)
         except Exception as e:
             logger.error("Failed to pre-join room %s: %s", token, e)
 
@@ -491,30 +489,19 @@ class NextcloudTalkChannel(Channel):
         if conversation_token in self._rooms:
             session_uuid = self._rooms[conversation_token]
             session = self._agent.get_session(session_uuid)
-            self._subscribe_session(session_uuid)
+            self.subscribe_to_session(session_uuid)
             return session
 
         try:
             session = await self._agent.create_session(self._config["default_role"])
             self._rooms[conversation_token] = session.uuid
             self._session_conversations[session.uuid] = conversation_token
-            self._subscribe_session(session.uuid)
+            self.subscribe_to_session(session.uuid)
             logger.info("Created session %s for conversation %s", session.uuid, conversation_token)
             return session
         except Exception as e:
             logger.error("Failed to create session for conversation %s: %s", conversation_token, e)
             return None
-
-    def _subscribe_session(self, session_uuid: uuid.UUID) -> None:
-        """Subscribe this channel to receive notifications for a session.
-
-        Delegates to the base class which handles queue creation, channel
-        registration, and notification consumer lifecycle.
-
-        Args:
-            session_uuid: The session to subscribe to.
-        """
-        self.subscribe_to_session(session_uuid)
 
     async def _send_to_nextcloud(self, conversation_token: str, payload: dict) -> Optional[str]:
         """Send a message to a Nextcloud Talk conversation.
@@ -563,42 +550,9 @@ class NextcloudTalkChannel(Channel):
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     if resp.status == 201:
-                        try:
-                            body_text = await resp.text()
-                            if not body_text.strip():
-                                logger.error(
-                                    "Empty response body from Nextcloud for %s, status=201. "
-                                    "Reactions to this message won't be linkable to tool calls.",
-                                    conversation_token,
-                                )
-                                return None
-                            response_data = json.loads(body_text)
-                            if response_data is None:
-                                response_data = {}
-                            # Extract message ID from OCS response — try multiple paths
-                            message_id = ""
-                            ocs = response_data.get("ocs", {}) if isinstance(response_data, dict) else None
-                            if ocs and isinstance(ocs, dict):
-                                ocs_data = ocs.get("data", {})
-                                if isinstance(ocs_data, dict):
-                                    message_id = ocs_data.get("id", "")
-                            if not message_id and isinstance(response_data, dict):
-                                message_id = response_data.get("id", "")
-                            if message_id:
-                                logger.debug("Message sent to conversation %s, id=%s", conversation_token, message_id)
-                            else:
-                                logger.error(
-                                    "Could not extract message ID from Nextcloud response for %s: %s",
-                                    conversation_token,
-                                    body_text[:200],
-                                )
-                            return message_id
-                        except (json.JSONDecodeError, Exception) as e:
-                            logger.error(
-                                "Failed to parse response from Nextcloud for %s: %s",
-                                conversation_token, e,
-                            )
-                            return None
+                        await resp.json()
+                        logger.debug("Message sent to conversation %s", conversation_token)
+                        return None
                     else:
                         body = await resp.text()
                         logger.warning(

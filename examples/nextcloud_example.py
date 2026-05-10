@@ -223,7 +223,7 @@ async def main():
     # Send startup message to the most recent conversation if one exists
     if nextcloud._rooms:
         token = list(nextcloud._rooms.keys())[-1]
-        await nextcloud._send_to_nextcloud(token, "Hello, I am online now.")
+        await nextcloud._send_to_nextcloud(token, {"message": "Hello, I am online now."})
         print(f"  Sent 'Hello, I am online now.' to room {token}")
     else:
         print("  No active rooms yet. Will greet on first room join.")
