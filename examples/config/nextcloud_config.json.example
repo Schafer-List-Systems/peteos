@@ -7,5 +7,6 @@
     "port": 8766,
     "show_reasoning": true,
     "show_tool_calls": true,
-    "show_tool_results": true
+    "show_tool_results": true,
+    "auto_join_rooms": ["abc123xyz"]
 }

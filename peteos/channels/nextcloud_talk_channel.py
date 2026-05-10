@@ -100,6 +100,10 @@ class NextcloudTalkChannel(Channel):
         actual_port = self._site._server.sockets[0].getsockname()[1]
         self._server_url = f"http://{self._config['host']}:{actual_port}/nextcloud-talk-webhook"
 
+        # Pre-join configured rooms and send greetings
+        for room_token in self._config.get("auto_join_rooms", []):
+            await self._pre_join_room(room_token)
+
         return self._server_url
 
     async def stop(self) -> None:
@@ -274,6 +278,19 @@ class NextcloudTalkChannel(Channel):
             hashlib.sha256,
         ).hexdigest()
         return hmac.compare_digest(computed, signature)
+
+    async def _pre_join_room(self, token: str) -> None:
+        """Pre-join a room from config: create session, send greeting."""
+        try:
+            session = await self._agent.create_session(self._config["default_role"])
+            self._rooms[token] = session.uuid
+            self._session_conversations[session.uuid] = token
+            self._subscribe_session(session.uuid)
+            logger.info("Pre-joined room %s with session %s", token, session.uuid)
+            await self._send_to_nextcloud(token, "Hello, I am online now.")
+            logger.info("Sent greeting to room %s", token)
+        except Exception as e:
+            logger.error("Failed to pre-join room %s: %s", token, e)
 
     async def _handle_message(self, event: dict) -> None:
         """Handle incoming chat message (Create event)."""
