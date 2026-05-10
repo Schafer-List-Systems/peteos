@@ -1,5 +1,6 @@
 # Peteos - Agentic application framework
 
+from peteos.activeclass import ActiveClass
 from peteos.agent import Agent
 from peteos.chatbot import (
     ChatBot,
@@ -23,6 +24,7 @@ from peteos.session import Session
 from peteos.toolmanager import ToolManager
 
 __all__ = [
+    "ActiveClass",
     "Agent",
     "AnthropicChatBot",
     "AnthropicChatBotResponse",

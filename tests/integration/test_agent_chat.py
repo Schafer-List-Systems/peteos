@@ -5,7 +5,9 @@ import pytest
 import sys
 sys.path.insert(0, '/home/frygge/projects/private/peteos')
 
-from unittest.mock import MagicMock, AsyncMock
+from aiohttp import web
+from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
+
 from peteos.agent import Agent
 from peteos.chatbot.manager import ChatBotManager
 from peteos.chatbot import Message, ContentPart
@@ -14,119 +16,148 @@ from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
-class TestAgentChatFlow:
+class TestAgentChatFlow(AioHTTPTestCase):
     """Test that Agent properly processes messages and gets responses."""
 
-    @pytest.fixture
-    def setup_components(self):
-        """Create mocked components for testing."""
+    async def get_application(self):
+        """Create the mock backend application."""
+        app = web.Application()
+        app.router.add_get("/", self.handle_root)
+        app.router.add_get("/v1/models", self.handle_models)
+        app.router.add_post("/v1/chat/completions", self.handle_chat_completions)
+        return app
+
+    async def handle_root(self, request):
+        """Root endpoint."""
+        return web.json_response({"status": "ok"})
+
+    async def handle_models(self, request):
+        """Return available models in OpenAI format."""
+        return web.json_response({
+            "data": [
+                {"id": "test-model", "name": "Test Model", "object": "model"}
+            ]
+        })
+
+    async def handle_chat_completions(self, request):
+        """Handle chat completions - echo back user message in SSE format."""
+        body = await request.json()
+        messages = body.get("messages", [])
+
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                user_content = msg.get("content", "")
+                text = f"This is the agent's response to: {user_content}"
+                break
+        else:
+            text = "Test response"
+
+        async def event_generator():
+            yield 'data: {"id": "chatcmpl-test", "object": "chat.completion", "created": 1234567890, "model": "' + body.get("model", "test-model") + '", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "' + text + '"}}], "usage": null}\n'
+            yield 'data: [DONE]\n'
+
+        response = web.StreamResponse(status=200)
+        response.headers['Content-Type'] = 'text/event-stream'
+        response.headers['Cache-Control'] = 'no-cache'
+        await response.prepare(request)
+        async for chunk in event_generator():
+            await response.write(chunk.encode())
+        await response.write_eof()
+        return response
+
+    @unittest_run_loop
+    @pytest.mark.asyncio
+    async def test_message_queue_processing(self):
+        """Test that posted messages are processed by the event loop."""
         role_manager = RoleManager()
         role_manager.register_role(Role(name="test", description="Test", model=".*"))
 
-        # Mock chatbot manager with a mock chatbot
-        chatbot_manager = MagicMock()
-
-        # Create proper mock response object
-        mock_response_data = {"text": "This is a test response", "role": "assistant"}
-        mock_response = MagicMock()
-        mock_response.data = mock_response_data
-
-        mock_chatbot = AsyncMock()
-        mock_chatbot.send_message = AsyncMock(return_value=mock_response)
-
-        chatbot_manager.list_chatbots = MagicMock(return_value=[
-            ("test-model", mock_chatbot)
-        ])
+        chatbot_manager = ChatBotManager()
+        await chatbot_manager.add_backend(
+            "mock", f"http://{self.server.host}:{self.server.port}"
+        )
 
         tool_manager = ToolManager()
-
-        return role_manager, chatbot_manager, tool_manager
-
-    @pytest.mark.asyncio
-    async def test_message_queue_processing(self, setup_components):
-        """Test that posted messages are processed by the event loop."""
-        role_manager, chatbot_manager, tool_manager = setup_components
-
         agent = Agent(role_manager, chatbot_manager, tool_manager)
-        await agent.start()
 
-        session = agent.create_session("test")
+        try:
+            session = await agent.create_session("test")
 
-        # Post a message using new Message format
-        msg = Message(
-            role="user",
-            content=[ContentPart(part_type="text", text="Test message")]
-        )
-        agent.post_message(session.uuid, msg)
+            msg = Message(
+                role="user",
+                content=[ContentPart(part_type="text", text="Test message")]
+            )
+            await session.queue_message(msg)
 
-        # Wait for processing
-        await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
 
-        # Verify queue was processed
-        assert agent._message_queues[session.uuid].empty(), "Message should be processed"
+            assert len(session.chat_history.messages) >= 1, "Message should be in history"
+            assert session.chat_history.messages[0].role == "user"
+        finally:
+            await session.stop()
 
-        # Verify message was added to history
-        assert len(session.chat_history.messages) >= 1, "Message should be in history"
-        assert session.chat_history.messages[0].role == "user"
-
-        await agent.stop()
-
+    @unittest_run_loop
     @pytest.mark.asyncio
-    async def test_message_triggers_chatbot(self, setup_components):
+    async def test_message_triggers_chatbot(self):
         """Test that messages trigger the chatbot to generate responses."""
-        role_manager, chatbot_manager, tool_manager = setup_components
+        role_manager = RoleManager()
+        role_manager.register_role(Role(name="test", description="Test", model=".*"))
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
-        await agent.start()
-
-        session = agent.create_session("test")
-
-        # Post a message using new Message format
-        msg = Message(
-            role="user",
-            content=[ContentPart(part_type="text", text="What is 2+2?")]
+        chatbot_manager = ChatBotManager()
+        await chatbot_manager.add_backend(
+            "mock", f"http://{self.server.host}:{self.server.port}"
         )
-        agent.post_message(session.uuid, msg)
 
-        # Wait for processing and chatbot response
-        await asyncio.sleep(2)
+        tool_manager = ToolManager()
+        agent = Agent(role_manager, chatbot_manager, tool_manager)
 
-        # Verify chatbot was called
-        chatbot = chatbot_manager.list_chatbots(".*")[0][1]
-        assert chatbot.send_message.called, "Chatbot should be called"
+        try:
+            session = await agent.create_session("test")
 
-        # Verify response was added to history
-        assert len(session.chat_history.messages) >= 2, "Should have user and agent messages"
+            msg = Message(
+                role="user",
+                content=[ContentPart(part_type="text", text="What is 2+2?")]
+            )
+            await session.queue_message(msg)
 
-        await agent.stop()
+            await asyncio.sleep(2)
 
+            # Verify chatbot was called by checking history has assistant response
+            assert len(session.chat_history.messages) >= 2, "Should have user and agent messages"
+        finally:
+            await session.stop()
+
+    @unittest_run_loop
     @pytest.mark.asyncio
-    async def test_full_chat_roundtrip(self, setup_components):
+    async def test_full_chat_roundtrip(self):
         """Test complete user question -> agent response flow."""
-        role_manager, chatbot_manager, tool_manager = setup_components
+        role_manager = RoleManager()
+        role_manager.register_role(Role(name="test", description="Test", model=".*"))
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
-        await agent.start()
-
-        session = agent.create_session("test")
-
-        # Send question using new Message format
-        question = "What is the weather?"
-        msg = Message(
-            role="user",
-            content=[ContentPart(part_type="text", text=question)]
+        chatbot_manager = ChatBotManager()
+        await chatbot_manager.add_backend(
+            "mock", f"http://{self.server.host}:{self.server.port}"
         )
-        agent.post_message(session.uuid, msg)
 
-        # Wait for response
-        await asyncio.sleep(3)
+        tool_manager = ToolManager()
+        agent = Agent(role_manager, chatbot_manager, tool_manager)
 
-        # Verify we got a response
-        history = session.chat_history.messages
-        assert len(history) >= 2, "Should have user message and response"
+        try:
+            session = await agent.create_session("test")
 
-        # Verify response exists - check role attribute, not content
-        assistant_messages = [m for m in history if m.role == 'assistant']
-        assert len(assistant_messages) > 0, "Should have at least one assistant response"
+            question = "What is the weather?"
+            msg = Message(
+                role="user",
+                content=[ContentPart(part_type="text", text=question)]
+            )
+            await session.queue_message(msg)
 
-        await agent.stop()
+            await asyncio.sleep(2)
+
+            history = session.chat_history.messages
+            assert len(history) >= 2, "Should have user message and response"
+
+            assistant_messages = [m for m in history if m.role == 'assistant']
+            assert len(assistant_messages) > 0, "Should have at least one assistant response"
+        finally:
+            await session.stop()

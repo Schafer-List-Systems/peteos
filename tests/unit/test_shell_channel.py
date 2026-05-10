@@ -77,6 +77,13 @@ class TestShellChannelCommands:
 
     def teardown_method(self):
         """Clean up."""
+        for session_uuid in list(self.agent._sessions.keys()):
+            session = self.agent.get_session(session_uuid)
+            if session and session.is_running():
+                try:
+                    asyncio.get_event_loop().run_until_complete(session.stop())
+                except RuntimeError:
+                    pass
         _cleanup_channels()
 
     def test_command_new_creates_session(self):

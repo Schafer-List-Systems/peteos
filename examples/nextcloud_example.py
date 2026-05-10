@@ -228,17 +228,11 @@ async def main():
     # Create the Agent
     agent = Agent(role_manager, chatbot_manager, tool_manager)
 
-    # Start the Agent's event loop
-    await agent.start()
-    print("Agent event loop started")
-    print()
-
     # Load Nextcloud configuration
     try:
         nc_config = load_nextcloud_config(args.nextcloud_config)
     except (FileNotFoundError, KeyError) as e:
         print(f"Aborting: {e}")
-        await agent.stop()
         return
 
     # Create the Nextcloud Talk channel
@@ -289,7 +283,6 @@ async def main():
             for token in nextcloud._rooms:
                 await nextcloud._send_to_nextcloud(token, "I am going offline.")
         await nextcloud.stop()
-        await agent.stop()
         print("Stopped.")
 
 

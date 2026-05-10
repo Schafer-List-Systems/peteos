@@ -56,3 +56,5 @@ http_client.md
 TODO.md
 config/chatbot_config.json
 roles/test/config.json
+examples/config/nextcloud_config.json
+context-folding.md

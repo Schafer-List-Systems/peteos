@@ -1,8 +1,8 @@
 """End-to-end integration tests using mock backend.
 
 This tests the complete agent flow:
-1. Agent receives message via queue
-2. Session processes message through execution environment
+1. Agent creates session with execution environment
+2. Session receives message, drives execution environment
 3. Chatbot (mocked HTTP server) generates response
 4. Response is added to session history
 """
@@ -91,19 +91,18 @@ class TestAgentE2E(AioHTTPTestCase):
         tool_manager = ToolManager()
 
         agent = Agent(role_manager, chatbot_manager, tool_manager)
-        await agent.start()
 
         try:
-            # Create session
-            session = agent.create_session("test")
+            # Create session (now async, auto-starts session event loop)
+            session = await agent.create_session("test")
 
-            # Send question using new Message format
+            # Send question directly to session (agent.post_message removed)
             question = "What is 2 + 2?"
             msg = Message(
                 role="user",
                 content=[ContentPart(part_type="text", text=question)]
             )
-            agent.post_message(session.uuid, msg)
+            await session.queue_message(msg)
 
             # Wait for response
             await asyncio.sleep(2)
@@ -121,7 +120,7 @@ class TestAgentE2E(AioHTTPTestCase):
             assert "2 + 2" in history[1].content[0].text
 
         finally:
-            await agent.stop()
+            await session.stop()
 
     @unittest_run_loop
     async def test_agent_multiple_messages(self):
@@ -141,20 +140,19 @@ class TestAgentE2E(AioHTTPTestCase):
         tool_manager = ToolManager()
 
         agent = Agent(role_manager, chatbot_manager, tool_manager)
-        await agent.start()
 
         try:
-            session = agent.create_session("test")
+            session = await agent.create_session("test")
 
-            # Send first question using new Message format
-            agent.post_message(session.uuid, Message(
+            # Send first question directly to session
+            await session.queue_message(Message(
                 role="user",
                 content=[ContentPart(part_type="text", text="Hello")]
             ))
             await asyncio.sleep(1)
 
-            # Send second question using new Message format
-            agent.post_message(session.uuid, Message(
+            # Send second question
+            await session.queue_message(Message(
                 role="user",
                 content=[ContentPart(part_type="text", text="How are you?")]
             ))
@@ -169,7 +167,7 @@ class TestAgentE2E(AioHTTPTestCase):
             assert "user" in roles and "assistant" in roles
 
         finally:
-            await agent.stop()
+            await session.stop()
 
     @unittest_run_loop
     async def test_agent_tool_call_flow(self):
@@ -195,13 +193,12 @@ class TestAgentE2E(AioHTTPTestCase):
         tool_manager.register_tool(func=get_weather)
 
         agent = Agent(role_manager, chatbot_manager, tool_manager)
-        await agent.start()
 
         try:
-            session = agent.create_session("test")
+            session = await agent.create_session("test")
 
-            # Send question using new Message format
-            agent.post_message(session.uuid, Message(
+            # Send question directly to session
+            await session.queue_message(Message(
                 role="user",
                 content=[ContentPart(part_type="text", text="What's the weather in London?")]
             ))
@@ -212,7 +209,7 @@ class TestAgentE2E(AioHTTPTestCase):
             assert len(history) >= 2
 
         finally:
-            await agent.stop()
+            await session.stop()
 
     @unittest_run_loop
     async def test_session_initializes_with_tools(self):
@@ -237,10 +234,9 @@ class TestAgentE2E(AioHTTPTestCase):
         tool_manager.register_tool(func=get_weather)
 
         agent = Agent(role_manager, chatbot_manager, tool_manager)
-        await agent.start()
 
         try:
-            session = agent.create_session("test")
+            session = await agent.create_session("test")
 
             # Verify chat history has messages
             history = session.chat_history.messages
@@ -264,7 +260,7 @@ class TestAgentE2E(AioHTTPTestCase):
                       for msg in history for part in msg.content)
 
         finally:
-            await agent.stop()
+            await session.stop()
 
 
 class TestAgentQuickVerify:

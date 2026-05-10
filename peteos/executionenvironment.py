@@ -95,14 +95,30 @@ class ExecutionEnvironment(ABC):
         finally:
             self._completion_signal.set()
 
-    @abstractmethod
+    async def step(self) -> tuple[str, dict | None]:
+        """Execute one loop iteration: chatbot call → tool(s) → continue/exit.
+
+        Returns:
+            Tuple of (status, data). Status is one of:
+            - "done": loop finished (final answer or interrupt)
+            - "continue": loop back to chatbot
+            - "tool_pending": waiting for user approval
+
+            When status is "tool_pending", data is {"tool_call": dict}.
+        """
+        raise NotImplementedError
+
     async def _run_impl(self) -> None:
         """
-        Actual implementation of the agentic loop.
+        Run the agentic loop by calling step() repeatedly.
 
-        This method must be overridden by derived classes.
+        Subclasses can override this for custom loop behavior,
+        but the default implementation calls step() in a loop.
         """
-        pass
+        while not self._interrupt:
+            status, _ = await self.step()
+            if status == "done":
+                break
 
     async def wait_for_stop(self) -> None:
         """

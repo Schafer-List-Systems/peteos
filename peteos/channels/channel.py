@@ -3,10 +3,11 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Dict, Set
 
+from peteos.activeclass import ActiveClass
 from peteos.chatbot import Message
 
 
-class Channel(ABC):
+class Channel(ActiveClass, ABC):
     """Abstract base class for channels connecting users to agents."""
 
     _registry: Dict[str, "Channel"] = {}
@@ -19,11 +20,10 @@ class Channel(ABC):
             name: Unique identifier for this channel.
             agent: The Agent instance this channel connects to.
         """
+        super().__init__()
         self.name = name
         self._agent = agent
         self._active_session_uuid: uuid.UUID | None = None
-        self._session_consumer_tasks: Dict[uuid.UUID, asyncio.Task] = {}
-        self._running: bool = False
         self._show_reasoning: bool = True
         self._show_tool_calls: bool = True
         self._show_tool_results: bool = True
@@ -95,78 +95,54 @@ class Channel(ABC):
         """
         return dict(cls._registry)
 
+    async def run(self) -> None:
+        """Main notification consumption loop.
+
+        Consumes events pushed via push_event() and delivers them via send().
+        Runs until the channel is stopped.
+
+        Call ``await channel.start()`` to begin the background loop,
+        and ``await channel.stop()`` to end it.
+        """
+        try:
+            while self.is_running():
+                message = await self._wait()
+                if message is None:
+                    break
+                if message.role == "reasoning" and not self._show_reasoning:
+                    continue
+                elif message.role == "tool" and not self._show_tool_calls:
+                    continue
+                elif message.role == "tool_result" and not self._show_tool_results:
+                    continue
+                self.send(message)
+        finally:
+            await self.stop()
+
     def subscribe_to_session(self, session_uuid: uuid.UUID) -> None:
         """Subscribe this channel to notifications for a session.
 
-        Creates the notification queue, registers the channel with the
-        agent's _session_channels, and starts the notification consumer
-        for the given session.
+        Registers the channel with the agent's _session_channels and
+        starts the notification consumer (self.run()).
 
         Args:
             session_uuid: The session to subscribe to.
         """
-        if not self._running:
-            return
-
-        queue_key = (self.name, session_uuid)
-
-        if queue_key not in self._agent._notification_queues:
-            self._agent._notification_queues[queue_key] = asyncio.Queue()
         if session_uuid not in self._agent._session_channels:
             self._agent._session_channels[session_uuid] = set()
         self._agent._session_channels[session_uuid].add(self)
 
-        # Start notification consumer if not already running for this session
-        if session_uuid not in self._session_consumer_tasks or self._session_consumer_tasks[session_uuid].done():
-            self._session_consumer_tasks[session_uuid] = asyncio.create_task(
-                self._consume_notifications(session_uuid)
-            )
-
     def unsubscribe_from_session(self, session_uuid: uuid.UUID) -> None:
         """Unsubscribe this channel from notifications for a session.
 
-        Cancels the notification consumer task for the given session.
+        Removes the channel from the session's subscribed channels.
 
         Args:
             session_uuid: The session to unsubscribe from.
         """
-        task = self._session_consumer_tasks.pop(session_uuid, None)
-        if task and not task.done():
-            task.cancel()
-
-    async def _consume_notifications(self, session_uuid: uuid.UUID) -> None:
-        """Poll the notification queue and forward messages via send().
-
-        Runs until the channel is stopped. Subclasses may override to customize
-        notification delivery behavior.
-
-        Args:
-            session_uuid: The session to consume notifications for.
-        """
-        queue_key = (self.name, session_uuid)
-        try:
-            while self._running:
-                queue = self._agent._notification_queues.get(queue_key)
-                if not queue:
-                    await asyncio.sleep(0.1)
-                    continue
-                if not queue.empty():
-                    try:
-                        message = queue.get_nowait()
-                        if message.role == "reasoning" and not self._show_reasoning:
-                            continue
-                        elif message.role == "tool" and not self._show_tool_calls:
-                            continue
-                        elif message.role == "tool_result" and not self._show_tool_results:
-                            continue
-                        self._active_session_uuid = session_uuid
-                        self.send(message)
-                    except Exception:
-                        pass
-                else:
-                    await asyncio.sleep(0.1)
-        except asyncio.CancelledError:
-            pass
+        if session_uuid in self._agent._session_channels:
+            if self in self._agent._session_channels[session_uuid]:
+                self._agent._session_channels[session_uuid].remove(self)
 
     def enable_reasoning(self, on: bool) -> None:
         self._show_reasoning = on

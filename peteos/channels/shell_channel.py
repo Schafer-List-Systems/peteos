@@ -8,6 +8,7 @@ from typing import Optional
 from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
 from peteos.logger import get_logger
+from peteos.session import ApprovalEvent
 
 _logger = get_logger(__name__)
 
@@ -44,7 +45,6 @@ class InteractiveShellChannel(Channel):
             agent: The Agent instance this channel connects to.
         """
         super().__init__(name, agent)
-        self._running = False  # Explicit start/stop lifecycle
 
     def send(self, message: Message | str) -> None:
         """Send a message to the shell.
@@ -58,20 +58,23 @@ class InteractiveShellChannel(Channel):
             print(message.text)
 
     def _post_message_to_agent(self, session_uuid: uuid.UUID, content: str) -> None:
-        """Post a message to the Agent's message queue.
+        """Post a message directly to the session's event queue.
 
-        Non-blocking queue put. If queue is full, blocks until space available.
+        Non-blocking. The session's event loop processes the message.
+        Since this method is sync (called from the input loop), uses
+        asyncio.create_task to call the async queue_message.
 
         Args:
             session_uuid: The UUID of the target session.
             content: The message content from the user.
         """
-        if self._agent:
+        session = self._agent.get_session(session_uuid)
+        if session:
             message = Message(
                 role="user",
                 content=[ContentPart(part_type="text", text=content)]
             )
-            self._agent.post_message(session_uuid, message)
+            asyncio.create_task(session.queue_message(message))
 
     def _get_input_line(self) -> Optional[str]:
         """Synchronous input reader for use with run_in_executor."""
@@ -91,20 +94,15 @@ class InteractiveShellChannel(Channel):
     async def start(self) -> None:
         """Start the shell channel.
 
-        Initializes notification consumption for the active session.
+        Starts the background notification consumption loop via super().start()
+        and the input reading loop via asyncio.create_task().
         """
-        if self._running:
-            return
-
-        self._running = True
-        self.send("Connected. Commands: /new, /list, /select, /messages, /quit")
+        await super().start()
+        asyncio.create_task(self.read_input_loop())
 
     async def stop(self) -> None:
         """Stop the shell channel gracefully."""
-        if not self._running:
-            return
-
-        self._running = False
+        await super().stop()
 
     def select_session(self, session_uuid: uuid.UUID) -> None:
         """
@@ -117,6 +115,15 @@ class InteractiveShellChannel(Channel):
         """
         super().select_session(session_uuid)
         self.subscribe_to_session(session_uuid)
+
+    def _get_prompt(self) -> str:
+        """Get the prompt string for the shell."""
+        if self._active_session_uuid:
+            short_uuid = str(self._active_session_uuid)[:8]
+            session = self._agent.get_session(self._active_session_uuid)
+            role_name = session.role.name if session else "agent"
+            return f"{short_uuid} @{role_name} >> "
+        return ">> "
 
     def handle_command(self, line: str) -> tuple[bool, str]:
         """Handle a shell command.
@@ -135,10 +142,19 @@ class InteractiveShellChannel(Channel):
             if not args:
                 return (True, "Usage: /new <role>")
             try:
-                session = self._agent.create_session(args.strip())
-                self.select_session(session.uuid)
-                _logger.debug(f"Session created: {session.uuid}")
-                return (True, "")
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(
+                        self._handle_new_session(args.strip())
+                    )
+                    return (True, "")
+                else:
+                    session = loop.run_until_complete(
+                        self._agent.create_session(args.strip())
+                    )
+                    self.select_session(session.uuid)
+                    _logger.debug("Session created: %s", session.uuid)
+                    return (True, "")
             except ValueError as e:
                 return (True, str(e))
 
@@ -161,7 +177,7 @@ class InteractiveShellChannel(Channel):
                 if session is None:
                     return (True, f"Session not found: {session_uuid}")
                 self.select_session(session_uuid)
-                _logger.debug(f"Active session: {session_uuid}")
+                _logger.debug("Active session: %s", session_uuid)
                 return (True, "")
             except ValueError:
                 return (True, f"Invalid UUID: {args}")
@@ -183,6 +199,56 @@ class InteractiveShellChannel(Channel):
                 output += f"\n  [{role}] {text}"
             return (True, output)
 
+        elif command == "/approve":
+            if self._active_session_uuid is None:
+                return (True, "No session selected")
+            session = self._agent.get_session(self._active_session_uuid)
+            if session is None:
+                return (True, "Session not found")
+            pending = session.get_pending_tool_calls()
+            if not pending:
+                return (True, "No pending tool calls")
+            record = pending[0]
+            approval_event = ApprovalEvent(
+                tool_call_id=record.tool_call_id,
+                tool_call=record.tool_call,
+                approved=True,
+            )
+            session.push_event(approval_event)
+            return (True, f"Approved tool call: {record.tool_call.get('name')}")
+
+        elif command == "/deny":
+            if self._active_session_uuid is None:
+                return (True, "No session selected")
+            session = self._agent.get_session(self._active_session_uuid)
+            if session is None:
+                return (True, "Session not found")
+            pending = session.get_pending_tool_calls()
+            if not pending:
+                return (True, "No pending tool calls")
+            record = pending[0]
+            approval_event = ApprovalEvent(
+                tool_call_id=record.tool_call_id,
+                tool_call=record.tool_call,
+                approved=False,
+            )
+            session.push_event(approval_event)
+            return (True, f"Denied tool call: {record.tool_call.get('name')}")
+
+        elif command == "/pending":
+            if self._active_session_uuid is None:
+                return (True, "No session selected")
+            session = self._agent.get_session(self._active_session_uuid)
+            if session is None:
+                return (True, "Session not found")
+            pending = session.get_pending_tool_calls()
+            if not pending:
+                return (True, "No pending tool calls")
+            output = "Pending tool calls:"
+            for record in pending:
+                output += f"\n  [{record.tool_call_id}] {record.tool_call.get('name', '?')} ({record.approval_status.value})"
+            return (True, output)
+
         elif command == "/quit":
             self._running = False
             return (False, "Goodbye!")
@@ -190,51 +256,52 @@ class InteractiveShellChannel(Channel):
         else:
             return (True, f"Unknown command: {command}. Use /list for available commands.")
 
-    async def run(self) -> None:
-        """Run the shell interaction loop.
+    async def _handle_new_session(self, role_name: str) -> None:
+        """Async helper for /new command."""
+        session = await self._agent.create_session(role_name)
+        self.select_session(session.uuid)
+        _logger.debug("Session created: %s", session.uuid)
 
-        This is the main async loop that:
-        1. Reads user input via blocking input() (in executor)
-        2. Processes commands
-        3. Posts messages to Agent for non-command input
-        4. Consumes notifications from Agent's queue in parallel
-        """
-        await self.start()
+    async def read_input_loop(self) -> None:
+        """Read user input and send events to the channel's queue."""
+        self.send("Connected. Commands: /new, /list, /select, /messages, /quit")
 
-        try:
-            while self._running:
-                # Read input in parallel with notifications
-                try:
-                    line = await asyncio.get_event_loop().run_in_executor(
-                        None, self._get_input_line
-                    )
-                except Exception:
-                    self._running = False
+        while self.is_running():
+            # Print prompt before reading input
+            prompt = self._get_prompt()
+            print(prompt, end="", flush=True)
+
+            # Read input in parallel with notifications
+            try:
+                line = await asyncio.get_event_loop().run_in_executor(
+                    None, self._get_input_line
+                )
+            except Exception:
+                break
+
+            if line is None:
+                break
+
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith("/"):
+                should_continue, output = self.handle_command(line)
+                self.send(output)
+                if not should_continue:
                     break
-
-                if line is None:
-                    break
-
-                line = line.strip()
-                if not line:
+            else:
+                # Push user input as an event to the channel queue.
+                # The Channel.run() loop consumes events via _wait() and
+                # processes them by calling send(). For non-command input,
+                # we need to forward to the agent's message queue directly
+                # since this is a shell-specific flow.
+                if self._active_session_uuid is None:
+                    self.send("No session selected. Use /new <role> or /select <uuid>.")
                     continue
 
-                if line.startswith("/"):
-                    should_continue, output = self.handle_command(line)
-                    self.send(output)
-                    if not should_continue:
-                        break
-                else:
-                    # Forward message to active session via Agent's queue
-                    if self._active_session_uuid is None:
-                        self.send("No session selected. Use /new <role> or /select <uuid>.")
-                        continue
-
-                    try:
-                        session_uuid = self._active_session_uuid
-                        self._post_message_to_agent(session_uuid, line)
-                    except Exception as e:
-                        self.send(f"Error: {type(e).__name__}: {str(e)}")
-
-        finally:
-            await self.stop()
+                try:
+                    self._post_message_to_agent(self._active_session_uuid, line)
+                except Exception as e:
+                    self.send(f"Error: {type(e).__name__}: {str(e)}")

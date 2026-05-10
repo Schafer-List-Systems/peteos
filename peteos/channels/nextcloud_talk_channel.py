@@ -12,6 +12,7 @@ from aiohttp import web
 
 from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
+from peteos.session import ApprovalEvent, ToolCallRecord, ToolApprovalStatus, ToolExecutionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +45,17 @@ class NextcloudTalkChannel(Channel):
         self._default_role = default_role
         self._host = host
         self._port = port
-        self._running = False
         self._app: web.Application = None
         self._runner: web.AppRunner = None
         self._site: web.TCPSite = None
         self._server_url: str = ""
         self._rooms: dict[str, uuid.UUID] = {}  # conversation_token -> session_uuid
         self._session_conversations: dict[uuid.UUID, str] = {}  # session_uuid -> conversation_token
+        self._incoming_message_ids: dict[uuid.UUID, str] = {}  # session_uuid -> message_id
+        self._replied_message_ids: set[str] = set()  # message IDs that received checkmark reaction
+        self._tool_call_ids: dict[str, list[str]] = {}  # referenceId -> [tool_call_ids]
+        self._sent_message_sessions: dict[str, uuid.UUID] = {}  # referenceId -> session_uuid
+        self._sent_messages: list[dict] = []  # Local history: [{referenceId, message, tool_call_ids, session_uuid}]
 
     async def start(self) -> str:
         """Start the webhook receiver server.
@@ -58,6 +63,9 @@ class NextcloudTalkChannel(Channel):
         Returns:
             The server URL to register as the webhook endpoint with Nextcloud.
         """
+        # Start ActiveClass's notification consumption loop
+        await super().start()
+
         self._app = web.Application()
         self._app.router.add_post("/nextcloud-talk-webhook", self._handle_webhook)
 
@@ -69,17 +77,12 @@ class NextcloudTalkChannel(Channel):
 
         actual_port = self._site._server.sockets[0].getsockname()[1]
         self._server_url = f"http://{self._host}:{actual_port}/nextcloud-talk-webhook"
-        self._running = True
 
         return self._server_url
 
     async def stop(self) -> None:
         """Stop the webhook receiver server."""
         self._running = False
-        for task in self._session_consumer_tasks.values():
-            if task and not task.done():
-                task.cancel()
-        self._session_consumer_tasks.clear()
         if self._runner:
             await self._runner.cleanup()
 
@@ -88,6 +91,8 @@ class NextcloudTalkChannel(Channel):
 
         Iterates over content parts, formats each into text, and sends via
         the Nextcloud Bot API. Skips parts filtered by enable/disable flags.
+        For final-answer messages (text-only assistant), sends a checkmark
+        reaction after the message text is delivered.
 
         Args:
             message: The Message to send.
@@ -105,9 +110,24 @@ class NextcloudTalkChannel(Channel):
         for part in message.content:
             if not self._should_send_part(part, message.role):
                 continue
-            payloads.append(self._format_for_nextcloud(part, message))
+            payload = self._format_for_nextcloud(part, message)
+            # Extract tool_call_ids from tool_call/tool_calls content parts
+            # so _send_all_sequentially can track the mapping
+            if part.type in ("tool_call", "tool_calls"):
+                tc = part.data.get("tool_call") or part.data.get("tool_calls")
+                tool_call_ids = []
+                if isinstance(tc, dict):
+                    id_val = tc.get("id", "")
+                    if id_val:
+                        tool_call_ids.append(id_val)
+                elif isinstance(tc, list):
+                    tool_call_ids = [item.get("id", "") for item in tc if item.get("id", "")]
+                if tool_call_ids:
+                    payload["tool_call_ids"] = tool_call_ids
+            payloads.append(payload)
 
-        asyncio.create_task(self._send_all_sequentially(conversation_token, payloads))
+        is_final_answer = message.metadata.get("finish", False)
+        asyncio.create_task(self._send_all_sequentially(conversation_token, payloads, is_final_answer))
 
     def _should_send_part(self, part: ContentPart, msg_role: str) -> bool:
         """Check if a content part should be sent based on enabled/disabled flags."""
@@ -144,16 +164,16 @@ class NextcloudTalkChannel(Channel):
 
             if isinstance(tc, dict):
                 args = tc.get("arguments", "{}")
-                payload["message"] = f"```python\n{tc.get('name', '?')}({args})\n```"
+                tool_id = tc.get("id", "?")
+                payload["message"] = f"```python\n{tc.get('name', '?')}({args})\n```\n/* id: {tool_id} */"
 
             elif isinstance(tc, list):
-                blocks = []
+                parts = []
                 for item in tc:
                     args = item.get("arguments", "{}")
-                    blocks.append(f"{item.get('name', '?')}({args})")
-                payload["message"] = "\n".join(
-                    f"```python\n{block}\n```" for block in blocks
-                )
+                    tool_id = item.get("id", "?")
+                    parts.append(f"```python\n{item.get('name', '?')}({args})\n```\n/* id: {tool_id} */")
+                payload["message"] = "\n".join(parts)
 
             else:
                 payload["message"] = "```python\n(no data)\n```"
@@ -258,9 +278,15 @@ class NextcloudTalkChannel(Channel):
             logger.warning("Empty message from %s", display_name)
             return
 
-        session = self._get_or_create_session(conversation_token)
+        session = await self._get_or_create_session(conversation_token)
         if session:
             self._active_session_uuid = session.uuid
+            message_id = obj.get("id")
+            if message_id:
+                self._incoming_message_ids[session.uuid] = message_id
+                # Send thinking reaction immediately, before processing
+                await self._send_reaction(conversation_token, message_id, "🤔")
+
             user_message = Message(
                 role="user",
                 content=[ContentPart(part_type="text", text=message_text)],
@@ -268,18 +294,121 @@ class NextcloudTalkChannel(Channel):
             await session.queue_message(user_message)
 
     async def _handle_reaction(self, event: dict) -> None:
-        """Handle reaction added (Like event)."""
-        content = event.get("content", "")
-        actor = event.get("actor", {})
-        display_name = actor.get("displayName", "unknown")
-        logger.info("Reaction '%s' by %s", content, display_name)
+        """Handle reaction added (Like event). Approve or deny tool calls."""
+        emoji = event.get("content", "")
+        if emoji not in ("+1", "-1", "\U0001f44d", "\U0001f44e"):
+            return
+
+        obj = event.get("object", {})
+        server_message_id = obj.get("id", "")
+        # Parse content - can be JSON string or plain string
+        reaction_message = ""
+        content_raw = obj.get("content", "")
+        try:
+            if isinstance(content_raw, str):
+                content_parsed = json.loads(content_raw)
+                reaction_message = content_parsed.get("message", "")
+            else:
+                reaction_message = content_raw.get("message", "") if isinstance(content_raw, dict) else ""
+        except (json.JSONDecodeError, TypeError):
+            reaction_message = str(content_raw) if content_raw else ""
+
+        logger.info("Reaction '%s' on message %s: %s", emoji, server_message_id, reaction_message)
+
+        # Match against our local sent message history
+        reference_id = None
+        for sent in reversed(self._sent_messages):
+            if sent.get("message", "") == reaction_message:
+                reference_id = sent.get("referenceId", "")
+                logger.info("Matched reaction to local message with referenceId %s", reference_id)
+                break
+
+        if not reference_id:
+            logger.warning("No matching local message found for reaction text")
+            return
+
+        tool_call_ids = self._tool_call_ids.get(reference_id, [])
+        if not tool_call_ids:
+            logger.warning("No tool calls found for matched message %s", reference_id)
+            return
+
+        session_uuid = self._sent_message_sessions.get(reference_id)
+        if not session_uuid:
+            logger.warning("No session found for matched message %s", reference_id)
+            return
+
+        session = self._agent.get_session(session_uuid)
+        if not session:
+            return
+
+        approved = emoji in ("+1", "\U0001f44d")
+        for tool_call_id in tool_call_ids:
+            record = session._find_pending_record(tool_call_id)
+            if record is None:
+                logger.warning("No pending record for tool_call_id=%s", tool_call_id)
+                continue
+
+            tool_call = record.tool_call
+            approval_event = ApprovalEvent(
+                tool_call_id=tool_call_id,
+                tool_call=tool_call,
+                approved=approved,
+            )
+            session.push_event(approval_event)
+            logger.info("Tool call %s %s via reaction %s", tool_call_id, "approved" if approved else "denied", emoji)
+            return
 
     async def _handle_reaction_undo(self, event: dict) -> None:
-        """Handle reaction removed (Undo event)."""
-        content = event.get("object", {}).get("content", "")
-        actor = event.get("actor", {})
-        display_name = actor.get("displayName", "unknown")
-        logger.info("Reaction removed '%s' by %s", content, display_name)
+        """Handle reaction removed (Undo event). Revert approval status."""
+        emoji = event.get("object", {}).get("content", "")
+        if emoji not in ("+1", "-1", "\U0001f44d", "\U0001f44e"):
+            return
+
+        obj = event.get("object", {})
+        server_message_id = obj.get("id", "")
+        # Parse content - can be JSON string or plain string
+        reaction_message = ""
+        content_raw = obj.get("content", "")
+        try:
+            if isinstance(content_raw, str):
+                content_parsed = json.loads(content_raw)
+                reaction_message = content_parsed.get("message", "")
+            else:
+                reaction_message = content_raw.get("message", "") if isinstance(content_raw, dict) else ""
+        except (json.JSONDecodeError, TypeError):
+            reaction_message = str(content_raw) if content_raw else ""
+
+        logger.info("Reaction removed '%s' from message %s: %s", emoji, server_message_id, reaction_message)
+
+        # Match against our local sent message history
+        reference_id = None
+        for sent in reversed(self._sent_messages):
+            if sent.get("message", "") == reaction_message:
+                reference_id = sent.get("referenceId", "")
+                break
+
+        if not reference_id:
+            logger.warning("No matching local message found for reaction")
+            return
+
+        tool_call_ids = self._tool_call_ids.get(reference_id, [])
+        if not tool_call_ids:
+            return
+
+        session_uuid = self._sent_message_sessions.get(reference_id)
+        if not session_uuid:
+            return
+
+        session = self._agent.get_session(session_uuid)
+        if not session:
+            return
+
+        for tool_call_id in tool_call_ids:
+            record = session._find_pending_record(tool_call_id)
+            if record is None:
+                continue
+            record.approval_status = ToolApprovalStatus.PENDING
+            record.execution_status = ToolExecutionStatus.WAITING_FOR_APPROVAL
 
     async def _handle_join(self, event: dict) -> None:
         """Handle bot added to room (Join event)."""
@@ -291,7 +420,7 @@ class NextcloudTalkChannel(Channel):
         display_name = actor.get("displayName", actor.get("name", actor.get("id", "unknown")))
         logger.info("Bot added to room by %s, conversation=%s", display_name, conversation_token)
 
-        session = self._get_or_create_session(conversation_token)
+        session = await self._get_or_create_session(conversation_token)
         if session:
             self._active_session_uuid = session.uuid
 
@@ -306,10 +435,12 @@ class NextcloudTalkChannel(Channel):
 
         session_uuid = self._rooms.pop(conversation_token, None)
         if session_uuid:
+            self._session_conversations.pop(session_uuid, None)
+            self._incoming_message_ids.pop(session_uuid, None)
             self.unsubscribe_from_session(session_uuid)
         logger.info("Removed mapping for conversation %s", conversation_token)
 
-    def _get_or_create_session(self, conversation_token: str):
+    async def _get_or_create_session(self, conversation_token: str):
         """Get existing session or create a new one for a conversation.
 
         Args:
@@ -325,7 +456,7 @@ class NextcloudTalkChannel(Channel):
             return session
 
         try:
-            session = self._agent.create_session(self._default_role)
+            session = await self._agent.create_session(self._default_role)
             self._rooms[conversation_token] = session.uuid
             self._session_conversations[session.uuid] = conversation_token
             self._subscribe_session(session.uuid)
@@ -346,7 +477,7 @@ class NextcloudTalkChannel(Channel):
         """
         self.subscribe_to_session(session_uuid)
 
-    async def _send_to_nextcloud(self, conversation_token: str, payload: dict) -> None:
+    async def _send_to_nextcloud(self, conversation_token: str, payload: dict) -> Optional[str]:
         """Send a message to a Nextcloud Talk conversation.
 
         Per the official Nextcloud Talk Bots API:
@@ -359,6 +490,9 @@ class NextcloudTalkChannel(Channel):
         Args:
             conversation_token: The conversation to send to.
             payload: Dict with message, replyTo, referenceId, silent keys.
+
+        Returns:
+            The message ID from the response, or None on failure.
         """
         try:
             import aiohttp
@@ -390,7 +524,42 @@ class NextcloudTalkChannel(Channel):
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     if resp.status == 201:
-                        logger.debug("Message sent to conversation %s", conversation_token)
+                        try:
+                            body_text = await resp.text()
+                            if not body_text.strip():
+                                logger.error(
+                                    "Empty response body from Nextcloud for %s, status=201. "
+                                    "Reactions to this message won't be linkable to tool calls.",
+                                    conversation_token,
+                                )
+                                return None
+                            response_data = json.loads(body_text)
+                            if response_data is None:
+                                response_data = {}
+                            # Extract message ID from OCS response — try multiple paths
+                            message_id = ""
+                            ocs = response_data.get("ocs", {}) if isinstance(response_data, dict) else None
+                            if ocs and isinstance(ocs, dict):
+                                ocs_data = ocs.get("data", {})
+                                if isinstance(ocs_data, dict):
+                                    message_id = ocs_data.get("id", "")
+                            if not message_id and isinstance(response_data, dict):
+                                message_id = response_data.get("id", "")
+                            if message_id:
+                                logger.debug("Message sent to conversation %s, id=%s", conversation_token, message_id)
+                            else:
+                                logger.error(
+                                    "Could not extract message ID from Nextcloud response for %s: %s",
+                                    conversation_token,
+                                    body_text[:200],
+                                )
+                            return message_id
+                        except (json.JSONDecodeError, Exception) as e:
+                            logger.error(
+                                "Failed to parse response from Nextcloud for %s: %s",
+                                conversation_token, e,
+                            )
+                            return None
                     else:
                         body = await resp.text()
                         logger.warning(
@@ -399,20 +568,113 @@ class NextcloudTalkChannel(Channel):
                             resp.status,
                             body,
                         )
+                        return None
 
         except Exception as e:
             logger.error("Error sending to Nextcloud: %s", e)
+            return None
+
+    async def _send_reaction(self, conversation_token: str, message_id: str, emoji: str) -> None:
+        """Send an emoji reaction to a message in a Nextcloud Talk conversation.
+
+        Per the Nextcloud Talk Bots API:
+        - Endpoint: POST /ocs/v2.php/apps/spreed/api/v1/bot/{TOKEN}/reaction/{MESSAGE_ID}
+        - Content-Type: application/json
+        - Body: {"reaction": "emoji"}
+        - Signature: HMAC-SHA256 of random_header + raw request body
+
+        Args:
+            conversation_token: The conversation token.
+            message_id: The message object.id to react to.
+            emoji: The emoji string to use as the reaction.
+        """
+        try:
+            import aiohttp
+
+            # Compact JSON to match bash reference: {"reaction":"❓"} not {"reaction": "❓"}
+            json_body = json.dumps({"reaction": emoji}, separators=(",", ":"))
+            random_nonce = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
+            # Per Nextcloud Talk Bots API bash implementation: HMAC-SHA256 of
+            # random + full JSON body
+            signature = hmac.new(
+                self._bot_secret.encode(),
+                (random_nonce + emoji).encode(),
+                hashlib.sha256,
+            ).hexdigest()
+
+            url = (
+                f"{self._nextcloud_url}/ocs/v2.php/apps/spreed/api/v1/bot/{conversation_token}/reaction/{message_id}"
+            )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    data=json_body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "OCS-APIRequest": "true",
+                        "X-Nextcloud-Talk-Bot-Random": random_nonce,
+                        "X-Nextcloud-Talk-Bot-Signature": signature,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status in (200, 201):
+                        logger.debug(
+                            "Reaction '%s' sent to message %s in conversation %s",
+                            emoji,
+                            message_id,
+                            conversation_token,
+                        )
+                    else:
+                        body = await resp.text()
+                        logger.warning(
+                            "Failed to send reaction to message %s: %d %s",
+                            message_id,
+                            resp.status,
+                            body,
+                        )
+
+        except Exception as e:
+            logger.error("Error sending reaction to Nextcloud: %s", e)
 
     async def _send_all_sequentially(
-        self, conversation_token: str, payloads: list[dict]
+        self, conversation_token: str, payloads: list[dict], is_final_answer: bool = False
     ) -> None:
         """Send multiple payloads to Nextcloud sequentially in order.
 
         Args:
             conversation_token: The conversation to send to.
             payloads: List of formatted message payloads to send.
+            is_final_answer: If True, sends a checkmark reaction after
+                the last message to indicate the incoming user message
+                has been answered.
         """
-        import aiohttp
-
+        sent_reference_ids: list[str] = []
         for i, payload in enumerate(payloads):
-            await self._send_to_nextcloud(conversation_token, payload)
+            _ = await self._send_to_nextcloud(conversation_token, payload)
+            # referenceId is set in the payload by _format_for_nextcloud
+            reference_id = payload.get("referenceId", "")
+            if reference_id:
+                sent_reference_ids.append(reference_id)
+                # Track referenceId → session for reaction matching
+                if self._active_session_uuid:
+                    self._sent_message_sessions[reference_id] = self._active_session_uuid
+                # For tool_call/tool_calls type messages, extract tool_call_ids
+                tool_calls = payload.get("tool_call_ids", [])
+                if tool_calls:
+                    self._tool_call_ids[reference_id] = tool_calls
+                # Store the formatted message text for local matching
+                msg_text = payload.get("message", "")
+                self._sent_messages.append({
+                    "referenceId": reference_id,
+                    "message": msg_text,
+                    "tool_call_ids": tool_calls,
+                    "session_uuid": self._active_session_uuid,
+                })
+
+        if is_final_answer and self._active_session_uuid:
+            message_id = self._incoming_message_ids.get(self._active_session_uuid)
+            if message_id and message_id not in self._replied_message_ids:
+                self._replied_message_ids.add(message_id)
+                await self._send_reaction(conversation_token, message_id, "🤖")

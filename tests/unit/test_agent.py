@@ -13,400 +13,201 @@ from peteos.chatbot import Message, ContentPart
 from peteos.toolmanager import ToolManager
 
 
-class TestAgentInit:
-    """Test Agent initialization."""
+@pytest.fixture
+def agent():
+    """Create a fresh Agent for each test."""
+    role_manager = RoleManager()
+    role_manager.register_role(
+        Role(name="test", description="Test role", model=".*")
+    )
+    chatbot_manager = MagicMock()
+    tool_manager = ToolManager()
+    return Agent(role_manager, chatbot_manager, tool_manager)
+
+
+@pytest.fixture
+def agent_with_sessions():
+    """Create a fresh Agent, auto-cleanup."""
+    role_manager = RoleManager()
+    role_manager.register_role(
+        Role(name="test", description="Test role", model=".*")
+    )
+    role_manager.register_role(
+        Role(name="assistant", description="Assistant role", model=".*")
+    )
+    chatbot_manager = MagicMock()
+    tool_manager = ToolManager()
+    ag = Agent(role_manager, chatbot_manager, tool_manager)
+    yield ag
+    # Cleanup: stop all sessions
+    for session_uuid in list(ag._sessions.keys()):
+        session = ag.get_session(session_uuid)
+        if session and session.is_running():
+            try:
+                asyncio.get_event_loop().run_until_complete(session.stop())
+            except RuntimeError:
+                pass
+
+
+def test_agent_creation(agent):
+    """Test creating an Agent."""
+    assert len(agent._sessions) == 0
+    assert len(agent._channels) == 0
+
+
+def test_agent_channels_registry(agent):
+    """Test agent maintains channel registry."""
+    assert len(agent._channels) == 0
+
+
+def test_get_session_not_found(agent):
+    """Test getting non-existent session returns None."""
+    session_uuid = uuid.UUID("810fb120-e4e5-4e32-9718-88bbcaf7641a")
+    retrieved = agent.get_session(session_uuid)
+    assert retrieved is None
+
+
+@pytest.mark.asyncio
+async def test_create_session(agent_with_sessions):
+    """Test creating a session."""
+    session = await agent_with_sessions.create_session("test")
+
+    assert session.role.name == "test"
+    assert session.uuid in agent_with_sessions._sessions
+    assert session.is_running()
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(
-            Role(name="test", description="Test role", model=".*")
-        )
-        self.chatbot_manager = MagicMock()
-        self.tool_manager = ToolManager()
 
-    def teardown_method(self):
-        """Clean up."""
-        pass
+@pytest.mark.asyncio
+async def test_create_session_invalid_role(agent):
+    """Test creating session with invalid role raises error."""
+    with pytest.raises(ValueError, match="not found"):
+        await agent.create_session("nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_get_session(agent_with_sessions):
+    """Test getting a session by UUID."""
+    session = await agent_with_sessions.create_session("test")
+    retrieved = agent_with_sessions.get_session(session.uuid)
+    assert retrieved == session
 
-    def test_agent_creation(self):
-        """Test creating an Agent."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
 
-        assert agent._running is False
-        assert agent._loop_task is None
-        assert len(agent._sessions) == 0
-        assert len(agent._message_queues) == 0
-        assert len(agent._notification_queues) == 0
+@pytest.mark.asyncio
+async def test_list_sessions(agent_with_sessions):
+    """Test listing all sessions."""
+    session1 = await agent_with_sessions.create_session("test")
+    session2 = await agent_with_sessions.create_session("assistant")
+
+    sessions = agent_with_sessions.list_sessions()
+    assert len(sessions) == 2
+    assert session1.uuid in sessions
+    assert session2.uuid in sessions
 
-    def test_agent_not_running(self):
-        """Test agent starts not running."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
 
-        assert agent._running is False
+@pytest.mark.asyncio
+async def test_destroy_session(agent_with_sessions):
+    """Test destroying a session."""
+    session = await agent_with_sessions.create_session("test")
+    result = await agent_with_sessions.destroy_session(session.uuid)
 
-    def test_agent_channels_registry(self):
-        """Test agent maintains channel registry."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
+    assert result is True
+    assert session.uuid not in agent_with_sessions._sessions
+
+
+@pytest.mark.asyncio
+async def test_destroy_session_not_found(agent_with_sessions):
+    """Test destroying non-existent session returns False."""
+    session_uuid = uuid.UUID("810fb120-e4e5-4e32-9718-88bbcaf7641a")
+    result = await agent_with_sessions.destroy_session(session_uuid)
+    assert result is False
 
-        assert len(agent._channels) == 0
 
+@pytest.mark.asyncio
+async def test_subscribe_notifications_removed(agent_with_sessions):
+    """Subscribe/unsubscribe removed during Agent simplification.
 
-class TestAgentLifecycle:
-    """Test Agent start/stop lifecycle."""
+    Channels now subscribe directly to sessions via subscribe_to_session().
+    """
+    pass
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(
-            Role(name="test", description="Test role", model=".*")
-        )
-        self.chatbot_manager = MagicMock()
-        self.tool_manager = ToolManager()
 
-    def teardown_method(self):
-        """Clean up."""
-        pass
+@pytest.mark.asyncio
+async def test_unsubscribe_notifications_removed(agent_with_sessions):
+    """Subscribe/unsubscribe removed during Agent simplification.
 
-    @pytest.mark.asyncio
-    async def test_agent_start(self):
-        """Test starting the agent."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
+    Channels now unsubscribe directly via unsubscribe_from_session().
+    """
+    pass
 
-        await agent.start()
 
-        assert agent._running is True
-        assert agent._loop_task is not None
-        assert not agent._loop_task.done()
+def test_publish_notification_to_channels(agent_with_sessions):
+    """Test publishing notification to subscribed channels."""
+    session = asyncio.get_event_loop().run_until_complete(
+        agent_with_sessions.create_session("test")
+    )
 
-        await agent.stop()
+    channel = MagicMock()
+    channel.name = "shell"
+    agent_with_sessions._session_channels[session.uuid] = {channel}
 
-    @pytest.mark.asyncio
-    async def test_agent_stop(self):
-        """Test stopping the agent."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
+    agent_with_sessions._publish_notification(
+        session.uuid, Message(role="user", content=[ContentPart(part_type="text", text="Test")])
+    )
 
-        await agent.start()
-        await agent.stop()
+    channel.push_event.assert_called_once()
 
-        assert agent._running is False
 
-    @pytest.mark.asyncio
-    async def test_agent_start_already_running_raises(self):
-        """Test starting an already-running agent raises error."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
+@pytest.mark.asyncio
+async def test_on_before_tool_execution(agent_with_sessions):
+    """Test before_tool_execution hook callback."""
+    session = await agent_with_sessions.create_session("test")
+    tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
 
-        await agent.start()
+    result = agent_with_sessions._on_before_tool_execution(session.uuid, tool_call)
+    assert result == ("pending", None)
 
-        with pytest.raises(RuntimeError, match="already running"):
-            await agent.start()
 
-        await agent.stop()
+@pytest.mark.asyncio
+async def test_on_after_tool_execution(agent_with_sessions):
+    """Test after_tool_execution hook callback."""
+    session = await agent_with_sessions.create_session("test")
+    tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
 
-    @pytest.mark.asyncio
-    async def test_agent_stop_not_running_raises(self):
-        """Test stopping a not-running agent raises error."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
+    agent_with_sessions._on_after_tool_execution(session.uuid, tool_call, "result", True)
 
-        with pytest.raises(RuntimeError, match="not running"):
-            await agent.stop()
 
+@pytest.mark.asyncio
+async def test_on_before_loop_continue(agent_with_sessions):
+    """Test before_loop_continue hook callback."""
+    session = await agent_with_sessions.create_session("test")
+    delta_messages = [
+        Message(role="tool", content=[ContentPart(
+            part_type="tool", name="test_tool", description="test", parameters={}
+        )]),
+        Message(role="assistant", content=[ContentPart(part_type="text", text="Hello")])
+    ]
 
-class TestAgentSessionManagement:
-    """Test Agent session management."""
+    agent_with_sessions._on_before_loop_continue(session.uuid, delta_messages)
 
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(
-            Role(name="test", description="Test role", model=".*")
-        )
-        self.role_manager.register_role(
-            Role(name="assistant", description="Assistant role", model=".*")
-        )
-        self.chatbot_manager = MagicMock()
-        self.tool_manager = ToolManager()
 
-    def teardown_method(self):
-        """Clean up."""
-        pass
+@pytest.mark.asyncio
+async def test_on_before_loop_exit(agent_with_sessions):
+    """Test before_loop_exit hook callback."""
+    session = await agent_with_sessions.create_session("test")
+    session.chat_history.append_message(
+        Message(role="assistant", content=[ContentPart(part_type="text", text="Final answer")])
+    )
 
-    def test_create_session(self):
-        """Test creating a session."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
+    agent_with_sessions._on_before_loop_exit(session.uuid, "final_answer")
 
-        session = agent.create_session("test")
 
-        assert session.role.name == "test"
-        assert session.uuid in agent._sessions
-        assert session.uuid in agent._message_queues
-        assert session.uuid in agent._session_channels
+@pytest.mark.asyncio
+async def test_agent_creates_session_hooks(agent_with_sessions):
+    """Test that creating a session registers hooks."""
+    session = await agent_with_sessions.create_session("test")
 
-    def test_create_session_invalid_role(self):
-        """Test creating session with invalid role raises error."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        with pytest.raises(ValueError, match="not found"):
-            agent.create_session("nonexistent")
-
-    def test_get_session(self):
-        """Test getting a session by UUID."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-        retrieved = agent.get_session(session.uuid)
-
-        assert retrieved == session
-
-    def test_get_session_not_found(self):
-        """Test getting non-existent session returns None."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session_uuid = uuid.UUID("810fb120-e4e5-4e32-9718-88bbcaf7641a")
-        retrieved = agent.get_session(session_uuid)
-
-        assert retrieved is None
-
-    def test_list_sessions(self):
-        """Test listing all sessions."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session1 = agent.create_session("test")
-        session2 = agent.create_session("assistant")
-
-        sessions = agent.list_sessions()
-
-        assert len(sessions) == 2
-        assert session1.uuid in sessions
-        assert session2.uuid in sessions
-
-    def test_destroy_session(self):
-        """Test destroying a session."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-        result = agent.destroy_session(session.uuid)
-
-        assert result is True
-        assert session.uuid not in agent._sessions
-        assert session.uuid not in agent._message_queues
-        assert session.uuid not in agent._session_channels
-
-    def test_destroy_session_not_found(self):
-        """Test destroying non-existent session returns False."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session_uuid = uuid.UUID("810fb120-e4e5-4e32-9718-88bbcaf7641a")
-        result = agent.destroy_session(session_uuid)
-
-        assert result is False
-
-
-class TestAgentMessageQueue:
-    """Test Agent message queue operations."""
-
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(
-            Role(name="test", description="Test role", model=".*")
-        )
-        self.chatbot_manager = MagicMock()
-        self.tool_manager = ToolManager()
-
-    def teardown_method(self):
-        """Clean up."""
-        pass
-
-    @pytest.mark.asyncio
-    async def test_post_message(self):
-        """Test posting a message to a session queue."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-        message = Message(role="user", content=[ContentPart(part_type="text", text="Hello")])
-
-        agent.post_message(session.uuid, message)
-
-        assert not agent._message_queues[session.uuid].empty()
-        retrieved = agent._message_queues[session.uuid].get_nowait()
-        assert retrieved == message
-
-    @pytest.mark.asyncio
-    async def test_post_message_session_not_found(self):
-        """Test posting message to non-existent session raises KeyError."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session_uuid = uuid.UUID("810fb120-e4e5-4e32-9718-88bbcaf7641a")
-        message = Message(role="user", content=[ContentPart(part_type="text", text="Hello")])
-
-        with pytest.raises(KeyError):
-            agent.post_message(session_uuid, message)
-
-
-class TestAgentNotificationQueues:
-    """Test Agent notification queue operations."""
-
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(
-            Role(name="test", description="Test role", model=".*")
-        )
-        self.chatbot_manager = MagicMock()
-        self.tool_manager = ToolManager()
-
-    def teardown_method(self):
-        """Clean up."""
-        pass
-
-    @pytest.mark.asyncio
-    async def test_subscribe_notifications(self):
-        """Test subscribing to session notifications."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-
-        async for notification in agent.subscribe_notifications("shell", session.uuid):
-            # This should not complete without an active loop
-            break
-
-    @pytest.mark.asyncio
-    async def test_unsubscribe_notifications(self):
-        """Test unsubscribing from session notifications."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-
-        # Subscribe
-        async for _ in agent.subscribe_notifications("shell", session.uuid):
-            break
-
-        # Unsubscribe
-        agent.unsubscribe_notifications("shell", session.uuid)
-
-        # Queue should be cleaned up
-        assert ("shell", session.uuid) not in agent._notification_queues
-
-    def test_publish_notification_to_channels(self):
-        """Test publishing notification to subscribed channels."""
-        from peteos.channels import InteractiveShellChannel
-
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-
-        # Manually create notification queue and subscribe channel
-        agent._notification_queues[("shell", session.uuid)] = asyncio.Queue()
-        if session.uuid not in agent._session_channels:
-            agent._session_channels[session.uuid] = set()
-
-        # Create a mock channel and add to session channels
-        channel = MagicMock()
-        channel.name = "shell"
-        agent._session_channels[session.uuid].add(channel)
-
-        # Manually trigger notification publishing
-        agent._publish_notification(session.uuid, "Test notification")
-
-        # Check notification was queued
-        queue_key = ("shell", session.uuid)
-        assert queue_key in agent._notification_queues
-        assert not agent._notification_queues[queue_key].empty()
-        notification = agent._notification_queues[queue_key].get_nowait()
-        assert notification == "Test notification"
-
-
-class TestAgentHookCallbacks:
-    """Test Agent hook callback methods."""
-
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(
-            Role(name="test", description="Test role", model=".*")
-        )
-        self.chatbot_manager = MagicMock()
-        self.tool_manager = ToolManager()
-
-    def teardown_method(self):
-        """Clean up."""
-        pass
-
-    def test_on_before_tool_execution(self):
-        """Test before_tool_execution hook callback."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-        tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
-
-        result = agent._on_before_tool_execution(session.uuid, tool_call)
-
-        assert result == (True, "")
-
-    def test_on_after_tool_execution(self):
-        """Test after_tool_execution hook callback."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-        tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
-
-        # Should not raise
-        agent._on_after_tool_execution(session.uuid, tool_call, "result", True)
-
-    def test_on_before_loop_continue(self):
-        """Test before_loop_continue hook callback."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-        delta_messages = [
-            Message(role="tool", content=[ContentPart(part_type="tool", name="test_tool", description="test", parameters={})]),
-            Message(role="assistant", content=[ContentPart(part_type="text", text="Hello")])
-        ]
-
-        # Should not raise
-        agent._on_before_loop_continue(session.uuid, delta_messages)
-
-    def test_on_before_loop_exit(self):
-        """Test before_loop_exit hook callback."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-        # Add a history message
-        session.chat_history.append_message(
-            Message(role="assistant", content=[ContentPart(part_type="text", text="Final answer")])
-        )
-
-        # Should not raise
-        agent._on_before_loop_exit(session.uuid, "final_answer")
-
-
-class TestAgentIntegration:
-    """Integration tests for Agent with channels."""
-
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(
-            Role(name="test", description="Test role", model=".*")
-        )
-        self.chatbot_manager = MagicMock()
-        self.tool_manager = ToolManager()
-
-    def teardown_method(self):
-        """Clean up."""
-        pass
-
-    @pytest.mark.asyncio
-    async def test_agent_creates_session_hooks(self):
-        """Test that creating a session registers hooks."""
-        agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
-
-        session = agent.create_session("test")
-
-        # Check hooks are registered on execution environment
-        env = session.execution_environment
-        assert "before_tool_execution" in env._hooks
-        assert "after_tool_execution" in env._hooks
-        assert "before_loop_continue" in env._hooks
-        assert "before_loop_exit" in env._hooks
+    env = session.execution_environment
+    assert "before_tool_execution" in env._hooks
+    assert "after_tool_execution" in env._hooks
+    assert "before_loop_continue" in env._hooks
+    assert "before_loop_exit" in env._hooks
