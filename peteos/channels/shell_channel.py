@@ -45,12 +45,23 @@ class InteractiveShellChannel(Channel):
             agent: The Agent instance this channel connects to.
         """
         super().__init__(name, agent)
+        self._active_session_uuid: uuid.UUID | None = None
 
-    def send(self, message: Message | str) -> None:
+    @property
+    def active_session_uuid(self) -> uuid.UUID | None:
+        """Get the currently active session UUID for this shell."""
+        return self._active_session_uuid
+
+    @active_session_uuid.setter
+    def active_session_uuid(self, value: uuid.UUID | None) -> None:
+        self._active_session_uuid = value
+
+    def send(self, message: Message | str, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the shell.
 
         Args:
             message: The Message to display, or a plain string.
+            session_uuid: Unused for shell (message is printed regardless).
         """
         if isinstance(message, str):
             print(message)
@@ -105,15 +116,14 @@ class InteractiveShellChannel(Channel):
         await super().stop()
 
     def select_session(self, session_uuid: uuid.UUID) -> None:
-        """
-        Select a session as the active session for this channel.
+        """Select a session as the active session for this channel.
 
         Also subscribes to notifications for this session via the base class.
 
         Args:
             session_uuid: The UUID of the session to select.
         """
-        super().select_session(session_uuid)
+        self._active_session_uuid = session_uuid
         self.subscribe_to_session(session_uuid)
 
     def _get_prompt(self) -> str:

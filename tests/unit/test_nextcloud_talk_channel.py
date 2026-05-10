@@ -187,7 +187,6 @@ class TestEventDispatch:
         await channel._handle_message(event)
 
         agent.create_session.assert_called_once_with("test")
-        assert channel._active_session_uuid == session_uuid
         assert channel._rooms["conv1"] == session_uuid
         assert channel._session_conversations[session_uuid] == "conv1"
 
@@ -219,7 +218,6 @@ class TestEventDispatch:
         await channel._handle_join(event)
 
         assert channel._rooms["room5"] == session_uuid
-        assert channel._active_session_uuid == session_uuid
 
     @pytest.mark.asyncio
     async def test_handle_leave(self, agent):
@@ -357,7 +355,7 @@ class TestSend:
             name="nextcloud", agent=agent,
             config=_make_config(),
         )
-        # _active_session_uuid is None by default
+        # No session_uuid means no-op
         channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]))  # Should not raise
 
     def test_send_no_conversation_mapping(self, agent):
@@ -366,9 +364,8 @@ class TestSend:
             name="nextcloud", agent=agent,
             config=_make_config(),
         )
-        channel._active_session_uuid = test_uuid
-        # No mapping in _session_conversations
-        channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]))  # Should not raise
+        # session_uuid present but no mapping in _session_conversations
+        channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]), session_uuid=test_uuid)  # Should not raise
 
     @pytest.mark.asyncio
     async def test_send_calls_nextcloud_api(self, agent):
@@ -377,7 +374,6 @@ class TestSend:
             name="nextcloud", agent=agent,
             config=_make_config(),
         )
-        channel._active_session_uuid = test_uuid
         channel._session_conversations[test_uuid] = "convtoken"
 
         mock_resp_obj = MagicMock(status=201, text="ok")
@@ -401,7 +397,7 @@ class TestSend:
             channel.send(Message(
                 role="assistant",
                 content=[ContentPart(part_type="text", text="Hello!")],
-            ))
+            ), session_uuid=test_uuid)
             await asyncio.sleep(0.05)
 
             mock_session_obj.post.assert_called_once()
@@ -421,7 +417,6 @@ class TestSend:
             name="nextcloud", agent=agent,
             config=_make_config(),
         )
-        channel._active_session_uuid = test_uuid
         channel._session_conversations[test_uuid] = "convtoken"
 
         mock_resp_obj = MagicMock(status=201, text="ok")
@@ -445,7 +440,7 @@ class TestSend:
                     ContentPart(part_type="reasoning", reasoning="Thinking..."),
                     ContentPart(part_type="text", text="Hello!"),
                 ],
-            ))
+            ), session_uuid=test_uuid)
             await asyncio.sleep(0.05)
 
             mock_session_obj.post.assert_called()

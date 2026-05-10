@@ -17,7 +17,7 @@ class _TestChannel(Channel):
         super().__init__(name, agent)
         self._sent_messages = []
 
-    def send(self, message: str) -> None:
+    def send(self, message: str, session_uuid: uuid.UUID | None = None) -> None:
         """Send message by storing it."""
         self._sent_messages.append(message)
 
@@ -82,17 +82,6 @@ class TestChannelRegistry:
 
 class TestChannelMethods:
     """Test Channel instance methods."""
-
-    def test_channel_select_session(self):
-        """Test select_session sets active session."""
-        mock_agent = MagicMock()
-        ch = _TestChannel("test", mock_agent)
-        session_uuid = uuid.UUID("810fb120-e4e5-4e32-9718-88bbcaf7641a")
-        ch.select_session(session_uuid)
-        assert ch.active_session_uuid == session_uuid
-        # Clean up
-        if ch.name in Channel._registry:
-            del Channel._registry[ch.name]
 
     def test_channel_send(self):
         """Test send stores message."""

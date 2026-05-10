@@ -1,10 +1,17 @@
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Dict, Set
+from dataclasses import dataclass
+from typing import AsyncIterator, Dict, Optional, Set
 
 from peteos.activeclass import ActiveClass
 from peteos.chatbot import Message
+
+
+@dataclass(frozen=True)
+class NotificationEvent:
+    session_uuid: uuid.UUID
+    message: Message
 
 
 class Channel(ActiveClass, ABC):
@@ -23,29 +30,14 @@ class Channel(ActiveClass, ABC):
         super().__init__()
         self.name = name
         self._agent = agent
-        self._active_session_uuid: uuid.UUID | None = None
         self._show_reasoning: bool = True
         self._show_tool_calls: bool = True
         self._show_tool_results: bool = True
         Channel._registry[name] = self
         agent.register_channel(self)
 
-    @property
-    def active_session_uuid(self) -> uuid.UUID | None:
-        """Get the currently active session UUID for this channel."""
-        return self._active_session_uuid
-
-    def select_session(self, session_uuid: uuid.UUID) -> None:
-        """
-        Select a session as the active session for this channel.
-
-        Args:
-            session_uuid: The UUID of the session to select.
-        """
-        self._active_session_uuid = session_uuid
-
     @abstractmethod
-    def send(self, message: Message) -> None:
+    def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
         """
         Send a message to the user through this channel.
 
@@ -106,7 +98,16 @@ class Channel(ActiveClass, ABC):
         """
         try:
             while self.is_running():
-                message = await self._wait()
+                event = await self._wait()
+                if event is None:
+                    break
+                if isinstance(event, NotificationEvent):
+                    message = event.message
+                    session_uuid: uuid.UUID | None = event.session_uuid
+                else:
+                    # Legacy: plain Message pushed directly (e.g., by tests)
+                    message = event
+                    session_uuid = None
                 if message is None:
                     break
                 if message.role == "reasoning" and not self._show_reasoning:
@@ -115,7 +116,7 @@ class Channel(ActiveClass, ABC):
                     continue
                 elif message.role == "tool_result" and not self._show_tool_results:
                     continue
-                self.send(message)
+                self.send(message, session_uuid=session_uuid)
         finally:
             await self.stop()
 

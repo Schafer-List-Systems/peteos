@@ -250,7 +250,7 @@ class TestShellChannelRun:
 
         # Start the channel to get welcome message
         # Need to set active session so send() will format output
-        channel._active_session_uuid = uuid.UUID("12345678-1234-1234-1234-123456789012")
+        channel.active_session_uuid = uuid.UUID("12345678-1234-1234-1234-123456789012")
 
         asyncio.run(channel.start())
 

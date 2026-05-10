@@ -5,7 +5,7 @@ import uuid
 from collections import deque
 from typing import Any, Dict, List, Optional, Set, AsyncIterator
 
-from peteos.channels.channel import Channel
+from peteos.channels.channel import Channel, NotificationEvent
 from peteos.chatbot import ChatBotManager, Message, ContentPart
 from peteos.logger import get_logger
 from peteos.role import Role
@@ -251,4 +251,4 @@ class Agent:
         channels = self._session_channels.get(session_uuid, set())
         for channel in channels:
             if channel:
-                channel.push_event(message)
+                channel.push_event(NotificationEvent(session_uuid, message))

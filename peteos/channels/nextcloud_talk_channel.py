@@ -112,7 +112,7 @@ class NextcloudTalkChannel(Channel):
         if self._runner:
             await self._runner.cleanup()
 
-    def send(self, message: Message) -> None:
+    def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the originating Nextcloud conversation.
 
         Iterates over content parts, formats each into text, and sends via
@@ -122,10 +122,11 @@ class NextcloudTalkChannel(Channel):
 
         Args:
             message: The Message to send.
+            session_uuid: The session UUID to route to.
         """
-        if not self._active_session_uuid:
+        if not session_uuid:
             return
-        conversation_token = self._session_conversations.get(self._active_session_uuid)
+        conversation_token = self._session_conversations.get(session_uuid)
         if not conversation_token:
             return
 
@@ -153,7 +154,7 @@ class NextcloudTalkChannel(Channel):
             payloads.append(payload)
 
         is_final_answer = message.metadata.get("finish", False)
-        asyncio.create_task(self._send_all_sequentially(conversation_token, payloads, is_final_answer))
+        asyncio.create_task(self._send_all_sequentially(conversation_token, payloads, is_final_answer, session_uuid))
 
     def _should_send_part(self, part: ContentPart, msg_role: str) -> bool:
         """Check if a content part should be sent based on enabled/disabled flags."""
@@ -317,7 +318,6 @@ class NextcloudTalkChannel(Channel):
 
         session = await self._get_or_create_session(conversation_token)
         if session:
-            self._active_session_uuid = session.uuid
             message_id = obj.get("id")
             if message_id:
                 self._incoming_message_ids[session.uuid] = message_id
@@ -457,9 +457,7 @@ class NextcloudTalkChannel(Channel):
         display_name = actor.get("displayName", actor.get("name", actor.get("id", "unknown")))
         logger.info("Bot added to room by %s, conversation=%s", display_name, conversation_token)
 
-        session = await self._get_or_create_session(conversation_token)
-        if session:
-            self._active_session_uuid = session.uuid
+        _ = await self._get_or_create_session(conversation_token)
 
     async def _handle_leave(self, event: dict) -> None:
         """Handle bot removed from room (Leave event)."""
@@ -632,7 +630,7 @@ class NextcloudTalkChannel(Channel):
             logger.error("Error sending reaction to Nextcloud: %s", e)
 
     async def _send_all_sequentially(
-        self, conversation_token: str, payloads: list[dict], is_final_answer: bool = False
+        self, conversation_token: str, payloads: list[dict], is_final_answer: bool = False, session_uuid: uuid.UUID | None = None
     ) -> None:
         """Send multiple payloads to Nextcloud sequentially in order.
 
@@ -651,8 +649,8 @@ class NextcloudTalkChannel(Channel):
             if reference_id:
                 sent_reference_ids.append(reference_id)
                 # Track referenceId → session for reaction matching
-                if self._active_session_uuid:
-                    self._sent_message_sessions[reference_id] = self._active_session_uuid
+                if session_uuid:
+                    self._sent_message_sessions[reference_id] = session_uuid
                 # For tool_call/tool_calls type messages, extract tool_call_ids
                 tool_calls = payload.get("tool_call_ids", [])
                 if tool_calls:
@@ -663,11 +661,11 @@ class NextcloudTalkChannel(Channel):
                     "referenceId": reference_id,
                     "message": msg_text,
                     "tool_call_ids": tool_calls,
-                    "session_uuid": self._active_session_uuid,
+                    "session_uuid": session_uuid,
                 })
 
-        if is_final_answer and self._active_session_uuid:
-            message_id = self._incoming_message_ids.get(self._active_session_uuid)
+        if is_final_answer and session_uuid:
+            message_id = self._incoming_message_ids.get(session_uuid)
             if message_id and message_id not in self._replied_message_ids:
                 self._replied_message_ids.add(message_id)
                 await self._send_reaction(conversation_token, message_id, "🤖")

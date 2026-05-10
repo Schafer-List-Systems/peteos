@@ -33,6 +33,7 @@ import sys
 from peteos.agent import Agent
 from peteos.channels import NextcloudTalkChannel
 from peteos.chatbot.manager import ChatBotManager
+from peteos.chatbot import Message, ContentPart
 from peteos.logger import setup_logging
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -220,11 +221,13 @@ async def main():
     print("Responses are sent back to the originating room.")
     print()
     print("Sending initial status message to active conversation...")
-    # Send startup message to the most recent conversation if one exists
     if nextcloud._rooms:
-        token = list(nextcloud._rooms.keys())[-1]
-        await nextcloud._send_to_nextcloud(token, {"message": "Hello, I am online now."})
-        print(f"  Sent 'Hello, I am online now.' to room {token}")
+        for token, session_uuid in nextcloud._rooms.items():
+            nextcloud.send(
+                Message(role="assistant", content=[ContentPart(part_type="text", text="Hello, I am online now.")]),
+                session_uuid=session_uuid,
+            )
+            print(f"  Sent 'Hello, I am online now.' to room {token}")
     else:
         print("  No active rooms yet. Will greet on first room join.")
     print()
@@ -239,8 +242,12 @@ async def main():
     finally:
         print("\nSending goodbye message...")
         if nextcloud._rooms:
-            for token in nextcloud._rooms:
-                await nextcloud._send_to_nextcloud(token, "I am going offline.")
+            for token, session_uuid in nextcloud._rooms.items():
+                nextcloud.send(
+                    Message(role="assistant", content=[ContentPart(part_type="text", text="I am going offline.")]),
+                    session_uuid=session_uuid,
+                )
+                print(f"  Sent 'I am going offline.' to room {token}")
         await nextcloud.stop()
         print("Stopped.")
 
