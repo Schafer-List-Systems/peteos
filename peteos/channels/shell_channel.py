@@ -8,6 +8,7 @@ from typing import Optional
 from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
 from peteos.logger import get_logger
+from peteos.session import ApprovalEvent
 
 _logger = get_logger(__name__)
 
@@ -196,6 +197,56 @@ class InteractiveShellChannel(Channel):
                 role = content.get("role", "unknown")
                 text = content.get("text", content.get("content", ""))[:100]
                 output += f"\n  [{role}] {text}"
+            return (True, output)
+
+        elif command == "/approve":
+            if self._active_session_uuid is None:
+                return (True, "No session selected")
+            session = self._agent.get_session(self._active_session_uuid)
+            if session is None:
+                return (True, "Session not found")
+            pending = session.get_pending_tool_calls()
+            if not pending:
+                return (True, "No pending tool calls")
+            record = pending[0]
+            approval_event = ApprovalEvent(
+                tool_call_id=record.tool_call_id,
+                tool_call=record.tool_call,
+                approved=True,
+            )
+            session.push_event(approval_event)
+            return (True, f"Approved tool call: {record.tool_call.get('name')}")
+
+        elif command == "/deny":
+            if self._active_session_uuid is None:
+                return (True, "No session selected")
+            session = self._agent.get_session(self._active_session_uuid)
+            if session is None:
+                return (True, "Session not found")
+            pending = session.get_pending_tool_calls()
+            if not pending:
+                return (True, "No pending tool calls")
+            record = pending[0]
+            approval_event = ApprovalEvent(
+                tool_call_id=record.tool_call_id,
+                tool_call=record.tool_call,
+                approved=False,
+            )
+            session.push_event(approval_event)
+            return (True, f"Denied tool call: {record.tool_call.get('name')}")
+
+        elif command == "/pending":
+            if self._active_session_uuid is None:
+                return (True, "No session selected")
+            session = self._agent.get_session(self._active_session_uuid)
+            if session is None:
+                return (True, "Session not found")
+            pending = session.get_pending_tool_calls()
+            if not pending:
+                return (True, "No pending tool calls")
+            output = "Pending tool calls:"
+            for record in pending:
+                output += f"\n  [{record.tool_call_id}] {record.tool_call.get('name', '?')} ({record.approval_status.value})"
             return (True, output)
 
         elif command == "/quit":

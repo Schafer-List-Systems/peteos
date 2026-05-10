@@ -187,15 +187,15 @@ class Agent:
         Publishes notification to all subscribed channels.
 
         Returns:
-            Tuple (allow: bool, message: str) - For now, always allows.
+            Tuple (allow: str, message: str | None) - Returns "pending" to
+            signal that user approval is required before execution.
         """
-        tool_name = tool_call.get("name", "unknown")
         msg = Message(
             role="tool",
             content=[ContentPart(part_type="tool_call", tool_call=tool_call)],
         )
         self._publish_notification(session_uuid, msg)
-        return (True, "")
+        return ("pending", None)
 
     def _on_after_tool_execution(
         self,

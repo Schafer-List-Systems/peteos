@@ -164,7 +164,7 @@ async def test_on_before_tool_execution(agent_with_sessions):
     tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
 
     result = agent_with_sessions._on_before_tool_execution(session.uuid, tool_call)
-    assert result == (True, "")
+    assert result == ("pending", None)
 
 
 @pytest.mark.asyncio

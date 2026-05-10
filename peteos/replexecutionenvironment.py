@@ -3,9 +3,6 @@ import json
 import inspect
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
-import inspect
-from typing import Any, Callable, Dict
-
 from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
 from peteos.executionenvironment import ExecutionEnvironment
 from peteos.logger import get_logger
@@ -100,11 +97,15 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             role=role,
         )
         self._session: "Session" = session
+        self._assistant_tool_calls: Optional[list[dict]] = None
+        self._executed_tool_ids: set[str] = set()
+        self._pending_tool_id: Optional[str] = None
+        self._last_response_text: Optional[str] = None
 
     async def step(self) -> tuple[str, dict | None]:
         """Execute one loop iteration.
 
-        1. Call chatbot, collect response
+        1. Call chatbot, collect response (skip on re-entry after tool_pending)
         2. Append assistant message to chat_history
         3. For each tool call: fire before_tool hook → execute or return tool_pending
         4. Fire before_loop_continue or before_loop_exit hook
@@ -112,64 +113,75 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         Returns:
             ("done", None) | ("continue", None) | ("tool_pending", {"tool_call": dict})
         """
-        # --- Phase 1: Call chatbot ---
-        response = await self.chatbot.send_message(self.chat_history)
-        async for _ in response:
+        # --- Phase 1: Call chatbot (skip if re-entering after tool_pending) ---
+        if self._assistant_tool_calls is None:
+            response = await self.chatbot.send_message(self.chat_history)
+            async for _ in response:
+                if self._interrupt:
+                    await self._call_hooks("before_loop_exit", "interrupt")
+                    return ("done", None)
+
             if self._interrupt:
                 await self._call_hooks("before_loop_exit", "interrupt")
                 return ("done", None)
 
-        if self._interrupt:
-            await self._call_hooks("before_loop_exit", "interrupt")
-            return ("done", None)
+            # --- Phase 2: Error handling ---
+            if "error" in response.data:
+                _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
+                return ("done", None)
 
-        # --- Phase 2: Error handling ---
-        if "error" in response.data:
-            _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
-            return ("done", None)
+            assert "role" in response.data, f"ChatBot response missing 'role' field: {response.data.keys()}"
 
-        assert "role" in response.data, f"ChatBot response missing 'role' field: {response.data.keys()}"
+            # --- Phase 3: Build content parts ---
+            content_parts: list[ContentPart] = []
 
-        # --- Phase 3: Build content parts ---
-        content_parts: list[ContentPart] = []
+            if response.data.get("reasoning"):
+                content_parts.append(
+                    ContentPart(part_type="reasoning", reasoning=response.data["reasoning"])
+                )
 
-        if response.data.get("reasoning"):
-            content_parts.append(
-                ContentPart(part_type="reasoning", reasoning=response.data["reasoning"])
+            tool_calls_list: list[dict] = []
+            content_array = response.data.get("content", [])
+            if isinstance(content_array, list):
+                tool_calls_list = [
+                    item for item in content_array
+                    if isinstance(item, dict) and item.get("type") == "tool_use"
+                ]
+
+            if tool_calls_list:
+                content_parts.append(
+                    ContentPart(part_type="tool_calls", tool_calls=tool_calls_list)
+                )
+
+            if response.data.get("text"):
+                content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
+
+            # --- Phase 4: Append assistant message ---
+            self.chat_history.append_message(
+                Message(role=response.data["role"], content=content_parts)
             )
 
-        tool_calls_list: list[dict] = []
-        content_array = response.data.get("content", [])
-        if isinstance(content_array, list):
-            tool_calls_list = [
-                item for item in content_array
-                if isinstance(item, dict) and item.get("type") == "tool_use"
-            ]
-
-        if tool_calls_list:
-            content_parts.append(
-                ContentPart(part_type="tool_calls", tool_calls=tool_calls_list)
-            )
-
-        if response.data.get("text"):
-            content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
-
-        # --- Phase 4: Append assistant message ---
-        self.chat_history.append_message(
-            Message(role=response.data["role"], content=content_parts)
-        )
+            # Store tool calls for re-entry after tool_pending
+            self._assistant_tool_calls = tool_calls_list if tool_calls_list else None
+            self._last_response_text = response.data.get("text")
+        else:
+            tool_calls_list = self._assistant_tool_calls
 
         # --- Phase 5: Execute tool calls ---
         if tool_calls_list:
             history_length_before = len(self.chat_history.messages)
 
-            for tool_call in tool_calls_list:
-                # Check for pending approval from previous iteration
-                pending = getattr(self, "_pending_tool_call", None)
-                if pending is not None:
-                    # Execute the pending tool (approved by session)
-                    await self.execute_pending_tool(pending)
-                    self._pending_tool_call = None
+            for idx, tool_call in enumerate(tool_calls_list):
+                tool_call_id = tool_call.get("id", "")
+
+                # Skip already-executed tool calls
+                if tool_call_id in self._executed_tool_ids:
+                    continue
+
+                # If this is the pending tool from previous step (approved by session),
+                # it was already executed via execute_pending_tool — skip it
+                if self._pending_tool_id is not None and tool_call_id == self._pending_tool_id:
+                    self._pending_tool_id = None
                     continue
 
                 tool_name = tool_call.get("name")
@@ -187,6 +199,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     )
                     self.chat_history.append_message(msg)
                     await self._call_hooks("after_tool_execution", tool_call, f"Error: Tool '{tool_name}' not found", False)
+                    self._executed_tool_ids.add(tool_call_id)
                     continue
 
                 args = _cast_args_to_types(tool.func, args)
@@ -197,9 +210,11 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     if not allow:
                         self._append_tool_result(tool_name=tool_name, content=message, success=False)
                         await self._call_hooks("after_tool_execution", tool_call, message, False)
+                        self._executed_tool_ids.add(tool_call_id)
                         continue
                     # If hook returns "pending approval" (new convention for milestone 2)
                     if allow is None or allow == "pending":
+                        self._pending_tool_id = tool_call_id
                         return ("tool_pending", {"tool_call": tool_call})
 
                 try:
@@ -214,6 +229,8 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     )
                     await self._call_hooks("after_tool_execution", tool_call, str(e), False)
 
+                self._executed_tool_ids.add(tool_call_id)
+
             new_count = len(self.chat_history.messages) - history_length_before
             delta_messages = (
                 self.chat_history.messages[-new_count:] if new_count > 0 else []
@@ -224,11 +241,17 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 if should_exit:
                     await self._call_hooks("before_loop_exit", reason)
                     return ("done", None)
-            # Loop continues to chatbot
+            # Clear state after processing all tool calls
+            self._assistant_tool_calls = None
+            self._executed_tool_ids = set()
+            self._last_response_text = None
             return ("continue", None)
         else:
-            # No tool calls
-            if response.data.get("text"):
+            # No tool calls — check for final answer or reasoning-only response
+            self._assistant_tool_calls = None
+            self._executed_tool_ids = set()
+
+            if self._last_response_text:
                 await self._call_hooks("before_loop_exit", "final_answer")
                 return ("done", None)
             # Only reasoning text
@@ -248,6 +271,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         Args:
             tool_call: Dict with 'name' and 'arguments' of the tool.
         """
+        tool_call_id = tool_call.get("id", "")
         tool_name = tool_call.get("name")
         args = json.loads(tool_call.get("arguments", "{}"))
         tool = self.tool_manager.get_tool(tool_name)
@@ -263,6 +287,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             )
             self.chat_history.append_message(msg)
             await self._call_hooks("after_tool_execution", tool_call, f"Error: Tool '{tool_name}' not found", False)
+            self._executed_tool_ids.add(tool_call_id)
             return
 
         args = _cast_args_to_types(tool.func, args)
@@ -278,6 +303,8 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 success=False,
             )
             await self._call_hooks("after_tool_execution", tool_call, str(e), False)
+
+        self._executed_tool_ids.add(tool_call_id)
 
     def _append_tool_result(
         self,

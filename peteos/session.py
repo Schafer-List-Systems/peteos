@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from enum import Enum
+from typing import TYPE_CHECKING, List, Optional
 
 import uuid
 
@@ -23,10 +24,37 @@ from peteos.replexecutionenvironment import REPLExecutionEnvironment
 _logger = get_logger(__name__)
 
 
+class ToolApprovalStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    DENIED = "denied"
+
+
+class ToolExecutionStatus(str, Enum):
+    WAITING_FOR_APPROVAL = "waiting_for_approval"
+    DENIED = "denied"
+    EXECUTING = "executing"
+    EXECUTED = "executed"
+
+
+@dataclass
+class ToolCallRecord:
+    """Tracks the lifecycle of a tool call through approval and execution."""
+    tool_call_id: str
+    tool_call: dict
+    approval_status: ToolApprovalStatus = ToolApprovalStatus.PENDING
+    execution_status: ToolExecutionStatus = ToolExecutionStatus.WAITING_FOR_APPROVAL
+    nextcloud_message_id: Optional[str] = None
+    execution_result: Optional[str] = None
+    execution_success: Optional[bool] = None
+    denied_reason: Optional[str] = None
+
+
 @dataclass
 class ApprovalEvent:
     """Event pushed to Session.event_queue to signal approval of a tool call."""
-    tool_call: dict
+    tool_call_id: str = ""
+    tool_call: dict = field(default_factory=dict)
     approved: bool = True
 
 
@@ -98,6 +126,7 @@ class Session(ActiveClass):
 
         self._message_queue: deque[Message] = deque()
         self._queue_lock = asyncio.Lock()
+        self._pending_tool_calls: list[ToolCallRecord] = []
 
     async def start(self) -> None:
         await super().start()
@@ -154,28 +183,60 @@ class Session(ActiveClass):
                 break
             elif status == "tool_pending":
                 tool_call = data["tool_call"]
-                approval = await self._wait()
-                if isinstance(approval, ApprovalEvent):
-                    await self._handle_approval(approval)
-                # If wrong event type, continue loop to step() again
+                record = ToolCallRecord(
+                    tool_call_id=tool_call.get("id", ""),
+                    tool_call=tool_call,
+                    approval_status=ToolApprovalStatus.PENDING,
+                    execution_status=ToolExecutionStatus.WAITING_FOR_APPROVAL,
+                )
+                self._pending_tool_calls.append(record)
+                return  # Exit step loop, wait for ApprovalEvent
             # "continue" -> loop back to step()
+
+    def _find_pending_record(self, tool_call_id: str) -> Optional[ToolCallRecord]:
+        """Find a pending tool call record by its tool_call_id."""
+        for record in self._pending_tool_calls:
+            if record.tool_call_id == tool_call_id:
+                return record
+        return None
+
+    def get_pending_tool_calls(self) -> List[ToolCallRecord]:
+        """Return all currently pending tool calls."""
+        return list(self._pending_tool_calls)
 
     async def _handle_approval(self, event: ApprovalEvent) -> None:
         """Handle an approval/denial event for a pending tool call."""
+        record = self._find_pending_record(event.tool_call_id)
+        if record is None:
+            _logger.warning("No pending tool call found for tool_call_id=%s", event.tool_call_id)
+            return
+
         if event.approved:
+            record.approval_status = ToolApprovalStatus.APPROVED
+            record.execution_status = ToolExecutionStatus.EXECUTING
             await self.execution_environment.execute_pending_tool(event.tool_call)
+            record.execution_status = ToolExecutionStatus.EXECUTED
+            self._pending_tool_calls.remove(record)
+            # Re-enter the session loop to continue
+            await self._run_session_loop()
         else:
+            record.approval_status = ToolApprovalStatus.DENIED
+            record.execution_status = ToolExecutionStatus.DENIED
             tool_name = event.tool_call.get("name", "unknown")
+            denial_msg = event.tool_call.get("denied_reason", "Tool call was denied by user.")
             msg = Message(
                 role="tool_result",
                 content=[ContentPart(
                     part_type="tool_result",
                     name=tool_name,
-                    content="Tool call was denied by user.",
+                    content=denial_msg,
                 )],
             )
             self.chat_history.append_message(msg)
-            await self._call_hooks("after_tool_execution", event.tool_call, "Tool call was denied by user.", False)
+            await self._call_hooks("after_tool_execution", event.tool_call, denial_msg, False)
+            self._pending_tool_calls.remove(record)
+            # Re-enter the session loop to continue
+            await self._run_session_loop()
 
     @staticmethod
     def load_from_json(

@@ -247,10 +247,10 @@ class TestEventDispatch:
         event = {
             "type": "Like",
             "actor": {"displayName": "User1"},
-            "content": ":thumbsup:",
+            "content": "+1",
         }
         await channel._handle_reaction(event)
-        assert "Reaction ':thumbsup:'" in caplog.text
+        assert "Reaction '+1'" in caplog.text
 
     @pytest.mark.asyncio
     async def test_handle_undo_reaction(self, agent, caplog):
@@ -264,10 +264,10 @@ class TestEventDispatch:
         event = {
             "type": "Undo",
             "actor": {"displayName": "User1"},
-            "object": {"content": ":thumbsup:"},
+            "object": {"content": "+1"},
         }
         await channel._handle_reaction_undo(event)
-        assert "Reaction removed ':thumbsup:'" in caplog.text
+        assert "Reaction removed '+1'" in caplog.text
 
     @pytest.mark.asyncio
     async def test_empty_message_ignored(self, agent):
