@@ -122,24 +122,6 @@ async def test_destroy_session_not_found(agent_with_sessions):
     assert result is False
 
 
-@pytest.mark.asyncio
-async def test_subscribe_notifications_removed(agent_with_sessions):
-    """Subscribe/unsubscribe removed during Agent simplification.
-
-    Channels now subscribe directly to sessions via subscribe_to_session().
-    """
-    pass
-
-
-@pytest.mark.asyncio
-async def test_unsubscribe_notifications_removed(agent_with_sessions):
-    """Subscribe/unsubscribe removed during Agent simplification.
-
-    Channels now unsubscribe directly via unsubscribe_from_session().
-    """
-    pass
-
-
 def test_publish_notification_to_channels(agent_with_sessions):
     """Test publishing notification to subscribed channels."""
     session = asyncio.get_event_loop().run_until_complete(

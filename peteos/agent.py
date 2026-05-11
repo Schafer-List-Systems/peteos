@@ -3,7 +3,7 @@
 import asyncio
 import uuid
 from collections import deque
-from typing import Any, Dict, List, Optional, Set, AsyncIterator
+from typing import Any, Dict, List, Optional, Set
 
 from peteos.channels.channel import Channel, NotificationEvent
 from peteos.chatbot import ChatBotManager, Message, ContentPart
@@ -137,45 +137,6 @@ class Agent:
             del self._sessions[session_uuid]
             return True
         return False
-
-    def subscribe_notifications(
-        self,
-        channel_name: str,
-        session_uuid: uuid.UUID
-    ) -> AsyncIterator[str]:
-        """Subscribe to notifications for a session from a channel.
-
-        Returns an async iterator that yields notification messages.
-        """
-        local_queue: asyncio.Queue[str] = asyncio.Queue()
-
-        # Track this channel as subscribed to this session
-        if session_uuid not in self._session_channels:
-            self._session_channels[session_uuid] = set()
-
-        # Store a reference to a callback that will push events into this queue
-        notification_sink: list[asyncio.Queue] = getattr(self, '_notification_sinks', None) or []
-
-        async def notification_generator() -> AsyncIterator[str]:
-            while True:
-                try:
-                    msg = await local_queue.get()
-                    yield msg
-                except asyncio.CancelledError:
-                    break
-
-        return notification_generator()
-
-    def unsubscribe_notifications(
-        self,
-        channel_name: str,
-        session_uuid: uuid.UUID
-    ) -> None:
-        """Unsubscribe from notifications for a session."""
-        if session_uuid in self._session_channels:
-            channel = Channel.get_by_name(channel_name)
-            if channel and channel in self._session_channels[session_uuid]:
-                self._session_channels[session_uuid].remove(channel)
 
     def _on_before_tool_execution(
         self,
