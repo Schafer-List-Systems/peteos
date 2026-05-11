@@ -95,13 +95,6 @@ class InteractiveShellChannel(Channel):
         except EOFError:
             return None
 
-    def receive(self) -> str | None:
-        """Receive method for Channel compatibility.
-
-        Returns None since run() uses run_in_executor instead.
-        """
-        return None
-
     async def start(self) -> None:
         """Start the shell channel.
 

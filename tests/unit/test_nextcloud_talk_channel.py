@@ -336,17 +336,6 @@ class TestSessionRouting:
         assert "badroom" not in channel._rooms
 
 
-class TestReceive:
-    """Test receive method."""
-
-    def test_receive_returns_none(self, agent):
-        channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
-            config=_make_config(),
-        )
-        assert channel.receive() is None
-
-
 class TestSend:
     """Test send method."""
 

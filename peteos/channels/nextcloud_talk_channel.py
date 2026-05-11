@@ -216,13 +216,6 @@ class NextcloudTalkChannel(Channel):
 
         return payload
 
-    def receive(self) -> str | None:
-        """Webhook-driven channel - no polling.
-
-        Returns:
-            None always.
-        """
-        return None
 
     async def _handle_webhook(self, request: web.Request) -> web.Response:
         """Handle incoming webhook from Nextcloud Talk.

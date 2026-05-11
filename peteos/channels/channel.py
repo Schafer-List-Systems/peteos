@@ -49,16 +49,6 @@ class Channel(ActiveClass, ABC):
         """
         pass
 
-    @abstractmethod
-    def receive(self) -> str | None:
-        """
-        Receive a message from the user.
-
-        Returns:
-            The received message, or None if channel is closed.
-        """
-        pass
-
     @classmethod
     def deregister_all(cls) -> None:
         """Remove all channels from the registry."""
