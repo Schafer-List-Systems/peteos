@@ -21,10 +21,6 @@ class _TestChannel(Channel):
         """Send message by storing it."""
         self._sent_messages.append(message)
 
-    def receive(self) -> str | None:
-        """Return None for testing."""
-        return None
-
 
 class TestChannelRegistry:
     """Test channel registry functionality."""
