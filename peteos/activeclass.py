@@ -82,24 +82,23 @@ class ActiveClass:
             self._running = False
             raise
 
-    async def _wait(self, timeout: Optional[float] = None) -> Optional[Any]:
-        """Block until an event arrives.
+    async def _wait_for_event(self, timeout: Optional[float] = None) -> bool:
+        """Block until an event arrives in the queue.
 
-        Fast-path: if an event is already queued, returns it immediately.
+        Fast-path: if an event is already queued, returns True immediately.
         Otherwise waits on asyncio.Event for wake-up signal.
 
         Uses a retry loop to handle spurious wakeups (multiple waiters
         waking on one trigger): if the queue is empty after wakeup, wait
         again with a reduced timeout.
 
-        Args:
-            timeout: Maximum seconds to wait. None means wait indefinitely.
+        Does NOT consume the event from the queue.
 
         Returns:
-            The event, or None if timeout expired.
+            True if an event is available, False if timeout expired.
         """
         if not self.event_queue.empty():
-            return self.event_queue.get_nowait()
+            return True
 
         self._event_trigger.clear()
         deadline = (asyncio.get_event_loop().time() + timeout) if timeout else None
@@ -112,14 +111,24 @@ class ActiveClass:
                     timeout=remaining,
                 )
             except asyncio.TimeoutError:
-                return None
+                return False
 
             if not self.event_queue.empty():
-                return self.event_queue.get_nowait()
+                return True
+
+    async def _wait(self, timeout: Optional[float] = None) -> Optional[Any]:
+        """Block until an event arrives, consume it from the queue, and return it."""
+        if await self._wait_for_event(timeout):
+            return self.event_queue.get_nowait()
+        return None
 
     async def run(self) -> None:
         """Main loop body to be implemented by subclasses."""
         raise NotImplementedError
+
+    def has_event(self) -> bool:
+        """Check if there is an event available in the queue (non-blocking)."""
+        return not self.event_queue.empty()
 
     def push_event(self, event: Any) -> None:
         """Push an event into the event queue and wake any _wait()."""

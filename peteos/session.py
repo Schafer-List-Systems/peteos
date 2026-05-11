@@ -124,15 +124,7 @@ class Session(ActiveClass):
             session=self,
         )
 
-        self._message_queue: deque[Message] = deque()
-        self._queue_lock = asyncio.Lock()
         self._pending_tool_calls: list[ToolCallRecord] = []
-
-    async def start(self) -> None:
-        await super().start()
-
-    async def stop(self) -> None:
-        await super().stop()
 
     async def queue_message(self, message: Message) -> None:
         """Queue a message for processing.
@@ -144,36 +136,43 @@ class Session(ActiveClass):
         Args:
             message: The message to queue.
         """
-        async with self._queue_lock:
-            self._message_queue.append(message)
-            if not self.is_running():
-                await self.start()
-            self.push_event(message)
+        if not self.is_running():
+            await self.start()
+        self.push_event(message)
 
     async def run(self) -> None:
         """Main event loop for the session.
 
-        Processes incoming messages and tool approval events.
+        Waits for the first event, then drains all accumulated events.
+        Processes messages into chat history, handles tool approvals/denials.
+        Runs the session loop only if at least one event was processed.
         """
         while self.is_running():
-            event = await self._wait()
-            if event is None:
+            # Block until at least one event arrives
+            if not await self._wait_for_event():
                 continue
-            if isinstance(event, Message):
-                await self._handle_message(event)
-            elif isinstance(event, ApprovalEvent):
-                await self._handle_approval(event)
 
-    async def _handle_message(self, message: Message) -> None:
-        """Process a user message: drain all queued messages, drive execution."""
-        # queue_message already appended the triggered message to _message_queue
-        # Drain ALL queued messages (the triggered one + any concurrent ones)
-        async with self._queue_lock:
-            while self._message_queue:
-                msg = self._message_queue.popleft()
-                self.chat_history.append_message(msg)
+            # Drain all accumulated events
+            events_processed = 0
+            while self.has_event():
+                event = self.event_queue.get_nowait()
+                if event is None:
+                    continue
 
-        await self._run_session_loop()
+                events_processed += 1
+
+                if isinstance(event, Message):
+                    self.chat_history.append_message(event)
+                elif isinstance(event, ApprovalEvent):
+                    approved = await self._handle_approval(event)
+                    if not approved:
+                        break  # Tool denied — stop draining
+                elif not isinstance(event, Message):
+                    continue  # Skip other event types
+
+            # Process accumulated history only if we processed events
+            if self.is_running() and events_processed > 0:
+                await self._run_session_loop()
 
     async def _run_session_loop(self) -> None:
         """Run step loop until done, tool_pending, or interrupted."""
@@ -204,12 +203,16 @@ class Session(ActiveClass):
         """Return all currently pending tool calls."""
         return list(self._pending_tool_calls)
 
-    async def _handle_approval(self, event: ApprovalEvent) -> None:
-        """Handle an approval/denial event for a pending tool call."""
+    async def _handle_approval(self, event: ApprovalEvent) -> bool:
+        """Handle an approval/denial event for a pending tool call.
+
+        Returns True if the tool was approved (keep draining queue),
+        False if the tool was denied (stop draining, session loop will run below).
+        """
         record = self._find_pending_record(event.tool_call_id)
         if record is None:
             _logger.warning("No pending tool call found for tool_call_id=%s", event.tool_call_id)
-            return
+            return True
 
         if event.approved:
             record.approval_status = ToolApprovalStatus.APPROVED
@@ -217,8 +220,7 @@ class Session(ActiveClass):
             await self.execution_environment.execute_pending_tool(event.tool_call)
             record.execution_status = ToolExecutionStatus.EXECUTED
             self._pending_tool_calls.remove(record)
-            # Re-enter the session loop to continue
-            await self._run_session_loop()
+            return True
         else:
             record.approval_status = ToolApprovalStatus.DENIED
             record.execution_status = ToolExecutionStatus.DENIED
@@ -235,8 +237,7 @@ class Session(ActiveClass):
             self.chat_history.append_message(msg)
             await self.execution_environment._call_hooks("after_tool_execution", event.tool_call, denial_msg, False)
             self._pending_tool_calls.remove(record)
-            # Re-enter the session loop to continue
-            await self._run_session_loop()
+            return False
 
     @staticmethod
     def load_from_json(
