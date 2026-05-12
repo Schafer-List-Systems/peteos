@@ -49,6 +49,31 @@ def agent_with_sessions():
                 pass
 
 
+@pytest.fixture
+def agent_with_auto_approve():
+    """Create an Agent with a role that has auto_approve_tools."""
+    role_manager = RoleManager()
+    role_manager.register_role(
+        Role(
+            name="autobot",
+            description="Auto-approves some tools",
+            model=".*",
+            auto_approve_tools=["web_fetch"]
+        )
+    )
+    chatbot_manager = MagicMock()
+    tool_manager = ToolManager()
+    ag = Agent(role_manager, chatbot_manager, tool_manager)
+    yield ag
+    for session_uuid in list(ag._sessions.keys()):
+        session = ag.get_session(session_uuid)
+        if session and session.is_running():
+            try:
+                asyncio.get_event_loop().run_until_complete(session.stop())
+            except RuntimeError:
+                pass
+
+
 def test_agent_creation(agent):
     """Test creating an Agent."""
     assert len(agent._sessions) == 0
@@ -193,3 +218,32 @@ async def test_agent_creates_session_hooks(agent_with_sessions):
     assert "after_tool_execution" in env._hooks
     assert "before_loop_continue" in env._hooks
     assert "before_loop_exit" in env._hooks
+
+
+@pytest.mark.asyncio
+async def test_on_before_tool_execution_auto_approve(agent_with_auto_approve):
+    """Test that tools in auto_approve_tools are immediately approved."""
+    session = await agent_with_auto_approve.create_session("autobot")
+
+    # Tool in auto_approve_tools should return (True, None)
+    approved_result = agent_with_auto_approve._on_before_tool_execution(
+        session.uuid, {"name": "web_fetch", "arguments": "{}"}
+    )
+    assert approved_result == (True, None)
+
+    # Tool not in auto_approve_tools should still return ("pending", None)
+    pending_result = agent_with_auto_approve._on_before_tool_execution(
+        session.uuid, {"name": "file_write", "arguments": "{}"}
+    )
+    assert pending_result == ("pending", None)
+
+
+@pytest.mark.asyncio
+async def test_on_before_tool_execution_auto_approve_empty_list(agent_with_sessions):
+    """Test that empty auto_approve_tools still requires approval."""
+    session = await agent_with_sessions.create_session("test")
+
+    result = agent_with_sessions._on_before_tool_execution(
+        session.uuid, {"name": "test_tool", "arguments": {"param": "value"}}
+    )
+    assert result == ("pending", None)

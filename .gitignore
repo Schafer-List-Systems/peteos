@@ -57,4 +57,5 @@ TODO.md
 config/chatbot_config.json
 roles/test/config.json
 examples/config/nextcloud_config.json
+examples/config/log_analyzer_config.json
 context-folding.md
