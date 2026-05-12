@@ -135,7 +135,7 @@ class NextcloudTalkChannel(Channel):
         for part in message.content:
             if not self._should_send_part(part, message.get_role()):
                 continue
-            payload = self._format_for_nextcloud(part, message)
+            payload = self._format_for_nextcloud(part, message.get_id())
             # Extract tool_call_ids from tool_call/tool_calls content parts
             # so _send_all_sequentially can track the mapping
             if part.type in ("tool_call", "tool_calls"):
@@ -166,7 +166,7 @@ class NextcloudTalkChannel(Channel):
             return False
         return True
 
-    def _format_for_nextcloud(self, part: ContentPart, message: Message) -> dict:
+    def _format_for_nextcloud(self, part: ContentPart, reference_id: str) -> dict:
         """Format a content part into a Nextcloud-compatible payload.
 
         All messages are rendered as Markdown by the Nextcloud Talk API.
@@ -174,7 +174,7 @@ class NextcloudTalkChannel(Channel):
         payload = {
             "message": "",
             "replyTo": "",
-            "referenceId": message.id,
+            "referenceId": reference_id,
             "silent": part.type != "text",
         }
         if part.type == "text":

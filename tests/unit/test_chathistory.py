@@ -167,8 +167,8 @@ class TestMessage:
     def test_message_id_auto_generated(self):
         """Test that message ID is auto-generated."""
         msg = Message(role="user", content=[ContentPart(part_type="text", text="Test")])
-        assert msg.id is not None
-        assert len(msg.id) > 0
+        assert msg.get_id() is not None
+        assert len(msg.get_id()) > 0
 
     def test_message_custom_id(self):
         """Test creating Message with custom ID."""
@@ -178,7 +178,7 @@ class TestMessage:
             content=[ContentPart(part_type="text", text="Test")],
             message_id=custom_id
         )
-        assert msg.id == custom_id
+        assert msg.get_id() == custom_id
 
     def test_message_timestamp(self):
         """Test creating Message with custom timestamp."""

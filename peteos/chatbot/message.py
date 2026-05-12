@@ -57,7 +57,7 @@ class Message:
         self.content = content
         self.metadata = metadata or {}
         self.creation_timestamp = creation_timestamp or datetime.now()
-        self.id = message_id or str(uuid.uuid4())
+        self._id = message_id or str(uuid.uuid4())
 
     def get_role(self) -> str:
         """Return the message role.
@@ -70,6 +70,9 @@ class Message:
         """Set the message role."""
         self._role = role
 
+    def get_id(self) -> str:
+        """Return the message ID."""
+        return self._id
 
     @property
     def text(self) -> str:
@@ -99,6 +102,7 @@ class Message:
         """
         return {
             "role": self.get_role(),
+            "id": self.get_id(),
             "content": [part.to_dict() for part in self.content],
             **self.metadata
         }
@@ -139,11 +143,13 @@ class Message:
             content=content,
             creation_timestamp=creation_timestamp,
             message_id=message_id,
-            **{k: v for k, v in data.items() if k not in ("role", "content", "metadata")}
+            **{k: v for k, v in data.items() if k not in ("role", "id", "content", "metadata")}
         )
+        if "id" in data and data["id"] and not message_id:
+            msg._id = data["id"]
         if "metadata" in data and data["metadata"]:
             msg.metadata.update(data["metadata"])
         return msg
 
     def __repr__(self) -> str:
-        return f"Message(role={self.get_role()!r}, content_count={len(self.content)}, id={self.id!r})"
+        return f"Message(role={self.get_role()!r}, content_count={len(self.content)}, id={self.get_id()!r})"

@@ -250,7 +250,7 @@ class InteractiveShellChannel(Channel):
 
     async def read_input_loop(self) -> None:
         """Read user input and send events to the channel's queue."""
-        self.send("Connected. Commands: /new, /list, /select, /messages, /quit")
+        self.send("Connected. Commands: /new, /list, /select, /quit")
 
         while self.is_running():
             # Print prompt before reading input

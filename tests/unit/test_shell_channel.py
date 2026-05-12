@@ -156,22 +156,6 @@ class TestShellChannelCommands:
         assert should_continue is True
         assert "not found" in output
 
-    def test_command_messages_no_session(self):
-        """Test /messages without session selected."""
-        channel = InteractiveShellChannel("shell", self.agent)
-        should_continue, output = channel.handle_command("/messages")
-
-        assert should_continue is True
-        assert "No session selected" in output
-
-    def test_command_messages_no_session(self):
-        """Test /messages without session selected."""
-        channel = InteractiveShellChannel("shell", self.agent)
-        should_continue, output = channel.handle_command("/messages")
-
-        assert should_continue is True
-        assert "No session selected" in output
-
     def test_command_quit(self):
         """Test /quit command."""
         channel = InteractiveShellChannel("shell", self.agent)
