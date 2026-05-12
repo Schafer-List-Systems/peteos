@@ -297,3 +297,161 @@ class TestChatHistory:
         assert "ChatHistory" in repr_str
         assert "messages=1" in repr_str
         assert "tools" not in repr_str
+
+
+class TestMessageAnchors:
+    """Tests for anchored (floating) message support."""
+
+    def test_messages_property_order(self):
+        """Front anchors come first, then unanchored, then back anchors."""
+        history = ChatHistory()
+        front = Message(role="system", content=[ContentPart(part_type="text", text="front")])
+        user = Message(role="user", content=[ContentPart(part_type="text", text="user")])
+        assistant = Message(role="assistant", content=[ContentPart(part_type="text", text="assistant")])
+        back = Message(role="tool", content=[ContentPart(part_type="tool", name="test", description="d", parameters={})])
+        history.append_message(front, anchor="front")
+        history.append_message(user)
+        history.append_message(assistant)
+        history.append_message(back, anchor="back")
+        merged = history.messages
+        assert merged[0] is front
+        assert merged[1] is user
+        assert merged[2] is assistant
+        assert merged[3] is back
+
+    def test_append_with_front_anchor(self):
+        """Message goes to front anchor group."""
+        history = ChatHistory()
+        msg = Message(role="system", content=[ContentPart(part_type="text", text="prompt")])
+        history.append_message(msg, anchor="front")
+        assert len(history._anchor_groups["front"]) == 1
+        assert history._anchor_groups["front"][0] is msg
+        assert len(history._unanchored) == 0
+
+    def test_append_with_back_anchor(self):
+        """Message goes to back anchor group."""
+        history = ChatHistory()
+        msg = Message(role="tool", content=[ContentPart(part_type="tool", name="t", description="d", parameters={})])
+        history.append_message(msg, anchor="back")
+        assert len(history._anchor_groups["back"]) == 1
+        assert history._anchor_groups["back"][0] is msg
+
+    def test_append_without_anchor(self):
+        """Message goes to unanchored list."""
+        history = ChatHistory()
+        msg = Message(role="user", content=[ContentPart(part_type="text", text="hello")])
+        history.append_message(msg)
+        assert history._unanchored[0] is msg
+
+    def test_iteration_orders_all_messages(self):
+        """Iteration yields front, unanchored, back."""
+        history = ChatHistory()
+        history.append_message(Message(role="system", content=[ContentPart(part_type="text", text="f")]), anchor="front")
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="u")]))
+        history.append_message(Message(role="assistant", content=[ContentPart(part_type="text", text="a")]))
+        history.append_message(Message(role="tool", content=[ContentPart(part_type="tool", name="t", description="d", parameters={})]), anchor="back")
+        assert [msg.text for msg in history if msg.text] == ["f", "u", "a"]
+
+    def test_len_counts_all_messages(self):
+        """len() counts front + unanchored + back."""
+        history = ChatHistory()
+        history.append_message(Message(role="system", content=[ContentPart(part_type="text", text="f")]), anchor="front")
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="u")]))
+        history.append_message(Message(role="t", content=[ContentPart(part_type="tool", name="t", description="d", parameters={})]), anchor="back")
+        assert len(history) == 3
+
+    def test_backwards_compat_init_with_messages(self):
+        """Existing code passing messages list still works."""
+        msg = Message(role="user", content=[ContentPart(part_type="text", text="Hello")])
+        history = ChatHistory(messages=[msg])
+        assert len(history.messages) == 1
+        assert history.messages[0] is msg
+        assert len(history._unanchored) == 1
+
+    def test_multiple_front_anchors_ordered(self):
+        """Multiple front anchors preserve insertion order."""
+        history = ChatHistory()
+        m1 = Message(role="system", content=[ContentPart(part_type="text", text="1")])
+        m2 = Message(role="system", content=[ContentPart(part_type="text", text="2")])
+        history.append_message(m1, anchor="front")
+        history.append_message(m2, anchor="front")
+        assert history.messages[0] is m1
+        assert history.messages[1] is m2
+
+    def test_dynamic_custom_anchor(self):
+        """Custom anchor names are supported."""
+        history = ChatHistory()
+        msg = Message(role="system", content=[ContentPart(part_type="text", text="custom")])
+        history.append_message(msg, anchor="system_header")
+        assert history._anchor_groups["system_header"][0] is msg
+        assert len(history.messages) == 1
+
+    def test_to_dict_serializes_all_messages(self):
+        """to_dict includes all anchor groups and unanchored."""
+        history = ChatHistory()
+        history.append_message(Message(role="system", content=[ContentPart(part_type="text", text="f")]), anchor="front")
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="u")]))
+        history.append_message(Message(role="t", content=[ContentPart(part_type="tool", name="t", description="d", parameters={})]), anchor="back")
+        data = history.to_dict()
+        assert len(data["unanchored"]) == 1
+        assert len(data["anchors"]["front"]) == 1
+        assert len(data["anchors"]["back"]) == 1
+        assert data["unanchored"][0]["role"] == "user"
+        assert data["anchors"]["front"][0]["role"] == "system"
+        assert data["anchors"]["back"][0]["role"] == "t"
+
+    def test_to_dict_preserves_generation_config(self):
+        """to_dict preserves generation_config."""
+        history = ChatHistory(generation_config={"max_tokens": 4096})
+        data = history.to_dict()
+        assert data["generation_config"]["max_tokens"] == 4096
+
+    def test_from_dict_reconstructs_order(self):
+        """from_dict reconstructs messages in correct order."""
+        history = ChatHistory()
+        history.append_message(Message(role="system", content=[ContentPart(part_type="text", text="f")]), anchor="front")
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="u")]))
+        history.append_message(Message(role="t", content=[ContentPart(part_type="tool", name="t", description="d", parameters={})]), anchor="back")
+        data = history.to_dict()
+        rebuilt = ChatHistory.from_dict(data)
+        assert rebuilt.messages[0].text == "f"
+        assert rebuilt.messages[1].text == "u"
+
+    def test_from_dict_legacy_list_format(self):
+        """Legacy plain list format loads all messages as unanchored."""
+        data = [
+            {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "Hi"}]},
+        ]
+        history = ChatHistory.from_dict(data)
+        assert len(history.messages) == 2
+        assert len(history.messages) == 2
+        assert history.messages[0].text == "Hello"
+        assert history.messages[1].text == "Hi"
+        assert len(history._unanchored) == 2
+        assert len(history._anchor_groups["front"]) == 0
+        assert len(history._anchor_groups["back"]) == 0
+
+    def test_roundtrip_preserves_anchors(self):
+        """Serialize then deserialize preserves anchor structure."""
+        history = ChatHistory(generation_config={"temperature": 0.7})
+        history.append_message(Message(role="system", content=[ContentPart(part_type="text", text="prompt")]), anchor="front")
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="Question")]))
+        history.append_message(Message(role="assistant", content=[ContentPart(part_type="text", text="Answer")]))
+        history.append_message(Message(role="tool", content=[ContentPart(part_type="tool", name="t", description="d", parameters={})]), anchor="back")
+        data = history.to_dict()
+        rebuilt = ChatHistory.from_dict(data)
+        assert len(rebuilt._unanchored) == 2
+        assert len(rebuilt._anchor_groups["front"]) == 1
+        assert len(rebuilt._anchor_groups["back"]) == 1
+        assert rebuilt.generation_config["temperature"] == 0.7
+
+    def test_messages_property_returns_new_list(self):
+        """messages property returns a fresh list each time."""
+        history = ChatHistory()
+        msg = Message(role="user", content=[ContentPart(part_type="text", text="x")])
+        history.append_message(msg)
+        list1 = history.messages
+        list2 = history.messages
+        assert list1 is not list2
+

@@ -1,6 +1,7 @@
 """ChatHistory class for managing chat messages and request fields."""
 
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
 from .message import Message
 from .contentpart import ContentPart
@@ -15,21 +16,17 @@ class ChatHistory:
     specific roles. Additional request fields (generation config) are stored
     in a single config dictionary.
 
+    Messages may be unanchored (default conversation history) or anchored
+    (persistent across compaction). The ``messages`` property returns a
+    merged view: front anchors, then unanchored, then back anchors.
+
     Example:
-        >>> history = ChatHistory(
-        ...     messages=[
-        ...         Message(role="system", content=[ContentPart(type="text", text="You are helpful")]),
-        ...         Message(role="tool", content=[ContentPart(type="tool", name="get_weather", ...)]),
-        ...         Message(role="user", content=[ContentPart(type="text", text="Hello")])
-        ...     ],
-        ...     generation_config={
-        ...         "max_tokens": 4096,
-        ...         "tool_choice": {"type": "auto"}
-        ...     }
-        ... )
+        >>> history = ChatHistory()
+        >>> history.append_message(Message(...))
+        >>> history.append_message(Message(...), anchor="front")
 
     Attributes:
-        messages: List of Message instances with various roles.
+        messages: Merged view of all messages in order.
         generation_config: Dictionary of model generation parameters including
             tool_choice, temperature, max_tokens, etc.
     """
@@ -43,21 +40,52 @@ class ChatHistory:
         Initialize ChatHistory.
 
         Args:
-            messages: List of Message instances. System messages should be first.
+            messages: List of Message instances. If provided without anchors,
+                all messages go into the unanchored list.
             generation_config: Dictionary of model generation parameters including
                 tool_choice, temperature, max_tokens, etc.
         """
-        self.messages = messages if messages is not None else []
+        if messages is not None:
+            self._unanchored: List[Message] = list(messages)
+        else:
+            self._unanchored = []
+        self._anchor_groups: Dict[str, List[Message]] = {
+            "front": [],
+            "back": [],
+        }
         self.generation_config = generation_config if generation_config is not None else {}
 
-    def append_message(self, message: Message) -> None:
+    @property
+    def messages(self) -> List[Message]:
+        """All messages in order: front anchors, unanchored, back anchors.
+
+        This is a computed property that returns a new list each time.
+        Do not mutate the returned list — use append_message() instead.
+        """
+        # Front first (ordered), then unanchored, then remaining anchors, then back
+        front = self._anchor_groups.get("front", [])
+        back = self._anchor_groups.get("back", [])
+        others = [
+            group for name, group in self._anchor_groups.items()
+            if name not in ("front", "back")
+        ]
+        return front + self._unanchored + others + back
+
+    def append_message(self, message: Message, anchor: Optional[str] = None) -> None:
         """
         Append a message to the chat history.
 
         Args:
             message: The message to append.
+            anchor: Optional anchor name ("front", "back", or custom).
+                Messages with anchors persist across compaction.
         """
-        self.messages.append(message)
+        if anchor is not None:
+            if anchor not in self._anchor_groups:
+                self._anchor_groups[anchor] = []
+            self._anchor_groups[anchor].append(message)
+        else:
+            self._unanchored.append(message)
 
     def set_generation_config(self, key: str, value: Any) -> None:
         """
@@ -92,3 +120,67 @@ class ChatHistory:
 
     def __repr__(self) -> str:
         return f"ChatHistory(messages={len(self.messages)}, config={self.generation_config})"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dictionary for persistence.
+
+        All messages (anchored and unanchored) are serialized in their
+        respective groups. Each message is converted via to_dict().
+
+        Returns:
+            Dictionary with 'unanchored', 'anchors', and 'generation_config'.
+        """
+        return {
+            "unanchored": [msg.to_dict() for msg in self._unanchored],
+            "anchors": {
+                name: [msg.to_dict() for msg in group]
+                for name, group in self._anchor_groups.items()
+            },
+            "generation_config": self.generation_config,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> "ChatHistory":
+        """Reconstruct ChatHistory from dictionary.
+
+        Supports two formats:
+        - New format: dict with 'unanchored', 'anchors', 'generation_config'
+        - Legacy format: plain list of message dicts (all go to unanchored)
+
+        Args:
+            data: Serialized chat history data.
+
+        Returns:
+            Reconstructed ChatHistory instance.
+        """
+        if isinstance(data, list):
+            # Legacy format: plain list of messages, all unanchored
+            msg_list = []
+            for msg_data in data:
+                creation_ts = None
+                ts = msg_data.get("creation_timestamp")
+                if ts:
+                    creation_ts = datetime.fromisoformat(ts)
+                msg_list.append(
+                    Message.from_dict(
+                        {"role": msg_data.get("role", "user"), "content": msg_data.get("content", [])},
+                        creation_timestamp=creation_ts,
+                        message_id=msg_data.get("id"),
+                    )
+                )
+            return cls(messages=msg_list, generation_config={})
+
+        # New format with anchor groups
+        generation_config = data.get("generation_config", {})
+        chat_history = cls(messages=[], generation_config=generation_config)
+
+        for msg_data in data.get("unanchored", []):
+            chat_history._unanchored.append(Message.from_dict(msg_data))
+
+        for anchor_name, msg_list in data.get("anchors", {}).items():
+            for msg_data in msg_list:
+                chat_history._anchor_groups[anchor_name].append(
+                    Message.from_dict(msg_data)
+                )
+
+        return chat_history

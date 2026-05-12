@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional
 
@@ -259,17 +259,7 @@ class Session(ActiveClass):
                     f"but it's not registered in tool_manager"
                 )
 
-        messages = [
-            Message.from_dict(
-                {"role": msg.get("role", "user"), "content": msg.get("content", [])},
-                creation_timestamp=datetime.fromisoformat(msg["creation_timestamp"]) if "creation_timestamp" in msg else None,
-                message_id=msg.get("id")
-            )
-            for msg in chat_history_data
-        ]
-        chat_history = ChatHistory()
-        for msg in messages:
-            chat_history.append_message(msg)
+        chat_history = ChatHistory.from_dict(chat_history_data)
 
         session_uuid = uuid.UUID(uuid_str) if uuid_str else None
 
