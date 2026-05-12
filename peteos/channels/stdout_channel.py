@@ -25,8 +25,9 @@ class ReadStdoutChannel(Channel):
         channel = ReadStdoutChannel(
             name="docker-logs",
             agent=agent,
-            config={"session_uuid": ..., "command": [...], "pattern": r"ERROR|WARNING"},
+            config={"command": ["journalctl", "-f"], "pattern": r"ERROR|WARNING"},
         )
+        channel.subscribe_to_session(some_uuid)
         await channel.start()
         # messages matching the pattern are queued to the session
         await channel.stop()
@@ -43,7 +44,7 @@ class ReadStdoutChannel(Channel):
         Args:
             name: Unique identifier for this channel.
             agent: The Agent instance to queue messages to.
-            config: Dict with session_uuid, command, and optional pattern.
+            config: Dict with command and optional pattern.
         """
         super().__init__(name, agent)
         self._config = config
@@ -58,7 +59,7 @@ class ReadStdoutChannel(Channel):
     def load_config(config_file: str) -> dict:
         """Load and validate ReadStdoutChannel config from JSON file.
 
-        Required fields: session_uuid, command.
+        Required fields: command.
         Optional fields: pattern (regex string, defaults to ".*").
 
         Args:
@@ -74,12 +75,10 @@ class ReadStdoutChannel(Channel):
         with open(config_file, "r") as f:
             config = json.load(f)
         config.setdefault("pattern", ".*")
-        required = ["session_uuid", "command"]
+        required = ["command"]
         missing = [k for k in required if k not in config]
         if missing:
             raise KeyError(f"Missing required config fields: {', '.join(missing)}")
-        # Parse session_uuid string to UUID
-        config["session_uuid"] = uuid.UUID(config["session_uuid"])
         return config
 
     async def start(self) -> None:
@@ -87,10 +86,13 @@ class ReadStdoutChannel(Channel):
         if self._running:
             return
 
+        if self._session_uuid is None:
+            raise RuntimeError(f"{self.name} is not subscribed to a session. Call subscribe_to_session() before start().")
+
         self._running = True
-        _logger.info("Starting %s: %s", self.name, self._command)
+        _logger.info("Starting %s: %s", self.name, self._config["command"])
         self._process = await asyncio.create_subprocess_exec(
-            *self._command,
+            *self._config["command"],
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -106,7 +108,7 @@ class ReadStdoutChannel(Channel):
                 await asyncio.wait_for(self._process.wait(), timeout=5)
             except asyncio.TimeoutError:
                 self._process.kill()
-            _logger.info("Stopped %s: %s", self.name, self._command)
+            _logger.info("Stopped %s: %s", self.name, self._config["command"])
 
     async def _read_loop(self) -> None:
         """Read stdout line by line and queue matching messages."""
@@ -123,7 +125,7 @@ class ReadStdoutChannel(Channel):
                 line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
-                if not self._pattern.search(line):
+                if not re.search(self._config["pattern"], line):
                     continue
 
                 message = Message(
@@ -131,10 +133,10 @@ class ReadStdoutChannel(Channel):
                     content=[ContentPart(part_type="text", text=line)],
                 )
                 try:
-                    await self._agent.get_session(self._config["session_uuid"]).queue_message(message)
-                    _logger.debug("Queued to session %s: %s", self._config["session_uuid"], line[:80])
+                    await self._agent.get_session(self._session_uuid).queue_message(message)
+                    _logger.debug("Queued to session %s: %s", self._session_uuid, line[:80])
                 except (KeyError, AttributeError):
-                    _logger.warning("Session %s no longer exists, dropping message", self._config["session_uuid"])
+                    _logger.warning("Session %s no longer exists, dropping message", self._session_uuid)
         except asyncio.CancelledError:
             pass
         except Exception as e:

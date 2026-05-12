@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """
-Nextcloud Talk Bot Example
+Log Analyzer Example
 
-This example demonstrates how to use the NextcloudTalkChannel to connect
-an Agent to a Nextcloud Talk room as a bot.
+This example demonstrates how to use a read-only stdout channel to monitor
+system logs (e.g., journalctl) and connect them to an agent via Nextcloud Talk.
+
+A session is created upfront, and two channels attach to it:
+  1. Nextcloud Talk channel - the user-facing channel for interaction
+  2. Stdout channel - reads journalctl output, forwards matching lines to the session
 
 Prerequisites:
   1. Create a bot in your Nextcloud instance:
      ./occ talk:bot:install <bot-name> <webhook-url> <secret>
   2. Configure the chatbot backend (your LLM) in examples/config/chatbot_config.json
   3. Configure the Nextcloud Talk bot in examples/config/nextcloud_config.json
+  4. Configure the stdout monitor in examples/config/log_analyzer_config.json
 
 Usage:
     PYTHONPATH=/home/frygge/projects/private/peteos \
-      examples/nextcloud_example.py
+      examples/log_analyzer_example.py
 
     # Override config paths:
     PYTHONPATH=/home/frygge/projects/private/peteos \
-      examples/nextcloud_example.py \
-      --nextcloud-config /path/to/nextcloud_config.json
+      examples/log_analyzer_example.py \
+      --nextcloud-config /path/to/nextcloud_config.json \
+      --stdout-config /path/to/log_analyzer_config.json
 
 When you run this, the channel starts an HTTP server. Visit its URL in a
 browser or use curl to verify it's listening, then point your Nextcloud
@@ -27,11 +33,12 @@ bot's webhook URL at <server-url>/webhook.
 
 import argparse
 import asyncio
-import json
+import re
 import sys
+import uuid
 
 from peteos.agent import Agent
-from peteos.channels import NextcloudTalkChannel
+from peteos.channels import NextcloudTalkChannel, ReadStdoutChannel
 from peteos.chatbot.manager import ChatBotManager
 from peteos.chatbot import Message, ContentPart
 from peteos.logger import setup_logging
@@ -41,14 +48,7 @@ from peteos.toolmanager import ToolManager
 
 
 async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json"):
-    """Setup ChatBotManager from configuration file.
-
-    Args:
-        config_file: Path to JSON configuration file with backend definitions.
-
-    Returns:
-        Configured ChatBotManager with all backends loaded.
-    """
+    """Setup ChatBotManager from configuration file."""
     chatbot_manager = ChatBotManager()
 
     try:
@@ -64,11 +64,7 @@ async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json")
 
 
 def setup_role_manager():
-    """Setup RoleManager with available roles.
-
-    Returns:
-        Configured RoleManager with roles loaded from roles/ directory.
-    """
+    """Setup RoleManager with available roles."""
     role_manager = RoleManager()
 
     try:
@@ -84,11 +80,7 @@ def setup_role_manager():
 
 
 def setup_tool_manager():
-    """Setup ToolManager with example tools.
-
-    Returns:
-        Configured ToolManager with read and eval_python tools.
-    """
+    """Setup ToolManager with example tools."""
     tool_manager = ToolManager()
     namespaces: dict[str, dict] = {}
 
@@ -153,10 +145,7 @@ def setup_tool_manager():
 
 
 def load_nextcloud_config(config_file: str = "examples/config/nextcloud_config.json"):
-    """Load Nextcloud Talk bot configuration from a JSON file.
-
-    Delegates to NextcloudTalkChannel.load_config() with error message formatting.
-    """
+    """Load Nextcloud Talk bot configuration from a JSON file."""
     try:
         return NextcloudTalkChannel.load_config(config_file)
     except FileNotFoundError:
@@ -166,9 +155,20 @@ def load_nextcloud_config(config_file: str = "examples/config/nextcloud_config.j
         raise
 
 
+def load_stdout_config(config_file: str = "examples/config/log_analyzer_config.json"):
+    """Load stdout channel configuration from a JSON file."""
+    try:
+        return ReadStdoutChannel.load_config(config_file)
+    except FileNotFoundError:
+        print(f"Error: Config file {config_file} not found.")
+        print("Create it from the template:")
+        print(f"  cp examples/config/log_analyzer_config.json.example {config_file}")
+        raise
+
+
 async def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Peteos Nextcloud Talk Bot")
+    parser = argparse.ArgumentParser(description="Peteos Log Analyzer Example")
     parser.add_argument(
         "--chatbot-config",
         default="config/chatbot_config.json",
@@ -179,13 +179,18 @@ async def main():
         default="examples/config/nextcloud_config.json",
         help="Path to Nextcloud Talk bot config (default: examples/config/nextcloud_config.json)",
     )
+    parser.add_argument(
+        "--stdout-config",
+        default="examples/config/log_analyzer_config.json",
+        help="Path to stdout channel config (default: examples/config/log_analyzer_config.json)",
+    )
     args = parser.parse_args()
 
     # Configure logging
     setup_logging(level="INFO", debug=True)
 
     print("=" * 60)
-    print("  Peteos Nextcloud Talk Bot Example")
+    print("  Peteos Log Analyzer Example")
     print("=" * 60)
     print()
 
@@ -197,17 +202,53 @@ async def main():
     # Create the Agent
     agent = Agent(role_manager, chatbot_manager, tool_manager)
 
-    # Load Nextcloud configuration
+    # Load configurations
     try:
-        config = load_nextcloud_config(args.nextcloud_config)
+        nextcloud_config = load_nextcloud_config(args.nextcloud_config)
     except (FileNotFoundError, KeyError) as e:
         print(f"Aborting: {e}")
         return
 
-    # Create the Nextcloud Talk channel
-    nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=config)
+    try:
+        stdout_config = load_stdout_config(args.stdout_config)
+    except (FileNotFoundError, KeyError) as e:
+        print(f"Aborting: {e}")
+        return
 
-    # Start the webhook receiver
+    # Create a shared session that both channels attach to
+    role_name = stdout_config.get("role", nextcloud_config.get("default_role", "test"))
+    session = await agent.create_session(role_name)
+    print(f"Created session: {session.uuid}")
+    print()
+
+    # Create the Nextcloud Talk channel (user-facing, sends and receives)
+    nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=nextcloud_config)
+
+    # Register rooms with the session (app owns session lifecycle)
+    auto_join_rooms = nextcloud_config.get("auto_join_rooms", [])
+    for room_token in auto_join_rooms:
+        nextcloud.register_room(session.uuid, room_token)
+        print(f"Registered room {room_token} with session {session.uuid}")
+
+    # Callback for dynamic room joins
+    async def on_room_joined(room_token: str):
+        new_session = await agent.create_session(role_name)
+        nextcloud.register_room(new_session.uuid, room_token)
+        print(f"Registered new room {room_token} with session {new_session.uuid}")
+
+    nextcloud.on_room_joined = on_room_joined
+
+    # Create the stdout monitor channel (read-only, forwards log lines to session)
+    stdout_channel = ReadStdoutChannel(
+        name="log-monitor",
+        agent=agent,
+        config=stdout_config,
+    )
+    stdout_channel.subscribe_to_session(session.uuid)
+
+    # Start both channels
+    await stdout_channel.start()
+
     webhook_url = await nextcloud.start()
     print(f"Webhook receiver started at: {webhook_url}")
     print()
@@ -217,31 +258,12 @@ async def main():
     print()
     print("Or manually set the webhook URL in the bot configuration.")
     print()
-    print("The bot will automatically create sessions when added to rooms.")
-    print("Responses are sent back to the originating room.")
+    print(f"Stdout monitor started: {stdout_config['command']}")
+    print(f"  Pattern: {stdout_config.get('pattern', '.*')}")
     print()
-
-    # Create a session for the first room and register it
-    role_name = config.get("default_role", "test")
-    session = await agent.create_session(role_name)
-    print(f"Created session: {session.uuid}")
+    print("The stdout channel will monitor logs and forward matching lines")
+    print("to the session. Responses go back through the Nextcloud channel.")
     print()
-
-    # Handle pre-joined rooms from config
-    auto_join_rooms = config.get("auto_join_rooms", [])
-    for room_token in auto_join_rooms:
-        nextcloud.register_room(session.uuid, room_token)
-        print(f"Registered room {room_token} with session {session.uuid}")
-
-    # When the bot is added to a new room, the channel calls this callback
-    # to let the app register the room with a session
-    async def on_room_joined(room_token: str):
-        """Handle new room join: create session and register the room."""
-        new_session = await agent.create_session(role_name)
-        nextcloud.register_room(new_session.uuid, room_token)
-        print(f"Registered new room {room_token} with session {new_session.uuid}")
-
-    nextcloud.on_room_joined = on_room_joined
 
     # Wait for webhook events (blocks until stopped)
     try:
@@ -260,6 +282,7 @@ async def main():
                 )
                 print(f"  Sent 'I am going offline.' to room {token}")
         await nextcloud.stop()
+        await stdout_channel.stop()
         print("Stopped.")
 
 

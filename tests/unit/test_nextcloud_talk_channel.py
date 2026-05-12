@@ -167,13 +167,16 @@ class TestEventDispatch:
         session_mock = MagicMock(uuid=session_uuid)
         session_mock.queue_message = AsyncMock(return_value=None)
         session_mock.start = AsyncMock(return_value=None)
-        agent.create_session = AsyncMock(return_value=session_mock)
         agent.get_session = MagicMock(return_value=session_mock)
 
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
             config=_make_config(),
         )
+        agent._session_channels = {}
+
+        # App registers the room with a session
+        channel.register_room(session_uuid, "conv1")
 
         event = {
             "type": "Create",
@@ -186,9 +189,9 @@ class TestEventDispatch:
         }
         await channel._handle_message(event)
 
-        agent.create_session.assert_called_once_with("test")
-        assert channel._rooms["conv1"] == session_uuid
-        assert channel._session_conversations[session_uuid] == "conv1"
+        session_mock.queue_message.assert_called_once()
+        queued_msg = session_mock.queue_message.call_args[0][0]
+        assert queued_msg.text == "Hello bot!"
 
         # Await the thinking reaction task to prevent RuntimeWarning
         # _send_reaction will fail (no real aiohttp) but we need to drain the task
@@ -197,14 +200,6 @@ class TestEventDispatch:
 
     @pytest.mark.asyncio
     async def test_handle_join(self, agent):
-        agent.role_manager = RoleManager()
-        agent.role_manager.register_role(Role(name="test", description="Test"))
-
-        session_uuid = uuid.uuid4()
-        session_mock = MagicMock(uuid=session_uuid)
-        agent.create_session = AsyncMock(return_value=session_mock)
-        agent.get_session = MagicMock(return_value=session_mock)
-
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
             config=_make_config(),
@@ -217,7 +212,8 @@ class TestEventDispatch:
         }
         await channel._handle_join(event)
 
-        assert channel._rooms["room5"] == session_uuid
+        # Join no longer creates sessions - channel just logs
+        assert channel._rooms == {}
 
     @pytest.mark.asyncio
     async def test_handle_leave(self, agent):
@@ -289,7 +285,7 @@ class TestSessionRouting:
     """Test session lookup and creation."""
 
     @pytest.mark.asyncio
-    async def test_existing_session_reused(self, agent):
+    async def test_find_session_existing(self, agent):
         existing_uuid = uuid.uuid4()
         existing_session = MagicMock(uuid=existing_uuid)
         channel = NextcloudTalkChannel(
@@ -299,41 +295,36 @@ class TestSessionRouting:
         channel._rooms["tok1"] = existing_uuid
         agent.get_session = MagicMock(return_value=existing_session)
 
-        result = await channel._get_or_create_session("tok1")
+        result = await channel._find_session("tok1")
 
         assert result is existing_session
-        agent.create_session.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_new_session_created(self, agent):
-        new_uuid = uuid.uuid4()
-        new_session = MagicMock(uuid=new_uuid)
+    async def test_find_session_not_registered_returns_none(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
             config=_make_config(),
         )
-        agent.create_session = AsyncMock(return_value=new_session)
-        agent.get_session = MagicMock(return_value=new_session)
 
-        result = await channel._get_or_create_session("newroom")
-
-        assert result is new_session
-        agent.create_session.assert_called_once_with("test")
-        assert channel._rooms["newroom"] == new_uuid
-        assert channel._session_conversations[new_uuid] == "newroom"
-
-    @pytest.mark.asyncio
-    async def test_failed_session_creation_returns_none(self, agent):
-        channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
-            config=_make_config(),
-        )
-        agent.create_session = AsyncMock(side_effect=RuntimeError("failed"))
-
-        result = await channel._get_or_create_session("badroom")
+        result = await channel._find_session("unknown")
 
         assert result is None
-        assert "badroom" not in channel._rooms
+
+    @pytest.mark.asyncio
+    async def test_register_room(self, agent):
+        session_uuid = uuid.uuid4()
+        channel = NextcloudTalkChannel(
+            name="nextcloud", agent=agent,
+            config=_make_config(),
+        )
+        # subscribe_to_session needs _session_channels to exist
+        agent._session_channels = {}
+
+        channel.register_room(session_uuid, "myroom")
+
+        assert channel._rooms["myroom"] == session_uuid
+        assert channel._session_conversations[session_uuid] == "myroom"
+        assert channel in agent._session_channels[session_uuid]
 
 
 class TestSend:

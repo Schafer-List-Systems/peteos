@@ -39,6 +39,7 @@ class NextcloudTalkChannel(Channel):
         self._runner: web.AppRunner = None
         self._site: web.TCPSite = None
         self._server_url: str = ""
+        self._on_room_joined: callable | None = None
         self._rooms: dict[str, uuid.UUID] = {}  # conversation_token -> session_uuid
         self._session_conversations: dict[uuid.UUID, str] = {}  # session_uuid -> conversation_token
         self._incoming_message_ids: dict[uuid.UUID, str] = {}  # session_uuid -> message_id
@@ -99,10 +100,6 @@ class NextcloudTalkChannel(Channel):
 
         actual_port = self._site._server.sockets[0].getsockname()[1]
         self._server_url = f"http://{self._config['host']}:{actual_port}/nextcloud-talk-webhook"
-
-        # Pre-join configured rooms
-        for room_token in self._config.get("auto_join_rooms", []):
-            await self._pre_join_room(room_token)
 
         return self._server_url
 
@@ -273,16 +270,27 @@ class NextcloudTalkChannel(Channel):
         ).hexdigest()
         return hmac.compare_digest(computed, signature)
 
-    async def _pre_join_room(self, token: str) -> None:
-        """Pre-join a room from config: create session and register mapping."""
-        try:
-            session = await self._agent.create_session(self._config["default_role"])
-            self._rooms[token] = session.uuid
-            self._session_conversations[session.uuid] = token
-            self.subscribe_to_session(session.uuid)
-            logger.info("Pre-joined room %s with session %s", token, session.uuid)
-        except Exception as e:
-            logger.error("Failed to pre-join room %s: %s", token, e)
+    def register_room(self, session_uuid: uuid.UUID, conversation_token: str) -> None:
+        """Register a session with a Nextcloud Talk conversation token.
+
+        The app creates sessions and calls this to map them to rooms.
+        After registration, incoming messages for this room will be routed
+        to the session.
+
+        Args:
+            session_uuid: The session to route messages to.
+            conversation_token: The Nextcloud Talk conversation token.
+        """
+        self._rooms[conversation_token] = session_uuid
+        self._session_conversations[session_uuid] = conversation_token
+        self.subscribe_to_session(session_uuid)
+
+        self.send(
+            Message(role="assistant", content=[ContentPart(part_type="text", text="Hello, I am online now.")]),
+            session_uuid=session_uuid,
+        )
+
+        logger.info("Registered room %s with session %s", conversation_token, session_uuid)
 
     async def _handle_message(self, event: dict) -> None:
         """Handle incoming chat message (Create event)."""
@@ -309,7 +317,7 @@ class NextcloudTalkChannel(Channel):
             logger.warning("Empty message from %s", display_name)
             return
 
-        session = await self._get_or_create_session(conversation_token)
+        session = await self._find_session(conversation_token)
         if session:
             message_id = obj.get("id")
             if message_id:
@@ -450,7 +458,8 @@ class NextcloudTalkChannel(Channel):
         display_name = actor.get("displayName", actor.get("name", actor.get("id", "unknown")))
         logger.info("Bot added to room by %s, conversation=%s", display_name, conversation_token)
 
-        _ = await self._get_or_create_session(conversation_token)
+        if self._on_room_joined:
+            await self._on_room_joined(conversation_token)
 
     async def _handle_leave(self, event: dict) -> None:
         """Handle bot removed from room (Leave event)."""
@@ -468,31 +477,21 @@ class NextcloudTalkChannel(Channel):
             self.unsubscribe_from_session(session_uuid)
         logger.info("Removed mapping for conversation %s", conversation_token)
 
-    async def _get_or_create_session(self, conversation_token: str):
-        """Get existing session or create a new one for a conversation.
+    async def _find_session(self, conversation_token: str):
+        """Find a registered session for a conversation token.
+
+        Returns None if the room is not registered (app must call register_room first).
 
         Args:
             conversation_token: Nextcloud Talk conversation token.
 
         Returns:
-            The session object, or None if creation fails.
+            The session object, or None if room is not registered.
         """
-        if conversation_token in self._rooms:
-            session_uuid = self._rooms[conversation_token]
-            session = self._agent.get_session(session_uuid)
-            self.subscribe_to_session(session_uuid)
-            return session
-
-        try:
-            session = await self._agent.create_session(self._config["default_role"])
-            self._rooms[conversation_token] = session.uuid
-            self._session_conversations[session.uuid] = conversation_token
-            self.subscribe_to_session(session.uuid)
-            logger.info("Created session %s for conversation %s", session.uuid, conversation_token)
-            return session
-        except Exception as e:
-            logger.error("Failed to create session for conversation %s: %s", conversation_token, e)
-            return None
+        session_uuid = self._rooms.get(conversation_token)
+        if session_uuid:
+            return self._agent.get_session(session_uuid)
+        return None
 
     async def _send_to_nextcloud(self, conversation_token: str, payload: dict) -> Optional[str]:
         """Send a message to a Nextcloud Talk conversation.

@@ -30,6 +30,7 @@ class Channel(ActiveClass, ABC):
         super().__init__()
         self.name = name
         self._agent = agent
+        self._session_uuid: uuid.UUID | None = None
         self._show_reasoning: bool = True
         self._show_tool_calls: bool = True
         self._show_tool_results: bool = True
@@ -119,6 +120,7 @@ class Channel(ActiveClass, ABC):
         Args:
             session_uuid: The session to subscribe to.
         """
+        self._session_uuid = session_uuid
         if session_uuid not in self._agent._session_channels:
             self._agent._session_channels[session_uuid] = set()
         self._agent._session_channels[session_uuid].add(self)
