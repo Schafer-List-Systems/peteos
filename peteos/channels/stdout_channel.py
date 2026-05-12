@@ -49,10 +49,53 @@ class ReadStdoutChannel(Channel):
         super().__init__(name, agent)
         self._config = config
         self._process: asyncio.subprocess.Process | None = None
+        self._exclude_patterns: list[str] = []
+        # Populate exclude patterns from config
+        self._exclude_patterns.extend(self._config.get("exclude", []))
 
     def send(self, message, session_uuid: uuid.UUID | None = None) -> None:
         """No-op - this channel is read-only."""
         pass
+
+    def add_exclude_pattern(self, pattern: str) -> bool:
+        """Add a regex pattern to the exclusive (exclusion) list.
+
+        Lines matching any exclude pattern will be dropped before
+        the inclusive pattern check.
+
+        Args:
+            pattern: Regular expression pattern to exclude.
+
+        Returns:
+            True if the pattern was added, False if it was already present.
+        """
+        if pattern in self._exclude_patterns:
+            return False
+        self._exclude_patterns.append(pattern)
+        return True
+
+    def remove_exclude_pattern(self, index: int) -> bool:
+        """Remove an exclude pattern by its index in the list.
+
+        Args:
+            index: The index of the pattern to remove.
+
+        Returns:
+            True if a pattern was removed, False if the index was out of range.
+        """
+        try:
+            self._exclude_patterns.pop(index)
+            return True
+        except IndexError:
+            return False
+
+    def list_exclude_patterns(self) -> list[str]:
+        """List all current exclude patterns.
+
+        Returns:
+            List of active exclude regex patterns.
+        """
+        return list(self._exclude_patterns)
 
 
     @staticmethod
@@ -75,6 +118,7 @@ class ReadStdoutChannel(Channel):
         with open(config_file, "r") as f:
             config = json.load(f)
         config.setdefault("pattern", ".*")
+        config.setdefault("exclude", [])
         required = ["command"]
         missing = [k for k in required if k not in config]
         if missing:
@@ -127,6 +171,10 @@ class ReadStdoutChannel(Channel):
                     continue
                 if not re.search(self._config["pattern"], line):
                     continue
+                for ex_pattern in self._exclude_patterns:
+                    if re.search(ex_pattern, line):
+                        _logger.debug("Excluded by pattern '%s': %s", ex_pattern, line[:80])
+                        continue
 
                 message = Message(
                     role="user",
