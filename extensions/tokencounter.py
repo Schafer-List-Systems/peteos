@@ -23,33 +23,25 @@ def count_tiktokens_per_message():
     token_counts = []
 
     for msg in history.messages:
-        # Reconstruct text from message parts to count tokens
+        # Use Message.serialize_content() for consistent serialization
         parts_text = []
-        
-        if msg.content:
-            for part in msg.content:
-                # part is a ContentPart object
-                try:
-                    part_type = part.type
-                    part_data = part.data or {}
-                    
-                    if part_type == "text":
-                        parts_text.append(part_data.get("text", ""))
-                    elif part_type == "reasoning":
-                        parts_text.append(part_data.get("reasoning", ""))
-                    elif part_type in ("tool_calls", "tool_call"):
-                        # Serialize tool calls for tokenization
-                        parts_text.append(str(part_data))
-                    elif part_type == "tool_result":
-                        parts_text.append(str(part_data.get("content", "")))
-                    else:
-                        parts_text.append(str(part_data))
-                except Exception:
-                    parts_text.append(str(part))
-        
+        for item in msg.serialize_content():
+            try:
+                ptype = item.get("type", "")
+                if ptype == "text":
+                    parts_text.append(item.get("text", ""))
+                elif ptype == "reasoning":
+                    parts_text.append(item.get("reasoning", ""))
+                elif ptype == "tool_result":
+                    parts_text.append(item.get("content", ""))
+                else:
+                    parts_text.append(str(item.get(ptype, item)))
+            except Exception:
+                parts_text.append(str(item))
+
         # Format: "role: content" is standard for context window counting
         full_text = f"{msg.get_role()}: {' '.join(parts_text)}"
-        
+
         tokens = enc.encode(full_text)
         token_counts.append(len(tokens))
 

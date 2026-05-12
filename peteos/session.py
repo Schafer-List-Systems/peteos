@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, List, Optional
 import uuid
 
 from peteos.activeclass import ActiveClass
-from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
+from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart, SystemPromptMessage
 from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -81,11 +81,8 @@ class Session(ActiveClass):
     def _initialize_chat_history(role: Role, tool_manager: ToolManager) -> ChatHistory:
         chat_history = ChatHistory()
 
-        if role.system_prompt:
-            chat_history.append_message(Message(
-                role="system",
-                content=[ContentPart(part_type="text", text=role.system_prompt)]
-            ))
+        if role.system_prompt or role.system_prompt_hooks:
+            chat_history.append_message(SystemPromptMessage(hooks=role._all_hooks))
 
         tool_list = tool_manager.get_tool_list()
         for tool in tool_list:

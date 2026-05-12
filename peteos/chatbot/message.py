@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .contentpart import ContentPart
 
@@ -165,3 +165,48 @@ class Message:
 
     def __repr__(self) -> str:
         return f"Message(role={self.get_role()!r}, content_count={len(self.content)}, id={self.get_id()!r})"
+
+
+class SystemPromptMessage(Message):
+    """A system message whose content is dynamically assembled from hooks.
+
+    Each hook is a callable returning a text string.  When
+    ``serialize_content()`` is called the hooks are invoked in order,
+    their return values are joined, and a single text content block is
+    returned.
+
+    Subclasses can add/remove hooks between serialisations to produce
+    dynamic content (e.g. an awake-status fragment).
+
+    Example:
+        msg = SystemPromptMessage()
+        msg.add_hook(lambda: "You are helpful.")
+        msg.add_hook(lambda: f"Status: {'awake' if check_awake() else 'asleep'}")
+        msg.serialize_content()  # -> [{"type": "text", "text": "You are helpful.\\nStatus: asleep"}]
+    """
+
+    def __init__(
+        self,
+        hooks: Optional[List[Callable[[], str]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        creation_timestamp: Optional[datetime] = None,
+        message_id: Optional[str] = None,
+    ) -> None:
+        # content must be non-empty for the parent constructor;
+        # the actual text comes from hooks at serialisation time.
+        super().__init__(
+            role="system",
+            content=[ContentPart(part_type="text", text="")],
+            metadata=metadata,
+            creation_timestamp=creation_timestamp,
+            message_id=message_id,
+        )
+        self._hooks: List[Callable[[], str]] = hooks if hooks is not None else []
+
+    def add_hook(self, hook: Callable[[], str]) -> None:
+        """Add a hook that returns a text string for the system prompt."""
+        self._hooks.append(hook)
+
+    def serialize_content(self) -> List[Dict[str, Any]]:
+        prompt = "\n".join(hook() for hook in self._hooks)
+        return [{"type": "text", "text": prompt}]

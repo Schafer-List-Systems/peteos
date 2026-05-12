@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 class Role:
@@ -11,6 +11,7 @@ class Role:
         name: str,
         description: str,
         system_prompt: Optional[str] = None,
+        system_prompt_hooks: Optional[list[Callable[[], str]]] = None,
         required_tools: Optional[list[str]] = None,
         execution_environment: str = "REPL",
         model: str = ".*",
@@ -22,7 +23,9 @@ class Role:
         Args:
             name: The name of the role.
             description: Description of the role.
-            system_prompt: Optional system prompt.
+            system_prompt: Optional system prompt (static text from role definition).
+            system_prompt_hooks: Optional callbacks invoked at session creation.
+                Each returns a text string appended to the system prompt.
             required_tools: Optional list of tool names required by this role.
             execution_environment: Name of the execution environment (default: "REPL").
             model: Regex pattern to match model IDs (default: ".*" matches any model).
@@ -31,10 +34,23 @@ class Role:
         self.name = name
         self.description = description
         self.system_prompt = system_prompt
+        self.system_prompt_hooks = system_prompt_hooks if system_prompt_hooks is not None else []
         self.required_tools = required_tools if required_tools is not None else []
         self.execution_environment = execution_environment
         self.model = model
         self.auto_approve_tools = auto_approve_tools if auto_approve_tools is not None else []
+
+    def add_system_prompt_hook(self, hook: Callable[[], str]) -> None:
+        """Add a hook that returns a dynamic fragment for the system prompt."""
+        self.system_prompt_hooks.append(hook)
+
+    @property
+    def _all_hooks(self) -> list[Callable[[], str]]:
+        """Return hooks including static system_prompt as a lambda."""
+        hooks = list(self.system_prompt_hooks)
+        if self.system_prompt:
+            hooks.append(lambda sp=self.system_prompt: sp)
+        return hooks
 
     @staticmethod
     def load_from_dict(data: dict) -> "Role":

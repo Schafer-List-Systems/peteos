@@ -39,7 +39,7 @@ from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
-from apps.log_analyzer.tools import LogState
+from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools
 
 
 async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
@@ -72,55 +72,6 @@ def setup_role_manager() -> RoleManager:
         )
 
     return role_manager
-
-
-def _register_exclude_tools(agent: Agent, stdout_channel: ReadStdoutChannel) -> None:
-    """Register exclude pattern management tools on the agent's tool manager."""
-    tm = agent._tool_manager
-
-    def add_exclude_pattern(pattern: str) -> str:
-        """Add a regex exclude pattern to filter out log messages.
-
-        Lines matching an exclude pattern are dropped. Use this to suppress unwanted noise.
-
-        Args:
-            pattern: Regular expression pattern to exclude.
-
-        Returns:
-            Status message.
-        """
-        if stdout_channel.add_exclude_pattern(pattern):
-            return f"Added exclude pattern: {pattern!r}"
-        return f"Pattern {pattern!r} already exists"
-
-    def remove_exclude_pattern(index: int) -> str:
-        """Remove an exclude pattern by its index in the list.
-
-        Args:
-            index: Position of the pattern to remove.
-
-        Returns:
-            Status message.
-        """
-        if stdout_channel.remove_exclude_pattern(index):
-            return f"Removed pattern at index {index}"
-        return f"Invalid index: {index}"
-
-    def list_exclude_patterns() -> str:
-        """List all current exclude patterns.
-
-        Returns:
-            Formatted list of active exclude patterns with their indices.
-        """
-        patterns = stdout_channel.list_exclude_patterns()
-        if not patterns:
-            return "No exclude patterns configured."
-        lines = [f"  [{i}] {p!r}" for i, p in enumerate(patterns)]
-        return "Exclude patterns:\n" + "\n".join(lines)
-
-    tm.register_tool(func=add_exclude_pattern)
-    tm.register_tool(func=remove_exclude_pattern)
-    tm.register_tool(func=list_exclude_patterns)
 
 
 def load_nextcloud_config(config_file: str = "apps/log_analyzer/nextcloud_config.json"):
@@ -193,8 +144,15 @@ async def main():
     # Create the Agent
     agent = Agent(role_manager, chatbot_manager, ToolManager())
 
-    # Create a shared session that both channels attach to
+    # Register awakeness status hook on the role's system prompt
     role_name = nextcloud_config.get("default_role", "router")
+    role = role_manager.get_role(role_name)
+    if role is not None:
+        role.add_system_prompt_hook(
+            lambda: "Status: you are awake" if _state.awake else "Status: you are asleep"
+        )
+
+    # Create a shared session that both channels attach to
     session = await agent.create_session(role_name)
     print(f"Created session: {session.uuid}")
     print()
@@ -225,7 +183,8 @@ async def main():
     stdout_channel.subscribe_to_session(session.uuid)
 
     # Register stdout channel exclude pattern tools with the agent's tool manager
-    _register_exclude_tools(agent, stdout_channel)
+    register_filter_tools(agent._tool_manager, stdout_channel)
+    register_state_tools(agent._tool_manager)
 
     # Start both channels
     await stdout_channel.start()
