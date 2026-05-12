@@ -210,26 +210,22 @@ class AnthropicChatBot(GenericChatBot):
             elif role in ("user", "assistant"):
                 # Conversation messages
                 content = []
-                for part in msg.content:
-                    if part.type == "tool_calls":
+                for item in msg.serialize_content():
+                    if item.get("type") == "tool_calls":
                         # Expand uniform tool_calls format to individual content items
-                        for tool_call in part.data.get("tool_calls", []):
-                            # tool_call: {'type': 'tool_use', 'id': '...', 'name': '...', 'arguments': '...'}
+                        for tool_call in item.get("tool_calls", []):
                             content_item = dict(tool_call)
-                            # Convert arguments to input for Anthropic
                             if "arguments" in content_item:
                                 content_item["input"] = json.loads(content_item["arguments"])
                                 del content_item["arguments"]
                             content.append(content_item)
-                    elif part.type == "reasoning":
-                        # Convert reasoning to thinking for Anthropic format
-                        content_item = {
+                    elif item.get("type") == "reasoning":
+                        content.append({
                             "type": "thinking",
-                            "thinking": part.data.get("reasoning", "")
-                        }
-                        content.append(content_item)
+                            "thinking": item.get("reasoning", "")
+                        })
                     else:
-                        content.append(part.to_dict())
+                        content.append(item)
                 messages.append({
                     "role": role,
                     "content": content

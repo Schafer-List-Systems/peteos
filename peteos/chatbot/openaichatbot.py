@@ -189,17 +189,14 @@ class OpenAIChatBot(GenericChatBot):
                         messages.append(msg_dict)
                         break
             elif role in ("user", "assistant", "system"):
-                # Conversation messages - build message dict from ContentPart fields
-                # Use translation table to map uniform keys to API-specific keys
+                # Conversation messages
                 msg_dict = {"role": role}
                 tool_calls = []
 
-                for part in msg.content:
-                    # Handle tool_calls from uniform format to OpenAI format
-                    if part.type == "tool_calls":
-                        for tool_call in part.data.get("tool_calls", []):
-                            # Uniform format: {"type": "tool_use", "name": "...", "arguments": "..."}
-                            # OpenAI format: {"type": "function", "function": {"name": "...", "arguments": "..."}}
+                serialized = msg.serialize_content()
+                for item in serialized:
+                    if item.get("type") == "tool_calls":
+                        for tool_call in item.get("tool_calls", []):
                             tool_calls.append({
                                 "type": "function",
                                 "id": tool_call.get("id"),
@@ -209,14 +206,14 @@ class OpenAIChatBot(GenericChatBot):
                                 }
                             })
                     else:
-                        # part.data contains fields like "text", "reasoning", etc.
-                        # Use translation to map to API-specific key
-                        for key, value in part.data.items():
+                        # Apply key translation to flatten to OpenAI format
+                        for key, value in item.items():
                             if key in (self._config.request_translations or {}):
-                                api_key = (self._config.request_translations or {})[key]
+                                api_key = self._config.request_translations[key]
                             else:
                                 api_key = key
-                            msg_dict[api_key] = value
+                            if api_key != "type":
+                                msg_dict[api_key] = value
 
                 if tool_calls:
                     msg_dict["tool_calls"] = tool_calls

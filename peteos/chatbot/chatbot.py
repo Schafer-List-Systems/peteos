@@ -185,15 +185,14 @@ class GenericChatBot(ChatBot):
                 # Conversation messages - build message dict from ContentPart fields
                 # Use translation table to map uniform keys to API-specific keys
                 msg_dict = {"role": role}
-                for part in msg.content:
-                    # part.data contains fields like "text", "reasoning", etc.
-                    # Use translation to map to API-specific key
-                    for key, value in part.data.items():
+                for item in msg.serialize_content():
+                    for key, value in item.items():
                         if key in request_translations:
                             api_key = request_translations[key]
                         else:
                             api_key = key
-                        msg_dict[api_key] = value
+                        if api_key != "type":
+                            msg_dict[api_key] = value
                 messages.append(msg_dict)
 
         body["messages"] = messages

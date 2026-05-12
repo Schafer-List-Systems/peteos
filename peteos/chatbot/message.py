@@ -94,6 +94,18 @@ class Message:
         """
         return self.text
 
+    def serialize_content(self) -> List[Dict[str, Any]]:
+        """Serialize content parts as API-agnostic dicts for message bodies.
+
+        Returns a list of dicts, one per content part, suitable for
+        inclusion in chatbot request bodies.  The base implementation
+        mirrors ``part.to_dict()`` (``{"type": ..., **data}``).
+
+        Subclasses can override to customise per-message-type formatting
+        (e.g. Anthropic may need API-specific field names).
+        """
+        return [part.to_dict() for part in self.content]
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation.
 
