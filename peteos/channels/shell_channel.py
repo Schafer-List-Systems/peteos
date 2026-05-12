@@ -66,7 +66,7 @@ class InteractiveShellChannel(Channel):
         if isinstance(message, str):
             print(message)
         else:
-            print(message.text)
+            print(message.printable())
 
     def _post_message_to_agent(self, session_uuid: uuid.UUID, content: str) -> None:
         """Post a message directly to the session's event queue.

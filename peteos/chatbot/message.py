@@ -83,6 +83,14 @@ class Message:
             return ""
         return " ".join(texts).replace("  ", " ")
 
+    def printable(self) -> str:
+        """Return a string suitable for display to a human.
+
+        Subclasses can override to provide custom formatting (e.g.
+        multi-modal messages with image/video references).
+        """
+        return self.text
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation.
 
