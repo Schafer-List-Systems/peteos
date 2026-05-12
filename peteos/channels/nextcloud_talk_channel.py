@@ -74,6 +74,7 @@ class NextcloudTalkChannel(Channel):
         config.setdefault("show_reasoning", True)
         config.setdefault("show_tool_calls", True)
         config.setdefault("show_tool_results", True)
+        config.setdefault("prefix_actor_names", False)
         required = ["nextcloud_url", "bot_id", "bot_secret"]
         missing = [k for k in required if k not in config]
         if missing:
@@ -324,6 +325,9 @@ class NextcloudTalkChannel(Channel):
                 self._incoming_message_ids[session.uuid] = message_id
                 # Send thinking reaction immediately, before processing
                 await self._send_reaction(conversation_token, message_id, "🤔")
+
+            if self._config.get("prefix_actor_names", False):
+                message_text = f"User {display_name} wrote: {message_text}"
 
             user_message = Message(
                 role="user",

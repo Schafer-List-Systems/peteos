@@ -8,5 +8,6 @@
     "show_reasoning": true,
     "show_tool_calls": true,
     "show_tool_results": true,
-    "auto_join_rooms": ["abc123xyz"]
+    "auto_join_rooms": ["abc123xyz"],
+    "prefix_actor_names": true
 }
