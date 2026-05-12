@@ -185,23 +185,6 @@ class InteractiveShellChannel(Channel):
             except ValueError:
                 return (True, f"Invalid UUID: {args}")
 
-        elif command == "/messages":
-            if self._active_session_uuid is None:
-                return (True, "No session selected")
-            session = self._agent.get_session(self._active_session_uuid)
-            if session is None:
-                return (True, "Session not found")
-            history = session.chat_history.messages
-            if not history:
-                return (True, "No messages in session history")
-            output = f"Recent messages ({min(10, len(history))} of {len(history)}):"
-            for msg in history[-10:]:
-                content = msg.content
-                role = content.get("role", "unknown")
-                text = content.get("text", content.get("content", ""))[:100]
-                output += f"\n  [{role}] {text}"
-            return (True, output)
-
         elif command == "/approve":
             if self._active_session_uuid is None:
                 return (True, "No session selected")
