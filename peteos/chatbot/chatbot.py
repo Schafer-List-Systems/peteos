@@ -174,8 +174,8 @@ class GenericChatBot(ChatBot):
             role = msg.get_role()
 
             if role == "system":
-                # Extract system content parts
-                system_parts.extend(msg.content)
+                # Extract system content parts (use serialize_content for dynamic hooks)
+                system_parts.extend(msg.serialize_content())
             elif role == "tool":
                 # Extract tool definitions
                 for part in msg.content:

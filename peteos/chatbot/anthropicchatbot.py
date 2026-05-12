@@ -193,7 +193,7 @@ class AnthropicChatBot(GenericChatBot):
 
             if role == "system":
                 # Collect system parts
-                system_parts.extend(msg.content)
+                system_parts.extend(msg.serialize_content())
             elif role == "tool":
                 # Extract tool definitions and translate parameters to Anthropic format
                 for part in msg.content:
@@ -258,10 +258,10 @@ class AnthropicChatBot(GenericChatBot):
         body["messages"] = messages
 
         if system_parts:
-            # Convert system parts to string
+            # Convert system parts (dicts from serialize_content) to string
             system_text = " ".join(
-                part.text for part in system_parts
-                if part.type == "text" and part.text
+                item["text"] for item in system_parts
+                if item.get("type") == "text" and item.get("text")
             )
             body["system"] = system_text
 

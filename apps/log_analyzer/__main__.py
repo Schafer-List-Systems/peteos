@@ -140,9 +140,10 @@ async def main():
     # Setup components
     role_manager = setup_role_manager()
     chatbot_manager = await setup_chatbot_manager(args.chatbot_config)
+    tm = ToolManager()
 
     # Create the Agent
-    agent = Agent(role_manager, chatbot_manager, ToolManager())
+    agent = Agent(role_manager, chatbot_manager, tm)
 
     # Register awakeness status hook on the role's system prompt
     role_name = nextcloud_config.get("default_role", "router")
@@ -151,6 +152,18 @@ async def main():
         role.add_system_prompt_hook(
             lambda: "Status: you are awake" if _state.awake else "Status: you are asleep"
         )
+
+    # Create the stdout channel first so its methods are available for tool registration
+    # (tools access the channel via _state.channel, not the tool manager)
+    stdout_channel = ReadStdoutChannel(
+        name="log-monitor",
+        agent=agent,
+        config=stdout_config,
+    )
+
+    # Register all tools (before session creation so chat history includes them)
+    register_state_tools(tm)
+    register_filter_tools(tm, stdout_channel)
 
     # Create a shared session that both channels attach to
     session = await agent.create_session(role_name)
@@ -174,17 +187,7 @@ async def main():
 
     nextcloud.on_room_joined = on_room_joined
 
-    # Create the stdout monitor channel (read-only, forwards log lines to session)
-    stdout_channel = ReadStdoutChannel(
-        name="log-monitor",
-        agent=agent,
-        config=stdout_config,
-    )
     stdout_channel.subscribe_to_session(session.uuid)
-
-    # Register stdout channel exclude pattern tools with the agent's tool manager
-    register_filter_tools(agent._tool_manager, stdout_channel)
-    register_state_tools(agent._tool_manager)
 
     # Start both channels
     await stdout_channel.start()
