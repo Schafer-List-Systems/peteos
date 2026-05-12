@@ -54,8 +54,5 @@ http_client.md
 
 # internal TODO list
 TODO.md
-config/chatbot_config.json
-roles/test/config.json
-examples/config/nextcloud_config.json
-examples/config/log_analyzer_config.json
+*.json
 context-folding.md

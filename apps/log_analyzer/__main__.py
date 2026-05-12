@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-Log Analyzer Example
+Log Analyzer App
 
-This example demonstrates how to use a read-only stdout channel to monitor
-system logs (e.g., journalctl) and connect them to an agent via Nextcloud Talk.
-
-A session is created upfront, and two channels attach to it:
+This app monitors system logs (e.g., journalctl) and categorizes them
+using a Router agent. It uses two channels attached to the same session:
   1. Nextcloud Talk channel - the user-facing channel for interaction
   2. Stdout channel - reads journalctl output, forwards matching lines to the session
 
@@ -13,41 +11,38 @@ Prerequisites:
   1. Create a bot in your Nextcloud instance:
      ./occ talk:bot:install <bot-name> <webhook-url> <secret>
   2. Configure the chatbot backend (your LLM) in examples/config/chatbot_config.json
-  3. Configure the Nextcloud Talk bot in examples/config/nextcloud_config.json
-  4. Configure the stdout monitor in examples/config/log_analyzer_config.json
+  3. Configure the Nextcloud Talk bot in apps/log_analyzer/config/nextcloud_config.json
+  4. Configure the stdout monitor in apps/log_analyzer/config/stdout_config.json
 
 Usage:
     PYTHONPATH=/home/frygge/projects/private/peteos \
-      examples/log_analyzer_example.py
+      python -m apps.log_analyzer
 
     # Override config paths:
     PYTHONPATH=/home/frygge/projects/private/peteos \
-      examples/log_analyzer_example.py \
+      python -m apps.log_analyzer \
       --nextcloud-config /path/to/nextcloud_config.json \
-      --stdout-config /path/to/log_analyzer_config.json
-
-When you run this, the channel starts an HTTP server. Visit its URL in a
-browser or use curl to verify it's listening, then point your Nextcloud
-bot's webhook URL at <server-url>/webhook.
+      --stdout-config /path/to/stdout_config.json
 """
 
 import argparse
 import asyncio
-import re
 import sys
 import uuid
 
 from peteos.agent import Agent
 from peteos.channels import NextcloudTalkChannel, ReadStdoutChannel
-from peteos.chatbot.manager import ChatBotManager
 from peteos.chatbot import Message, ContentPart
+from peteos.chatbot.manager import ChatBotManager
 from peteos.logger import setup_logging
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
+from apps.log_analyzer.tools import LogState
 
-async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json"):
+
+async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
     """Setup ChatBotManager from configuration file."""
     chatbot_manager = ChatBotManager()
 
@@ -63,126 +58,70 @@ async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json")
     return chatbot_manager
 
 
-def setup_role_manager():
-    """Setup RoleManager with available roles."""
+def setup_role_manager() -> RoleManager:
+    """Setup RoleManager with roles from the app's roles directory."""
     role_manager = RoleManager()
 
     try:
-        loaded_roles = role_manager.load_from_dir("roles")
+        loaded_roles = role_manager.load_from_dir("apps/log_analyzer/roles")
         print(f"Loaded roles: {', '.join(loaded_roles)}")
     except FileNotFoundError:
-        print("Note: No roles directory found. Creating default 'test' role.")
+        print("Note: No roles directory found. Creating default 'router' role.")
         role_manager.register_role(
-            Role(name="test", description="Default test role", model=".*")
+            Role(name="router", description="Log router role", model=".*")
         )
 
     return role_manager
 
 
-def setup_tool_manager():
-    """Setup ToolManager with example tools."""
+def setup_tool_manager() -> ToolManager:
+    """Setup ToolManager with log analyzer tools."""
     tool_manager = ToolManager()
-    namespaces: dict[str, dict] = {}
-
-    def read(filename: str) -> str:
-        """Read a file and return its contents as a string.
-
-        Args:
-            filename: The path to the file to read.
-        """
-        try:
-            with open(filename, "r") as f:
-                return f.read()
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
-
-    def eval_python(python_string: str, namespace_name: str = "") -> str:
-        """Execute Python code and return stdout and return_value.
-
-        The return value is captured by setting _result in the code.
-        Use the same namespace_name across calls to maintain state (variables defined in one call are available in subsequent calls).
-        Omit namespace_name or pass '' for a fresh anonymous namespace destroyed after each call.
-        Pass 'globals' to execute in the module's global namespace (sharing module-level imports and definitions).
-        Pass a named namespace_name for persistent state.
-
-        Args:
-            python_string: A string containing valid Python code to execute.
-            namespace_name: The namespace name for state persistence. Empty string for ephemeral (default).
-        """
-        import io
-        import sys
-
-        if namespace_name == "globals":
-            ns: dict = globals()
-        elif namespace_name == "":
-            ns = {}
-        else:
-            ns = namespaces.get(namespace_name)
-            if ns is None:
-                namespaces[namespace_name] = {}
-                ns = namespaces[namespace_name]
-
-        stdout_capture = io.StringIO()
-        old_stdout = sys.stdout
-        return_value = None
-        try:
-            sys.stdout = stdout_capture
-            code = compile(python_string, "<eval>", "exec")
-            exec(code, ns)
-            return_value = ns.get("_result")
-        except Exception as e:
-            return_value = f"Error: {type(e).__name__}: {e}"
-        finally:
-            sys.stdout = old_stdout
-
-        stdout = stdout_capture.getvalue()
-        return f"stdout: {stdout!r}\nreturn_value: {return_value!r}"
-
-    tool_manager.register_tool(func=read)
-    tool_manager.register_tool(func=eval_python)
+    # TODO: Implement actual filter logic here.
+    # TODO: Implement actual wake/sleep logic here.
 
     return tool_manager
 
 
-def load_nextcloud_config(config_file: str = "examples/config/nextcloud_config.json"):
+def load_nextcloud_config(config_file: str = "apps/log_analyzer/nextcloud_config.json"):
     """Load Nextcloud Talk bot configuration from a JSON file."""
     try:
         return NextcloudTalkChannel.load_config(config_file)
     except FileNotFoundError:
         print(f"Error: Config file {config_file} not found.")
         print("Create it from the template:")
-        print(f"  cp examples/config/nextcloud_config.json.example {config_file}")
+        print(f"  cp apps/log_analyzer/config/nextcloud_config.json.example {config_file}")
         raise
 
 
-def load_stdout_config(config_file: str = "examples/config/log_analyzer_config.json"):
+def load_stdout_config(config_file: str = "apps/log_analyzer/stdout_config.json"):
     """Load stdout channel configuration from a JSON file."""
     try:
         return ReadStdoutChannel.load_config(config_file)
     except FileNotFoundError:
         print(f"Error: Config file {config_file} not found.")
         print("Create it from the template:")
-        print(f"  cp examples/config/log_analyzer_config.json.example {config_file}")
+        print(f"  cp apps/log_analyzer/config/stdout_config.json.example {config_file}")
         raise
 
 
 async def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Peteos Log Analyzer Example")
+    parser = argparse.ArgumentParser(description="Peteos Log Analyzer App")
     parser.add_argument(
         "--chatbot-config",
-        default="config/chatbot_config.json",
-        help="Path to chatbot backend config (default: config/chatbot_config.json)",
+        default="apps/log_analyzer/config/chatbot_config.json",
+        help="Path to chatbot backend config (default: apps/log_analyzer/config/chatbot_config.json)",
     )
     parser.add_argument(
         "--nextcloud-config",
-        default="examples/config/nextcloud_config.json",
-        help="Path to Nextcloud Talk bot config (default: examples/config/nextcloud_config.json)",
+        default="apps/log_analyzer/config/nextcloud_config.json",
+        help="Path to Nextcloud Talk bot config (default: apps/log_analyzer/config/nextcloud_config.json)",
     )
     parser.add_argument(
         "--stdout-config",
-        default="examples/config/log_analyzer_config.json",
-        help="Path to stdout channel config (default: examples/config/log_analyzer_config.json)",
+        default="apps/log_analyzer/config/stdout_config.json",
+        help="Path to stdout channel config (default: apps/log_analyzer/config/stdout_config.json)",
     )
     args = parser.parse_args()
 
@@ -190,7 +129,7 @@ async def main():
     setup_logging(level="INFO", debug=True)
 
     print("=" * 60)
-    print("  Peteos Log Analyzer Example")
+    print("  Peteos Log Analyzer App")
     print("=" * 60)
     print()
 
@@ -216,7 +155,7 @@ async def main():
         return
 
     # Create a shared session that both channels attach to
-    role_name = nextcloud_config.get("default_role", "test")
+    role_name = nextcloud_config.get("default_role", "router")
     session = await agent.create_session(role_name)
     print(f"Created session: {session.uuid}")
     print()

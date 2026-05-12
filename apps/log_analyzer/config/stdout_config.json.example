@@ -1,0 +1,4 @@
+{
+    "command": ["journalctl", "-f"],
+    "pattern": "ERROR|WARNING|CRITICAL|SECURITY|HARDWARE|FAIL"
+}

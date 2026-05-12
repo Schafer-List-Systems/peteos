@@ -1,5 +1,4 @@
 {
-    "role": "test",
     "command": ["journalctl", "-f"],
     "pattern": "ERROR|WARNING|CRITICAL"
 }
