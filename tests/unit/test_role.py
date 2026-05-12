@@ -281,3 +281,81 @@ def test_role_load_from_path_config_only():
         assert role.system_prompt == "System prompt from config"
         assert role.required_tools == ["tool1", "tool2"]
         assert role.execution_environment == "Jupyter"
+
+
+def test_role_init_with_auto_approve_tools():
+    """Test Role initialization with auto_approve_tools."""
+    role = Role(
+        name="autobot",
+        description="Auto-approves some tools",
+        auto_approve_tools=["file_read", "calc"]
+    )
+
+    assert role.name == "autobot"
+    assert role.description == "Auto-approves some tools"
+    assert role.auto_approve_tools == ["file_read", "calc"]
+
+
+def test_role_init_default_auto_approve_tools():
+    """Test Role default auto_approve_tools is empty list."""
+    role = Role(name="simple", description="Simple role")
+
+    assert role.auto_approve_tools == []
+
+
+def test_role_load_from_dict_with_auto_approve_tools():
+    """Test loading Role from dictionary with auto_approve_tools."""
+    data = {
+        "name": "autobot",
+        "description": "Auto-approves web_fetch",
+        "auto_approve_tools": ["web_fetch"]
+    }
+
+    role = Role.load_from_dict(data)
+
+    assert role.name == "autobot"
+    assert role.description == "Auto-approves web_fetch"
+    assert role.auto_approve_tools == ["web_fetch"]
+
+
+def test_role_load_from_dict_default_auto_approve_tools():
+    """Test loading Role from dictionary without auto_approve_tools."""
+    data = {
+        "name": "simple",
+        "description": "Simple role"
+    }
+
+    role = Role.load_from_dict(data)
+
+    assert role.auto_approve_tools == []
+
+
+def test_role_load_from_path_with_auto_approve_tools_config():
+    """Test loading Role from directory with auto_approve_tools in config.json."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        role_dir = Path(tmpdir) / "autobot"
+        role_dir.mkdir()
+
+        (role_dir / "description.md").write_text("An auto-approver.")
+        (role_dir / "config.json").write_text(
+            '{"auto_approve_tools": ["file_read", "calc"]}'
+        )
+
+        role = Role.load_from_path(str(role_dir))
+
+        assert role.name == "autobot"
+        assert role.description == "An auto-approver."
+        assert role.auto_approve_tools == ["file_read", "calc"]
+
+
+def test_role_load_from_path_default_auto_approve_tools():
+    """Test loading Role from directory without auto_approve_tools in config."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        role_dir = Path(tmpdir) / "simple"
+        role_dir.mkdir()
+
+        (role_dir / "description.md").write_text("A simple role.")
+
+        role = Role.load_from_path(str(role_dir))
+
+        assert role.auto_approve_tools == []

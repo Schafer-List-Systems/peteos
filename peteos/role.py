@@ -13,7 +13,8 @@ class Role:
         system_prompt: Optional[str] = None,
         required_tools: Optional[list[str]] = None,
         execution_environment: str = "REPL",
-        model: str = ".*"
+        model: str = ".*",
+        auto_approve_tools: Optional[list[str]] = None
     ):
         """
         Initialize Role.
@@ -25,6 +26,7 @@ class Role:
             required_tools: Optional list of tool names required by this role.
             execution_environment: Name of the execution environment (default: "REPL").
             model: Regex pattern to match model IDs (default: ".*" matches any model).
+            auto_approve_tools: Optional list of tool names auto-approved for this role.
         """
         self.name = name
         self.description = description
@@ -32,6 +34,7 @@ class Role:
         self.required_tools = required_tools if required_tools is not None else []
         self.execution_environment = execution_environment
         self.model = model
+        self.auto_approve_tools = auto_approve_tools if auto_approve_tools is not None else []
 
     @staticmethod
     def load_from_dict(data: dict) -> "Role":
@@ -51,13 +54,15 @@ class Role:
         required_tools = data.get("required_tools", [])
         execution_environment = data.get("execution_environment", "REPL")
         model = data.get("model", ".*")
+        auto_approve_tools = data.get("auto_approve_tools", [])
         return Role(
             name=name,
             description=description,
             system_prompt=system_prompt,
             required_tools=required_tools,
             execution_environment=execution_environment,
-            model=model
+            model=model,
+            auto_approve_tools=auto_approve_tools
         )
 
     @staticmethod
@@ -120,6 +125,7 @@ class Role:
         required_tools = config.get("required_tools", [])
         execution_environment = config.get("execution_environment", "REPL")
         model = config.get("model", ".*")
+        auto_approve_tools = config.get("auto_approve_tools", [])
 
         return Role(
             name=name,
@@ -127,5 +133,6 @@ class Role:
             system_prompt=system_prompt,
             required_tools=required_tools,
             execution_environment=execution_environment,
-            model=model
+            model=model,
+            auto_approve_tools=auto_approve_tools
         )

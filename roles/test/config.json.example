@@ -1,4 +1,5 @@
 {
     "required_tools": ["example_tool_1", "example_tool_2"],
-    "model": "example-model"
+    "model": "example-model",
+    "auto_approve_tools": ["example_tool_1"]
 }

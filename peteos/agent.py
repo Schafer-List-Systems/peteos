@@ -145,17 +145,25 @@ class Agent:
     ) -> tuple:
         """Hook callback fired before each tool execution.
 
-        Publishes notification to all subscribed channels.
+        Publishes notification to all subscribed channels. Auto-approves
+        tools listed in the session's auto_approve_tools.
 
         Returns:
-            Tuple (allow: str, message: str | None) - Returns "pending" to
-            signal that user approval is required before execution.
+            Tuple (allow: bool | None, message: str | None) - Returns
+            (True, None) for auto-approved tools, ("pending", None) otherwise.
         """
         msg = Message(
             role="tool",
             content=[ContentPart(part_type="tool_call", tool_call=tool_call)],
         )
         self._publish_notification(session_uuid, msg)
+
+        session = self.get_session(session_uuid)
+        if session is not None:
+            tool_name = tool_call.get("name", "")
+            if tool_name in session.auto_approve_tools:
+                return (True, None)
+
         return ("pending", None)
 
     def _on_after_tool_execution(
