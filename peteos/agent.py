@@ -204,12 +204,8 @@ class Agent:
             if history:
                 last_msg = history[-1]
                 if last_msg.role == "assistant":
-                    final_msg = Message(
-                        role=last_msg.role,
-                        content=last_msg.content,
-                        metadata={**last_msg.metadata, "finish": True}
-                    )
-                    self._publish_notification(session_uuid, final_msg)
+                    last_msg.metadata["finish"] = True
+                    self._publish_notification(session_uuid, last_msg)
 
     def _publish_notification(
         self,
