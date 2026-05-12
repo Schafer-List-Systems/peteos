@@ -296,9 +296,9 @@ class TestREPLRunWithToolCalls:
         # Should have: user, assistant (with tool_calls), tool (result), assistant (final answer)
         assert len(chat_history.messages) == 4
         # Message 0 is user
-        assert chat_history.messages[0].role == "user"
+        assert chat_history.messages[0].get_role() == "user"
         # Message 1 is assistant response with tool_calls in content array
-        assert chat_history.messages[1].role == "assistant"
+        assert chat_history.messages[1].get_role() == "assistant"
         # Tool calls are in content array with type="tool_use"
         tool_calls = [
             item for item in chat_history.messages[1].content
@@ -307,11 +307,11 @@ class TestREPLRunWithToolCalls:
         assert len(tool_calls) == 1
         assert tool_calls[0].data["tool_calls"][0]["name"] == "get_weather"
         # Message 2 is tool result
-        assert chat_history.messages[2].role == "tool_result"
+        assert chat_history.messages[2].get_role() == "tool_result"
         assert chat_history.messages[2].content[0].type == "tool_result"
         assert chat_history.messages[2].content[0].data["name"] == "get_weather"
         # Message 3 is final answer
-        assert chat_history.messages[3].role == "assistant"
+        assert chat_history.messages[3].get_role() == "assistant"
         assert chat_history.messages[3].content[0].text == final_answer
 
     @pytest.mark.asyncio
@@ -369,7 +369,7 @@ class TestREPLRunWithToolCalls:
         # user, assistant (tool), tool (result), assistant (answer)
         assert len(chat_history.messages) == 4
         # Verify assistant response has tool_calls in content array
-        assert chat_history.messages[1].role == "assistant"
+        assert chat_history.messages[1].get_role() == "assistant"
         tool_calls = [
             item for item in chat_history.messages[1].content
             if isinstance(item, ContentPart) and item.type == "tool_calls"

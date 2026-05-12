@@ -141,7 +141,7 @@ class TestAgentHooksMessageFormat:
 
         assert len(notifications_received) == 1
         notification = notifications_received[0].message
-        assert notification.role == "tool_result"
+        assert notification.get_role() == "tool_result"
         assert len(notification.content) > 0
         assert "Sunny and 25C" in notification.content[0].data.get("content", "")
         assert notification.metadata.get("tool_status") == "ok"

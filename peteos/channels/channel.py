@@ -101,11 +101,11 @@ class Channel(ActiveClass, ABC):
                     session_uuid = None
                 if message is None:
                     break
-                if message.role == "reasoning" and not self._show_reasoning:
+                if message.get_role() == "reasoning" and not self._show_reasoning:
                     continue
-                elif message.role == "tool" and not self._show_tool_calls:
+                elif message.get_role() == "tool" and not self._show_tool_calls:
                     continue
-                elif message.role == "tool_result" and not self._show_tool_results:
+                elif message.get_role() == "tool_result" and not self._show_tool_results:
                     continue
                 self.send(message, session_uuid=session_uuid)
         finally:

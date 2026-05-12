@@ -189,7 +189,7 @@ class Agent:
     ) -> None:
         """Hook callback fired when the loop continues after tool calls."""
         for msg in delta_messages:
-            if msg.role == "assistant" and msg.text:
+            if msg.get_role() == "assistant" and msg.text:
                 self._publish_notification(session_uuid, msg)
 
     def _on_before_loop_exit(
@@ -203,7 +203,7 @@ class Agent:
             history = session.chat_history.messages
             if history:
                 last_msg = history[-1]
-                if last_msg.role == "assistant":
+                if last_msg.get_role() == "assistant":
                     last_msg.metadata["finish"] = True
                     self._publish_notification(session_uuid, last_msg)
 

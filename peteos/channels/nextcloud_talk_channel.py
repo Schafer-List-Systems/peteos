@@ -133,7 +133,7 @@ class NextcloudTalkChannel(Channel):
 
         payloads = []
         for part in message.content:
-            if not self._should_send_part(part, message.role):
+            if not self._should_send_part(part, message.get_role()):
                 continue
             payload = self._format_for_nextcloud(part, message)
             # Extract tool_call_ids from tool_call/tool_calls content parts

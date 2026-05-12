@@ -155,7 +155,7 @@ class OpenAIChatBot(GenericChatBot):
         tools = []
 
         for msg in chat_history.messages:
-            role = msg.role
+            role = msg.get_role()
 
             if role == "tool":
                 # Extract tool definitions and translate parameters to OpenAI format

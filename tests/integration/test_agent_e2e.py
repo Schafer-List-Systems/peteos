@@ -112,11 +112,11 @@ class TestAgentE2E(AioHTTPTestCase):
             assert len(history) >= 2, f"Expected 2 messages, got {len(history)}"
 
             # Verify user message using new format
-            assert history[0].role == "user"
+            assert history[0].get_role() == "user"
             assert history[0].content[0].text == question
 
             # Verify assistant response using new format
-            assert history[1].role == "assistant"
+            assert history[1].get_role() == "assistant"
             assert "2 + 2" in history[1].content[0].text
 
         finally:
@@ -163,7 +163,7 @@ class TestAgentE2E(AioHTTPTestCase):
             assert len(history) >= 4, f"Expected 4 messages, got {len(history)}"
 
             # Verify alternating user/assistant using role attribute
-            roles = [m.role for m in history[:4]]
+            roles = [m.get_role() for m in history[:4]]
             assert "user" in roles and "assistant" in roles
 
         finally:
@@ -245,7 +245,7 @@ class TestAgentE2E(AioHTTPTestCase):
             # Find the tool list message - tools are stored as role="tool" messages
             tool_list_msg = None
             for msg in history:
-                if msg.role == "tool":
+                if msg.get_role() == "tool":
                     for part in msg.content:
                         if part.type == "tool" and "get_weather" in part.data.get("name", ""):
                             tool_list_msg = msg

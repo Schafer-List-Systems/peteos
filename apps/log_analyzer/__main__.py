@@ -78,7 +78,7 @@ def _register_exclude_tools(agent: Agent, stdout_channel: ReadStdoutChannel) -> 
     """Register exclude pattern management tools on the agent's tool manager."""
     tm = agent._tool_manager
 
-    def add_exclude_pattertn(pattern: str) -> str:
+    def add_exclude_pattern(pattern: str) -> str:
         """Add a regex exclude pattern to filter out log messages.
 
         Lines matching an exclude pattern are dropped. Use this to suppress unwanted noise.

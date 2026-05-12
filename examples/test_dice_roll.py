@@ -51,7 +51,7 @@ async def test():
     # Show messages
     print('=== Messages ===')
     for i, msg in enumerate(session.chat_history.messages):
-        print(f'{i}. Role: {msg.role}')
+        print(f'{i}. Role: {msg.get_role()}')
         print(f'   Text: {msg.text[:200]}...')
         print()
 

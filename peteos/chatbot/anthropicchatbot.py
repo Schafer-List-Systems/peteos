@@ -189,7 +189,7 @@ class AnthropicChatBot(GenericChatBot):
         tools = []
 
         for msg in chat_history.messages:
-            role = msg.role
+            role = msg.get_role()
 
             if role == "system":
                 # Collect system parts

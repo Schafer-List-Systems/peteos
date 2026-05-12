@@ -171,7 +171,7 @@ class GenericChatBot(ChatBot):
         request_translations = self._config.request_translations or {}
 
         for msg in chat_history.messages:
-            role = msg.role
+            role = msg.get_role()
 
             if role == "system":
                 # Extract system content parts

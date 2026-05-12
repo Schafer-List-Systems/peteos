@@ -92,7 +92,7 @@ class TestAgentChatFlow(AioHTTPTestCase):
             await asyncio.sleep(1)
 
             assert len(session.chat_history.messages) >= 1, "Message should be in history"
-            assert session.chat_history.messages[0].role == "user"
+            assert session.chat_history.messages[0].get_role() == "user"
         finally:
             await session.stop()
 
@@ -157,7 +157,7 @@ class TestAgentChatFlow(AioHTTPTestCase):
             history = session.chat_history.messages
             assert len(history) >= 2, "Should have user message and response"
 
-            assistant_messages = [m for m in history if m.role == 'assistant']
+            assistant_messages = [m for m in history if m.get_role() == 'assistant']
             assert len(assistant_messages) > 0, "Should have at least one assistant response"
         finally:
             await session.stop()

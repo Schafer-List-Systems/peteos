@@ -127,7 +127,7 @@ async def test_queue_message_adds_to_queue():
     await asyncio.sleep(0.1)
 
     assert len(chat_history.messages) == 1
-    assert chat_history.messages[0].role == "user"
+    assert chat_history.messages[0].get_role() == "user"
     assert env.run_count == 1
 
     await session.stop()

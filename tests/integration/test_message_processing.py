@@ -92,7 +92,7 @@ class TestMessageQueueProcessing(AioHTTPTestCase):
             await asyncio.sleep(1)
 
             assert len(session.chat_history.messages) >= 1
-            assert session.chat_history.messages[0].role == "user"
+            assert session.chat_history.messages[0].get_role() == "user"
             assert session.chat_history.messages[0].content[0].text == "Hello"
         finally:
             await session.stop()
@@ -125,7 +125,7 @@ class TestMessageQueueProcessing(AioHTTPTestCase):
                 await session.queue_message(msg)
                 await asyncio.sleep(0.5)  # Wait for each response
 
-            user_messages = [m for m in session.chat_history.messages if m.role == "user"]
+            user_messages = [m for m in session.chat_history.messages if m.get_role() == "user"]
             assert len(user_messages) == 3
             for i in range(3):
                 assert user_messages[i].content[0].text == f"Message {i}"
@@ -163,7 +163,7 @@ class TestMessageQueueProcessing(AioHTTPTestCase):
                 if len(session.chat_history.messages) > 0:
                     break
 
-            user_messages = [m for m in session.chat_history.messages if m.role == "user"]
+            user_messages = [m for m in session.chat_history.messages if m.get_role() == "user"]
             assert len(user_messages) > 0
             assert user_messages[0].content[0].text == "Test"
         finally:

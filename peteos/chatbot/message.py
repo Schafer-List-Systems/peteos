@@ -53,11 +53,23 @@ class Message:
             creation_timestamp: Timestamp of message creation (defaults to now).
             message_id: UUID identifying this message (auto-generated if not provided).
         """
-        self.role = role
+        self._role = role
         self.content = content
         self.metadata = metadata or {}
         self.creation_timestamp = creation_timestamp or datetime.now()
         self.id = message_id or str(uuid.uuid4())
+
+    def get_role(self) -> str:
+        """Return the message role.
+
+        Can be overridden in derived classes to return a computed or modified role.
+        """
+        return self._role
+
+    def set_role(self, role: str) -> None:
+        """Set the message role."""
+        self._role = role
+
 
     @property
     def text(self) -> str:
@@ -78,7 +90,7 @@ class Message:
             Dictionary with role, content (as list of dicts), and metadata.
         """
         return {
-            "role": self.role,
+            "role": self.get_role(),
             "content": [part.to_dict() for part in self.content],
             **self.metadata
         }
@@ -114,13 +126,16 @@ class Message:
         else:
             content = [ContentPart.from_dict(part) for part in content_data]
 
-        return cls(
+        msg = cls(
             role=role,
             content=content,
             creation_timestamp=creation_timestamp,
             message_id=message_id,
-            **{k: v for k, v in data.items() if k not in ("role", "content")}
+            **{k: v for k, v in data.items() if k not in ("role", "content", "metadata")}
         )
+        if "metadata" in data and data["metadata"]:
+            msg.metadata.update(data["metadata"])
+        return msg
 
     def __repr__(self) -> str:
-        return f"Message(role={self.role!r}, content_count={len(self.content)}, id={self.id!r})"
+        return f"Message(role={self.get_role()!r}, content_count={len(self.content)}, id={self.id!r})"

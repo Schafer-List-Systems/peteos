@@ -119,7 +119,7 @@ def test_session_load_from_json():
     assert session.uuid.hex == "810fb120e4e54e32971888bbcaf7641a"
     assert session.role.name == "test"
     assert len(session.chat_history.messages) == 2
-    assert session.chat_history.messages[0].role == "user"
+    assert session.chat_history.messages[0].get_role() == "user"
     assert session.chat_history.messages[1].text == "Hi!"
 
 
@@ -262,7 +262,7 @@ def test_session_load_from_file():
         assert session.uuid.hex == "810fb120e4e54e32971888bbcaf7641a"
         assert session.role.name == "test"
         assert len(session.chat_history.messages) == 1
-        assert session.chat_history.messages[0].role == "user"
+        assert session.chat_history.messages[0].get_role() == "user"
 
 
 def test_session_load_from_file_without_timestamps():

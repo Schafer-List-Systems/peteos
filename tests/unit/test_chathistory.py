@@ -61,7 +61,7 @@ class TestToolMessage:
                 parameters={"type": "object", "properties": {"city": {"type": "string"}}}
             )]
         )
-        assert msg.role == "tool"
+        assert msg.get_role() == "tool"
         assert msg.content[0].type == "tool"
         assert msg.content[0].data["name"] == "get_weather"
 
@@ -91,7 +91,7 @@ class TestMessage:
             role="user",
             content=[ContentPart(part_type="text", text="Hello")]
         )
-        assert msg.role == "user"
+        assert msg.get_role() == "user"
         assert len(msg.content) == 1
         assert msg.text == "Hello"
 
@@ -137,7 +137,7 @@ class TestMessage:
             "metadata": {"source": "test"}
         }
         msg = Message.from_dict(d)
-        assert msg.role == "user"
+        assert msg.get_role() == "user"
         assert len(msg.content) == 1
         assert msg.content[0].type == "text"
 
@@ -255,7 +255,7 @@ class TestChatHistory:
             Message(role="user", content=[ContentPart(part_type="text", text="1")]),
             Message(role="assistant", content=[ContentPart(part_type="text", text="2")])
         ])
-        roles = [msg.role for msg in history]
+        roles = [msg.get_role() for msg in history]
         assert roles == ["user", "assistant"]
 
     def test_system_message_position(self):
@@ -264,8 +264,8 @@ class TestChatHistory:
             Message(role="system", content=[ContentPart(part_type="text", text="You are helpful")]),
             Message(role="user", content=[ContentPart(part_type="text", text="Hello")])
         ])
-        assert history.messages[0].role == "system"
-        assert history.messages[1].role == "user"
+        assert history.messages[0].get_role() == "system"
+        assert history.messages[1].get_role() == "user"
 
     def test_history_with_tools_as_messages(self):
         """Test ChatHistory with tool messages."""
@@ -283,7 +283,7 @@ class TestChatHistory:
             generation_config={"max_tokens": 4096, "tool_choice": {"type": "auto"}}
         )
         assert len(history.messages) == 2
-        assert history.messages[0].role == "tool"
+        assert history.messages[0].get_role() == "tool"
         assert history.generation_config["max_tokens"] == 4096
         assert history.generation_config["tool_choice"] == {"type": "auto"}
 
