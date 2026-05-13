@@ -150,9 +150,7 @@ async def main():
     role_name = nextcloud_config.get("default_role", "router")
     role = role_manager.get_role(role_name)
     if role is not None:
-        role.add_system_prompt_hook(
-            lambda: "Status: you are currently silent.\n" if (_state.nextcloud_channel and _state.nextcloud_channel.is_session_silent(_state.router_session_uuid)) else "Status: you are currently verbose.\n"
-        )
+        role.add_system_prompt_hook(_state.status_text)
 
     # Create the stdout channel first so its methods are available for tool registration
     # (tools access the channel via _state.channel, not the tool manager)

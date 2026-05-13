@@ -1,5 +1,6 @@
 """Log Analyzer tools — stub implementations for wake/sleep state and filtering."""
 
+import logging
 import uuid
 from typing import TYPE_CHECKING
 
@@ -7,6 +8,8 @@ from peteos.toolmanager import ToolManager
 
 if TYPE_CHECKING:
     from peteos.channels import NextcloudTalkChannel, ReadStdoutChannel
+
+_logger = logging.getLogger(__name__)
 
 
 class LogState:
@@ -17,9 +20,30 @@ class LogState:
     nextcloud_channel: "NextcloudTalkChannel | None" = None
     router_session_uuid: "uuid.UUID | None" = None
     last_context_tokens: int = 0
+    _previous_silent: bool | None = None
 
     def set_nextcloud_channel(self, ch: "NextcloudTalkChannel") -> None:
         self.nextcloud_channel = ch
+
+    def status_text(self) -> str:
+        """Return the status line for the system prompt.
+
+        Logs a debug message when the silence status changes
+        from the previous call.
+        """
+        is_silent = (
+            self.nextcloud_channel
+            and self.router_session_uuid
+            and self.nextcloud_channel.is_session_silent(self.router_session_uuid)
+        )
+        if self._previous_silent is not None and is_silent != self._previous_silent:
+            _logger.debug(
+                "Silence status changed: %s -> %s",
+                "silent" if self._previous_silent else "verbose",
+                "silent" if is_silent else "verbose",
+            )
+        self._previous_silent = is_silent
+        return f"Status: you are currently {'silent' if is_silent else 'verbose'}.\n"
 
 
 _state = LogState()
