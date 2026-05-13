@@ -16,6 +16,7 @@ class LogState:
     channel: "ReadStdoutChannel | None" = None
     nextcloud_channel: "NextcloudTalkChannel | None" = None
     router_session_uuid: "uuid.UUID | None" = None
+    last_context_tokens: int = 0
 
     def set_nextcloud_channel(self, ch: "NextcloudTalkChannel") -> None:
         self.nextcloud_channel = ch

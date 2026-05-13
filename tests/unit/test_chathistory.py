@@ -491,14 +491,15 @@ class TestCountTokens:
 class TestRollingWindowDiscard:
     """Tests for ChatHistory.rolling_window_discard()."""
 
-    def test_no_unanchored_returns_zero(self):
+    def test_no_unanchored_returns_zero_tokens(self):
         """No unanchored messages means no discards."""
         history = ChatHistory()
         history.append_message(
             Message(role="system", content=[ContentPart(part_type="text", text="prompt")]),
             anchor="front"
         )
-        assert history.rolling_window_discard(100) == 0
+        removed, _ = history.rolling_window_discard(100)
+        assert removed == 0
 
     def test_under_limit_removes_nothing(self):
         """If total is under limit, nothing is discarded."""
@@ -509,7 +510,8 @@ class TestRollingWindowDiscard:
         )
         history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="hi")]))
         # Large limit should not discard anything
-        assert history.rolling_window_discard(100000) == 0
+        removed, _ = history.rolling_window_discard(100000)
+        assert removed == 0
 
     def test_discards_from_unanchored_only(self):
         """Anchored messages are protected; only unanchored are removed."""
@@ -520,13 +522,15 @@ class TestRollingWindowDiscard:
         )
         for i in range(5):
             history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="x" * 1000)]))
-        removed = history.rolling_window_discard(500)
+        removed, total = history.rolling_window_discard(500)
         # At least one removed
         assert removed > 0
         # Front anchor still has its message
         assert len(history._anchor_groups["front"]) == 1
         # Unanchored has fewer messages
         assert len(history._unanchored) < 5
+        # Total tokens should be under limit
+        assert total <= 500
 
     def test_discards_oldest_first(self):
         """Oldest unanchored messages are removed first."""
@@ -534,8 +538,9 @@ class TestRollingWindowDiscard:
         history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="AAAA")]))
         history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="BBBB")]))
         history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="CCCC")]))
-        history.rolling_window_discard(35)
+        removed, _ = history.rolling_window_discard(35)
         # "A" should be gone; "B" and "C" remain
+        assert removed == 1
         assert len(history._unanchored) == 2
         assert history._unanchored[0].text == "BBBB"
         assert history._unanchored[1].text == "CCCC"
@@ -548,7 +553,7 @@ class TestRollingWindowDiscard:
             anchor="front"
         )
         history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="hi")]))
-        removed = history.rolling_window_discard(1)
+        removed, _ = history.rolling_window_discard(1)
         assert removed == 1
         assert len(history._unanchored) == 0
 

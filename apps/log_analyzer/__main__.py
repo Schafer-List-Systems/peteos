@@ -178,7 +178,8 @@ async def main():
         max_tokens = 60000
 
     async def _on_before_loop_continue(_delta_messages, _max=max_tokens):
-        session.execution_environment.chat_history.rolling_window_discard(_max)
+        _, total_tokens = session.execution_environment.chat_history.rolling_window_discard(_max)
+        _state.last_context_tokens = total_tokens
         return None
 
     session.execution_environment.register_hook("before_loop_continue", _on_before_loop_continue)
@@ -192,6 +193,13 @@ async def main():
     # Wire the nextcloud channel to the tools for per-session silent mode
     _state.set_nextcloud_channel(nextcloud)
     _state.router_session_uuid = session.uuid
+
+    # Add context size awareness to the system prompt (reads cached count from _state)
+    from peteos.chatbot.message import SystemPromptMessage
+    for msg in session.chat_history.messages:
+        if isinstance(msg, SystemPromptMessage):
+            msg.add_hook(lambda: f"Context: {_state.last_context_tokens} tokens in use")
+            break
 
     # Register rooms with the session (app owns session lifecycle)
     auto_join_rooms = nextcloud_config.get("auto_join_rooms", [])
