@@ -27,6 +27,7 @@ Usage:
 
 import argparse
 import asyncio
+import json
 import sys
 import uuid
 
@@ -167,6 +168,21 @@ async def main():
 
     # Create a shared session that both channels attach to
     session = await agent.create_session(role_name)
+
+    # Register rolling window discard hook
+    try:
+        with open("apps/log_analyzer/config/app_config.json", "r") as f:
+            app_cfg = json.load(f)
+        max_tokens = app_cfg.get("rolling_window_max_tokens", 60000)
+    except FileNotFoundError:
+        max_tokens = 60000
+
+    async def _on_before_loop_continue(_delta_messages, _max=max_tokens):
+        session.execution_environment.chat_history.rolling_window_discard(_max)
+        return None
+
+    session.execution_environment.register_hook("before_loop_continue", _on_before_loop_continue)
+
     print(f"Created session: {session.uuid}")
     print()
 

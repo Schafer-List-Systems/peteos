@@ -121,6 +121,42 @@ class ChatHistory:
     def __repr__(self) -> str:
         return f"ChatHistory(messages={len(self.messages)}, config={self.generation_config})"
 
+    def rolling_window_discard(self, max_tokens: int) -> int:
+        """Discard oldest unanchored messages until total token count is within limit.
+
+        Counts tokens for all messages (anchored + unanchored) but only
+        discards from the unanchored list. Anchored messages are protected.
+
+        Computes all message token counts once, then subtracts oldest from
+        the running total until it fits within max_tokens.
+
+        Args:
+            max_tokens: Maximum allowed token count for the entire history.
+
+        Returns:
+            Number of messages removed.
+        """
+        if not self._unanchored:
+            return 0
+
+        # Compute token counts once for all messages
+        token_counts = {id(msg): msg.count_tokens() for msg in self.messages}
+        total_tokens = sum(token_counts.values())
+
+        if total_tokens <= max_tokens:
+            return 0
+
+        # Subtract oldest unanchored messages from running total
+        removed = 0
+        for msg in self._unanchored:
+            if total_tokens <= max_tokens:
+                break
+            total_tokens -= token_counts[id(msg)]
+            self._unanchored.pop(0)
+            removed += 1
+
+        return removed
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary for persistence.
 

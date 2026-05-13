@@ -62,19 +62,19 @@ class TestReadStdoutChannelExcludeMethods:
     def test_add_exclude_pattern(self):
         channel = ReadStdoutChannel("test", self.agent, {"command": ["echo", "hi"], "pattern": ".*"})
         result = channel.add_exclude_pattern(r"DEBUG.*")
-        assert result is True
+        assert result == 0
         assert channel._exclude_patterns == [r"DEBUG.*"]
 
-    def test_add_duplicate_exclude_pattern_returns_false(self):
+    def test_add_duplicate_exclude_pattern_returns_none(self):
         channel = ReadStdoutChannel("test", self.agent, {"command": ["echo", "hi"], "pattern": ".*", "exclude": ["DEBUG"]})
         result = channel.add_exclude_pattern("DEBUG")
-        assert result is False
+        assert result is None
         assert channel._exclude_patterns == ["DEBUG"]
 
     def test_add_multiple_exclude_patterns(self):
         channel = ReadStdoutChannel("test", self.agent, {"command": ["echo", "hi"], "pattern": ".*"})
-        assert channel.add_exclude_pattern(r"DEBUG") is True
-        assert channel.add_exclude_pattern(r"TRACE") is True
+        assert channel.add_exclude_pattern(r"DEBUG") == 0
+        assert channel.add_exclude_pattern(r"TRACE") == 1
         assert channel._exclude_patterns == [r"DEBUG", r"TRACE"]
 
     def test_remove_exclude_pattern_by_index(self):

@@ -425,7 +425,6 @@ class TestMessageAnchors:
         ]
         history = ChatHistory.from_dict(data)
         assert len(history.messages) == 2
-        assert len(history.messages) == 2
         assert history.messages[0].text == "Hello"
         assert history.messages[1].text == "Hi"
         assert len(history._unanchored) == 2
@@ -454,4 +453,102 @@ class TestMessageAnchors:
         list1 = history.messages
         list2 = history.messages
         assert list1 is not list2
+
+
+class TestCountTokens:
+    """Tests for Message.count_tokens()."""
+
+    def test_count_tokens_basic(self):
+        """Token counting works for a simple message."""
+        msg = Message(role="user", content=[ContentPart(part_type="text", text="Hello")])
+        count = msg.count_tokens()
+        assert count > 0
+
+    def test_count_tokens_cached(self):
+        """Result is cached in metadata on first call."""
+        msg = Message(role="user", content=[ContentPart(part_type="text", text="Test")])
+        count1 = msg.count_tokens()
+        count2 = msg.count_tokens()
+        assert count1 == count2
+        assert msg.metadata["token_count"] == count1
+
+    def test_count_tokens_system_prompt_always_recomputes(self):
+        """SystemPromptMessage.count_tokens never caches."""
+        from peteos.chatbot.message import SystemPromptMessage
+        msg = SystemPromptMessage()
+        msg.add_hook(lambda: "Hello world")
+        count1 = msg.count_tokens()
+        count2 = msg.count_tokens()
+        assert count1 == count2
+
+    def test_count_tokens_uses_serialize_content(self):
+        """count_tokens produces deterministic output from serialize_content."""
+        msg = Message(role="test", content=[ContentPart(part_type="text", text="data")])
+        # Two calls should give same result
+        assert msg.count_tokens() == msg.count_tokens()
+
+
+class TestRollingWindowDiscard:
+    """Tests for ChatHistory.rolling_window_discard()."""
+
+    def test_no_unanchored_returns_zero(self):
+        """No unanchored messages means no discards."""
+        history = ChatHistory()
+        history.append_message(
+            Message(role="system", content=[ContentPart(part_type="text", text="prompt")]),
+            anchor="front"
+        )
+        assert history.rolling_window_discard(100) == 0
+
+    def test_under_limit_removes_nothing(self):
+        """If total is under limit, nothing is discarded."""
+        history = ChatHistory()
+        history.append_message(
+            Message(role="system", content=[ContentPart(part_type="text", text="prompt")]),
+            anchor="front"
+        )
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="hi")]))
+        # Large limit should not discard anything
+        assert history.rolling_window_discard(100000) == 0
+
+    def test_discards_from_unanchored_only(self):
+        """Anchored messages are protected; only unanchored are removed."""
+        history = ChatHistory()
+        history.append_message(
+            Message(role="system", content=[ContentPart(part_type="text", text="prompt")]),
+            anchor="front"
+        )
+        for i in range(5):
+            history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="x" * 1000)]))
+        removed = history.rolling_window_discard(500)
+        # At least one removed
+        assert removed > 0
+        # Front anchor still has its message
+        assert len(history._anchor_groups["front"]) == 1
+        # Unanchored has fewer messages
+        assert len(history._unanchored) < 5
+
+    def test_discards_oldest_first(self):
+        """Oldest unanchored messages are removed first."""
+        history = ChatHistory()
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="AAAA")]))
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="BBBB")]))
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="CCCC")]))
+        history.rolling_window_discard(35)
+        # "A" should be gone; "B" and "C" remain
+        assert len(history._unanchored) == 2
+        assert history._unanchored[0].text == "BBBB"
+        assert history._unanchored[1].text == "CCCC"
+
+    def test_all_unanchored_removed_if_needed(self):
+        """If anchored messages alone exceed limit, all unanchored are discarded."""
+        history = ChatHistory()
+        history.append_message(
+            Message(role="system", content=[ContentPart(part_type="text", text="huge prompt text here")]),
+            anchor="front"
+        )
+        history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="hi")]))
+        removed = history.rolling_window_discard(1)
+        assert removed == 1
+        assert len(history._unanchored) == 0
 

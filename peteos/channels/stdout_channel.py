@@ -57,8 +57,8 @@ class ReadStdoutChannel(Channel):
         """No-op - this channel is read-only."""
         pass
 
-    def add_exclude_pattern(self, pattern: str) -> bool:
-        """Add a regex pattern to the exclusive (exclusion) list.
+    def add_exclude_pattern(self, pattern: str) -> int | None:
+        """Add a regex pattern to the exclusion list.
 
         Lines matching any exclude pattern will be dropped before
         the inclusive pattern check.
@@ -67,12 +67,12 @@ class ReadStdoutChannel(Channel):
             pattern: Regular expression pattern to exclude.
 
         Returns:
-            True if the pattern was added, False if it was already present.
+            Index where the pattern was added, or None if it already existed.
         """
         if pattern in self._exclude_patterns:
-            return False
+            return None
         self._exclude_patterns.append(pattern)
-        return True
+        return len(self._exclude_patterns) - 1
 
     def remove_exclude_pattern(self, index: int) -> bool:
         """Remove an exclude pattern by its index in the list.

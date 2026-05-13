@@ -1,6 +1,7 @@
 """Message class for chat history."""
 
 import uuid
+import json
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -106,6 +107,42 @@ class Message:
         """
         return [part.to_dict() for part in self.content]
 
+    def _compute_token_count(self, encoding: str = "cl100k_base") -> int:
+        """Compute token count from serialized content without caching.
+
+        Subclasses that override serialize_content() automatically get the
+        correct count here.
+
+        Args:
+            encoding: Tiktoken encoding to use.
+
+        Returns:
+            Token count as an integer.
+        """
+        from peteos.utils.tiktoken import count_tiktoken
+
+        serialized = self.serialize_content()
+        full_text = f"{self.get_role()}: {json.dumps(serialized, ensure_ascii=False) if serialized else ''}"
+        return count_tiktoken(full_text, encoding)
+
+    def count_tokens(self, encoding: str = "cl100k_base") -> int:
+        """Count tokens in this message's content.
+
+        Uses cached token count from metadata if available, otherwise
+        computes and caches the result.
+
+        Args:
+            encoding: Tiktoken encoding to use.
+
+        Returns:
+            Token count as an integer.
+        """
+        if "token_count" in self.metadata:
+            return self.metadata["token_count"]
+        token_count = self._compute_token_count(encoding)
+        self.metadata["token_count"] = token_count
+        return token_count
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation.
 
@@ -210,3 +247,7 @@ class SystemPromptMessage(Message):
     def serialize_content(self) -> List[Dict[str, Any]]:
         prompt = "\n".join(hook() for hook in self._hooks)
         return [{"type": "text", "text": prompt}]
+
+    def count_tokens(self, encoding: str = "cl100k_base") -> int:
+        """Count tokens, always recomputing since content is dynamic."""
+        return self._compute_token_count(encoding)

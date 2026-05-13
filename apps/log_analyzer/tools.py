@@ -23,8 +23,10 @@ def wake_up() -> str:
     """Wake up the router and set the system to awake state.
 
     Returns:
-        A status message indicating the router is now awake.
+        A status message: 'Awake' on transition, 'Already awake' if no-op.
     """
+    if _state.awake:
+        return "Already awake"
     _state.awake = True
     return "Awake"
 
@@ -33,47 +35,58 @@ def sleep() -> str:
     """Put the router to sleep and set the system to sleep state.
 
     Returns:
-        A status message indicating the router is now asleep.
+        A status message: 'Asleep' on transition, 'Already asleep' if no-op.
     """
+    if not _state.awake:
+        return "Already asleep"
     _state.awake = False
     return "Asleep"
 
 
 def add_exclude_pattern(pattern: str) -> str:
-    """Add a regex exclude pattern to filter out log messages.
+    """Add a regex exclude pattern to filter out future log messages.
 
     Lines matching an exclude pattern are dropped. Use this to suppress
-    unwanted noise.
+    unwanted noise from spamming you in the future.
 
     Args:
         pattern: Regular expression pattern to exclude.
 
     Returns:
-        Status message.
+        Status message with the index, or that the pattern already exists.
     """
     ch = _state.channel
     if ch is None:
         return "Error: channel not configured."
-    if ch.add_exclude_pattern(pattern):
-        return f"Added exclude pattern: {pattern!r}"
+    index = ch.add_exclude_pattern(pattern)
+    if index is not None:
+        return f"Added exclude pattern at index {index}: {pattern!r}"
     return f"Pattern {pattern!r} already exists"
 
 
-def remove_exclude_pattern(index: int) -> str:
-    """Remove an exclude pattern by its index in the list.
+def remove_exclude_pattern(index: int, pattern: str) -> str:
+    """Remove an exclude pattern from the exclusion list.
 
     Args:
         index: Position of the pattern to remove.
+        pattern: The pattern to remove (sanity check).
 
     Returns:
-        Status message.
+        Status message: 'Removed', 'Invalid index', or mismatch warning.
     """
     ch = _state.channel
     if ch is None:
         return "Error: channel not configured."
-    if ch.remove_exclude_pattern(index):
-        return f"Removed pattern at index {index}"
-    return f"Invalid index: {index}"
+    try:
+        patterns = ch.list_exclude_patterns()
+        if index < 0 or index >= len(patterns):
+            return f"Invalid index: {index}"
+        if patterns[index] != pattern:
+            return f"Mismatch: pattern at index {index} is {patterns[index]!r}, not {pattern!r}. Check list_exclude_patterns() and try again."
+    except Exception:
+        return f"Invalid index: {index}"
+    ch.remove_exclude_pattern(index)
+    return f"Removed pattern at index {index}: {pattern!r}"
 
 
 def list_exclude_patterns() -> str:
