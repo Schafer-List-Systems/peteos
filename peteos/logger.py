@@ -4,6 +4,29 @@ import logging
 import sys
 from typing import Optional
 
+_DEFAULT_TRUNC_LEN = 256
+
+
+def truncate(value: str, max_len: int = _DEFAULT_TRUNC_LEN) -> str:
+    """Truncate a string to *max_len* characters, appending ``[...]``.
+
+    Returns the original string unchanged if it is already shorter than
+    *max_len*.  The ``[...]`` sentinel signals to the reader that the
+    value was cut off.
+
+    Args:
+        value: The string to truncate.
+        max_len: Maximum length before truncation kicks in.
+
+    Returns:
+        The (possibly truncated) string.
+    """
+    if value is None:
+        return value
+    if len(value) <= max_len:
+        return value
+    return value[:max_len] + "[...]"
+
 
 def setup_logging(
     level: str = "INFO",

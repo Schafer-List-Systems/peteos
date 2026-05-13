@@ -159,7 +159,8 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
 
             # --- Phase 4: Append assistant message ---
-            _logger.debug("ChatBot response: role=%s, text=%r, content_keys=%s, reasoning=%r", response.data.get("role"), response.data.get("text")[:80] if response.data.get("text") else None, [item.get("type") for item in response.data.get("content", [])] if isinstance(response.data.get("content"), list) else "N/A", response.data.get("reasoning")[:80] if response.data.get("reasoning") else None)
+            from peteos.logger import truncate
+            _logger.debug("ChatBot response: role=%s, text=%r, content_keys=%s, reasoning=%r", response.data.get("role"), truncate(response.data.get("text")), [item.get("type") for item in response.data.get("content", [])] if isinstance(response.data.get("content"), list) else "N/A", truncate(response.data.get("reasoning")))
             self.chat_history.append_message(
                 Message(role=response.data["role"], content=content_parts)
             )

@@ -8,7 +8,7 @@ from typing import Optional
 
 from peteos.chatbot import Message, ContentPart
 from peteos.channels.channel import Channel
-from peteos.logger import get_logger
+from peteos.logger import get_logger, truncate
 
 _logger = get_logger(__name__)
 
