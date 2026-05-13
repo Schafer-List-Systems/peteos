@@ -188,7 +188,7 @@ async def main():
     # Create the Nextcloud Talk channel (user-facing, sends and receives)
     nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=nextcloud_config)
 
-    # Wire the nextcloud channel to the tools for per-session silent mode
+    # Wire the nextcloud channel to the tools for per-session muted mode
     _state.set_nextcloud_channel(nextcloud)
     _state.router_session_uuid = session.uuid
 

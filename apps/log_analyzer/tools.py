@@ -20,7 +20,7 @@ class LogState:
     nextcloud_channel: "NextcloudTalkChannel | None" = None
     router_session_uuid: "uuid.UUID | None" = None
     last_context_tokens: int = 0
-    _previous_silent: bool | None = None
+    _previous_muted: bool | None = None
 
     def set_nextcloud_channel(self, ch: "NextcloudTalkChannel") -> None:
         self.nextcloud_channel = ch
@@ -28,66 +28,66 @@ class LogState:
     def status_text(self) -> str:
         """Return the status line for the system prompt.
 
-        Logs a debug message when the silence status changes
+        Logs a debug message when the muted status changes
         from the previous call.
         """
-        is_silent = (
+        is_muted = (
             self.nextcloud_channel
             and self.router_session_uuid
-            and self.nextcloud_channel.is_session_silent(self.router_session_uuid)
+            and self.nextcloud_channel.is_session_muted(self.router_session_uuid)
         )
-        if self._previous_silent is not None and is_silent != self._previous_silent:
-            emoji = "🌙" if is_silent else "☀️"
+        if self._previous_muted is not None and is_muted != self._previous_muted:
+            emoji = "🌙" if is_muted else "☀️"
             _logger.debug(
-                "Silence status changed: %s -> %s %s",
-                "silent" if self._previous_silent else "verbose",
-                "silent" if is_silent else "verbose",
+                "Muted status changed: %s -> %s %s",
+                "muted" if self._previous_muted else "unmuted",
+                "muted" if is_muted else "unmuted",
                 emoji,
             )
-        self._previous_silent = is_silent
-        return f"Status: you are currently {'silent' if is_silent else 'verbose'}.\n"
+        self._previous_muted = is_muted
+        return f"Status: you are currently {'muted' if is_muted else 'unmuted'}.\n"
 
 
 _state = LogState()
 
 
-def silence_router() -> str:
-    """Stop the router from sending messages to Nextcloud.
+def mute_router() -> str:
+    """Mute the router so it does not send messages to the user. Muted messages are not visible to the user.
 
     Use this when there are no serious issues to report. The router
     remains operational — it just does not send any output to the
-    Nextcloud conversation. Call verbose_router when something needs
+    Nextcloud conversation. Call unmute_router when something needs
     to be reported.
     """
     ch = _state.nextcloud_channel
     session = _state.router_session_uuid
-    was_silent = ch.is_session_silent(session) if ch and session else False
-    if ch is not None and session is not None and not was_silent:
-        ch.set_session_silent(session, True)
-        _logger.debug("silence_router(): changed verbose -> silent")
-        return "Silenced"
-    _logger.debug("silence_router(): already silent")
-    return "Already silenced"
+    was_muted = ch.is_session_muted(session) if ch and session else False
+    if ch is not None and session is not None and not was_muted:
+        ch.set_session_muted(session, True)
+        _logger.debug("mute_router(): changed unmuted -> muted")
+        return "Muted"
+    _logger.debug("mute_router(): already muted")
+    return "Already muted"
 
 
-def verbose_router() -> str:
-    """Allow the router to send messages to Nextcloud again.
+def unmute_router() -> str:
+    """Unmute the router so it can send messages to the user.
 
     Use this when you have detected something serious that needs to be
     reported to the user (security issues, hardware failures, etc.).
     Once active, all your messages will be delivered via Nextcloud.
-    Call silence_router when the conversation is done and no more
+    Call mute_router when the conversation is done and no more
     output is needed.
     """
     ch = _state.nextcloud_channel
     session = _state.router_session_uuid
-    was_silent = ch.is_session_silent(session) if ch and session else False
-    if ch is not None and session is not None and was_silent:
-        ch.set_session_silent(session, False)
-        _logger.debug("verbose_router(): changed silent -> verbose")
-        return "Verbose"
-    _logger.debug("verbose_router(): already verbose")
-    return "Already verbose"
+    was_muted = ch.is_session_muted(session) if ch and session else False
+    if ch is not None and session is not None and was_muted:
+        ch.set_session_muted(session, False)
+        _logger.debug("unmute_router(): changed muted -> unmuted")
+        return "Unmuted"
+    _logger.debug("unmute_router(): already unmuted")
+    return "Already unmuted"
 
 
 def add_exclude_pattern(pattern: str) -> str:
@@ -153,13 +153,13 @@ def list_exclude_patterns() -> str:
 
 
 def register_state_tools(tool_manager: ToolManager) -> None:
-    """Register router silence/verbose tools on the given tool manager.
+    """Register router mute/unmute tools on the given tool manager.
 
     Args:
         tool_manager: The ToolManager to register the tools on.
     """
-    tool_manager.register_tool(func=silence_router)
-    tool_manager.register_tool(func=verbose_router)
+    tool_manager.register_tool(func=mute_router)
+    tool_manager.register_tool(func=unmute_router)
 
 
 def register_filter_tools(
