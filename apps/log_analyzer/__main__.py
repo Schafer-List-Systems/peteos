@@ -151,7 +151,7 @@ async def main():
     role = role_manager.get_role(role_name)
     if role is not None:
         role.add_system_prompt_hook(
-            lambda: "Status: you are awake" if _state.awake else "Status: you are asleep"
+            lambda: "Status: you are awake" if not nextcloud.is_silent() else "Status: you are asleep"
         )
 
     # Create the stdout channel first so its methods are available for tool registration
@@ -188,6 +188,9 @@ async def main():
 
     # Create the Nextcloud Talk channel (user-facing, sends and receives)
     nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=nextcloud_config)
+
+    # Wire the nextcloud channel to the tools for silent mode
+    _state.set_nextcloud_channel(nextcloud)
 
     # Register rooms with the session (app owns session lifecycle)
     auto_join_rooms = nextcloud_config.get("auto_join_rooms", [])

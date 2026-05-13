@@ -47,6 +47,7 @@ class NextcloudTalkChannel(Channel):
         self._tool_call_ids: dict[str, list[str]] = {}  # referenceId -> [tool_call_ids]
         self._sent_message_sessions: dict[str, uuid.UUID] = {}  # referenceId -> session_uuid
         self._sent_messages: list[dict] = []  # Local history: [{referenceId, message, tool_call_ids, session_uuid}]
+        self._silent: bool = False
 
     @staticmethod
     def load_config(config_file: str = "examples/config/nextcloud_config.json") -> dict:
@@ -110,6 +111,17 @@ class NextcloudTalkChannel(Channel):
         if self._runner:
             await self._runner.cleanup()
 
+    def set_silent(self, silent: bool) -> None:
+        """Enable or disable silent mode.
+
+        When silent, send() will not transmit messages to Nextcloud.
+        """
+        self._silent = silent
+
+    def is_silent(self) -> bool:
+        """Return whether the channel is currently in silent mode."""
+        return self._silent
+
     def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the originating Nextcloud conversation.
 
@@ -118,10 +130,14 @@ class NextcloudTalkChannel(Channel):
         For final-answer messages (text-only assistant), sends a checkmark
         reaction after the message text is delivered.
 
+        When silent mode is active, no messages are sent.
+
         Args:
             message: The Message to send.
             session_uuid: The session UUID to route to.
         """
+        if self._silent:
+            return
         if not session_uuid:
             return
         conversation_token = self._session_conversations.get(session_uuid)

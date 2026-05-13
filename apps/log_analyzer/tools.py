@@ -5,42 +5,47 @@ from typing import TYPE_CHECKING
 from peteos.toolmanager import ToolManager
 
 if TYPE_CHECKING:
-    from peteos.channels import ReadStdoutChannel
+    from peteos.channels import NextcloudTalkChannel, ReadStdoutChannel
 
 
 class LogState:
     """Shared mutable state for log analyzer tools."""
 
-    awake: bool = False
     _filters: list[str] = []
     channel: "ReadStdoutChannel | None" = None
+    nextcloud_channel: "NextcloudTalkChannel | None" = None
+
+    def set_nextcloud_channel(self, ch):
+        self.nextcloud_channel = ch
 
 
 _state = LogState()
 
 
 def wake_up() -> str:
-    """Wake up the router and set the system to awake state.
+    """Wake up the router by disabling the silent flag on the nextcloud channel.
 
     Returns:
         A status message: 'Awake' on transition, 'Already awake' if no-op.
     """
-    if _state.awake:
-        return "Already awake"
-    _state.awake = True
-    return "Awake"
+    ch = _state.nextcloud_channel
+    if ch is not None and ch.is_silent():
+        ch.set_silent(False)
+        return "Awake"
+    return "Already awake"
 
 
 def sleep() -> str:
-    """Put the router to sleep and set the system to sleep state.
+    """Put the router to sleep by enabling the silent flag on the nextcloud channel.
 
     Returns:
         A status message: 'Asleep' on transition, 'Already asleep' if no-op.
     """
-    if not _state.awake:
-        return "Already asleep"
-    _state.awake = False
-    return "Asleep"
+    ch = _state.nextcloud_channel
+    if ch is not None and not ch.is_silent():
+        ch.set_silent(True)
+        return "Asleep"
+    return "Already asleep"
 
 
 def add_exclude_pattern(pattern: str) -> str:
