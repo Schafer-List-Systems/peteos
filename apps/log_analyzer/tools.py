@@ -1,5 +1,6 @@
 """Log Analyzer tools — stub implementations for wake/sleep state and filtering."""
 
+import uuid
 from typing import TYPE_CHECKING
 
 from peteos.toolmanager import ToolManager
@@ -14,38 +15,46 @@ class LogState:
     _filters: list[str] = []
     channel: "ReadStdoutChannel | None" = None
     nextcloud_channel: "NextcloudTalkChannel | None" = None
+    router_session_uuid: "uuid.UUID | None" = None
 
-    def set_nextcloud_channel(self, ch):
+    def set_nextcloud_channel(self, ch: "NextcloudTalkChannel") -> None:
         self.nextcloud_channel = ch
 
 
 _state = LogState()
 
 
-def wake_up() -> str:
-    """Wake up the router by disabling the silent flag on the nextcloud channel.
+def silence_router() -> str:
+    """Stop the router from sending messages to Nextcloud.
 
-    Returns:
-        A status message: 'Awake' on transition, 'Already awake' if no-op.
+    Use this when there are no serious issues to report. The router
+    remains operational — it just does not send any output to the
+    Nextcloud conversation. Call verbose_router when something needs
+    to be reported.
     """
     ch = _state.nextcloud_channel
-    if ch is not None and ch.is_silent():
-        ch.set_silent(False)
-        return "Awake"
-    return "Already awake"
+    session = _state.router_session_uuid
+    if ch is not None and session is not None and not ch.is_session_silent(session):
+        ch.set_session_silent(session, True)
+        return "Silenced"
+    return "Already silenced"
 
 
-def sleep() -> str:
-    """Put the router to sleep by enabling the silent flag on the nextcloud channel.
+def verbose_router() -> str:
+    """Allow the router to send messages to Nextcloud again.
 
-    Returns:
-        A status message: 'Asleep' on transition, 'Already asleep' if no-op.
+    Use this when you have detected something serious that needs to be
+    reported to the user (security issues, hardware failures, etc.).
+    Once active, all your messages will be delivered via Nextcloud.
+    Call silence_router when the conversation is done and no more
+    output is needed.
     """
     ch = _state.nextcloud_channel
-    if ch is not None and not ch.is_silent():
-        ch.set_silent(True)
-        return "Asleep"
-    return "Already asleep"
+    session = _state.router_session_uuid
+    if ch is not None and session is not None and ch.is_session_silent(session):
+        ch.set_session_silent(session, False)
+        return "Verbose"
+    return "Already verbose"
 
 
 def add_exclude_pattern(pattern: str) -> str:
@@ -111,13 +120,13 @@ def list_exclude_patterns() -> str:
 
 
 def register_state_tools(tool_manager: ToolManager) -> None:
-    """Register wake/sleep state tools on the given tool manager.
+    """Register router silence/verbose tools on the given tool manager.
 
     Args:
         tool_manager: The ToolManager to register the tools on.
     """
-    tool_manager.register_tool(func=wake_up)
-    tool_manager.register_tool(func=sleep)
+    tool_manager.register_tool(func=silence_router)
+    tool_manager.register_tool(func=verbose_router)
 
 
 def register_filter_tools(

@@ -47,7 +47,7 @@ class NextcloudTalkChannel(Channel):
         self._tool_call_ids: dict[str, list[str]] = {}  # referenceId -> [tool_call_ids]
         self._sent_message_sessions: dict[str, uuid.UUID] = {}  # referenceId -> session_uuid
         self._sent_messages: list[dict] = []  # Local history: [{referenceId, message, tool_call_ids, session_uuid}]
-        self._silent: bool = False
+        self._session_silent: dict[uuid.UUID, bool] = {}
 
     @staticmethod
     def load_config(config_file: str = "examples/config/nextcloud_config.json") -> dict:
@@ -111,16 +111,18 @@ class NextcloudTalkChannel(Channel):
         if self._runner:
             await self._runner.cleanup()
 
-    def set_silent(self, silent: bool) -> None:
-        """Enable or disable silent mode.
+    def set_session_silent(self, session_uuid: uuid.UUID, silent: bool) -> None:
+        """Set silent mode for a specific session.
 
-        When silent, send() will not transmit messages to Nextcloud.
+        Args:
+            session_uuid: The session to set silent mode for.
+            silent: True to silence, False to make verbose.
         """
-        self._silent = silent
+        self._session_silent[session_uuid] = silent
 
-    def is_silent(self) -> bool:
-        """Return whether the channel is currently in silent mode."""
-        return self._silent
+    def is_session_silent(self, session_uuid: uuid.UUID) -> bool:
+        """Return whether a specific session is silenced."""
+        return self._session_silent.get(session_uuid, False)
 
     def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the originating Nextcloud conversation.
@@ -130,13 +132,13 @@ class NextcloudTalkChannel(Channel):
         For final-answer messages (text-only assistant), sends a checkmark
         reaction after the message text is delivered.
 
-        When silent mode is active, no messages are sent.
+        When a session is silenced, no messages are sent for that session.
 
         Args:
             message: The Message to send.
             session_uuid: The session UUID to route to.
         """
-        if self._silent:
+        if session_uuid and self._session_silent.get(session_uuid, False):
             return
         if not session_uuid:
             return
