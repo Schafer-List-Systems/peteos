@@ -130,7 +130,9 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
                 return ("done", None)
 
-            assert "role" in response.data, f"ChatBot response missing 'role' field: {response.data.keys()}"
+            if "role" not in response.data:
+                _logger.error("ChatBot response missing 'role' field. Response data: %s", response.data)
+                return ("done", None)
 
             # --- Phase 3: Build content parts ---
             content_parts: list[ContentPart] = []
@@ -157,6 +159,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
 
             # --- Phase 4: Append assistant message ---
+            _logger.debug("ChatBot response: role=%s, text=%r, content_keys=%s, reasoning=%r", response.data.get("role"), response.data.get("text")[:80] if response.data.get("text") else None, [item.get("type") for item in response.data.get("content", [])] if isinstance(response.data.get("content"), list) else "N/A", response.data.get("reasoning")[:80] if response.data.get("reasoning") else None)
             self.chat_history.append_message(
                 Message(role=response.data["role"], content=content_parts)
             )

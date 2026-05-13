@@ -81,9 +81,14 @@ class Session(ActiveClass):
     def _initialize_chat_history(role: Role, tool_manager: ToolManager) -> ChatHistory:
         chat_history = ChatHistory()
 
+        # System prompt anchored at front (persists, appears first to LLM)
         if role.system_prompt or role.system_prompt_hooks:
-            chat_history.append_message(SystemPromptMessage(hooks=role._all_hooks))
+            chat_history.append_message(
+                SystemPromptMessage(hooks=role._all_hooks),
+                anchor="front"
+            )
 
+        # Tool definitions anchored at back (persist, appear after conversation)
         tool_list = tool_manager.get_tool_list()
         for tool in tool_list:
             chat_history.append_message(Message(
@@ -94,7 +99,7 @@ class Session(ActiveClass):
                     description=tool.description,
                     parameters=tool.parameters
                 )]
-            ))
+            ), anchor="front")
 
         return chat_history
 

@@ -255,6 +255,8 @@ class AnthropicChatBot(GenericChatBot):
                         "content": content
                     })
 
+        _logger.debug("Anthropic request: system_parts=%d, tools=%d, messages=%d", len(system_parts), len(tools), len(messages))
+
         body["messages"] = messages
 
         if system_parts:

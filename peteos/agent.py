@@ -201,11 +201,15 @@ class Agent:
         session = self.get_session(session_uuid)
         if session:
             history = session.chat_history.messages
-            if history:
-                last_msg = history[-1]
-                if last_msg.get_role() == "assistant":
-                    last_msg.metadata["finish"] = True
-                    self._publish_notification(session_uuid, last_msg)
+            # Search for last assistant message (anchored messages sit at edges)
+            last_assistant = None
+            for msg in reversed(history):
+                if msg.get_role() == "assistant":
+                    last_assistant = msg
+                    break
+            if last_assistant is not None:
+                last_assistant.metadata["finish"] = True
+                self._publish_notification(session_uuid, last_assistant)
 
     def _publish_notification(
         self,
