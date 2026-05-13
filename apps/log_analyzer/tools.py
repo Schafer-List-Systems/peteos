@@ -61,9 +61,12 @@ def silence_router() -> str:
     """
     ch = _state.nextcloud_channel
     session = _state.router_session_uuid
-    if ch is not None and session is not None and not ch.is_session_silent(session):
+    was_silent = ch.is_session_silent(session) if ch and session else False
+    if ch is not None and session is not None and not was_silent:
         ch.set_session_silent(session, True)
+        _logger.debug("silence_router(): changed verbose -> silent")
         return "Silenced"
+    _logger.debug("silence_router(): already silent")
     return "Already silenced"
 
 
@@ -78,9 +81,12 @@ def verbose_router() -> str:
     """
     ch = _state.nextcloud_channel
     session = _state.router_session_uuid
-    if ch is not None and session is not None and ch.is_session_silent(session):
+    was_silent = ch.is_session_silent(session) if ch and session else False
+    if ch is not None and session is not None and was_silent:
         ch.set_session_silent(session, False)
+        _logger.debug("verbose_router(): changed silent -> verbose")
         return "Verbose"
+    _logger.debug("verbose_router(): already verbose")
     return "Already verbose"
 
 

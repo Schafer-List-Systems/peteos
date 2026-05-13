@@ -190,6 +190,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
                 tool_name = tool_call.get("name")
                 args = json.loads(tool_call.get("arguments", "{}"))
+                _logger.debug("Executing tool: %s(%s)", tool_name, args)
                 tool = self.tool_manager.get_tool(tool_name)
 
                 if not tool:
@@ -278,6 +279,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         tool_call_id = tool_call.get("id", "")
         tool_name = tool_call.get("name")
         args = json.loads(tool_call.get("arguments", "{}"))
+        _logger.debug("Executing pending tool: %s(%s)", tool_name, args)
         tool = self.tool_manager.get_tool(tool_name)
 
         if not tool:
