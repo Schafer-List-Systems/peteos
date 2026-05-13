@@ -37,10 +37,12 @@ class LogState:
             and self.nextcloud_channel.is_session_silent(self.router_session_uuid)
         )
         if self._previous_silent is not None and is_silent != self._previous_silent:
+            emoji = "🌙" if is_silent else "☀️"
             _logger.debug(
-                "Silence status changed: %s -> %s",
+                "Silence status changed: %s -> %s %s",
                 "silent" if self._previous_silent else "verbose",
                 "silent" if is_silent else "verbose",
+                emoji,
             )
         self._previous_silent = is_silent
         return f"Status: you are currently {'silent' if is_silent else 'verbose'}.\n"
