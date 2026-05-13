@@ -48,6 +48,7 @@ class ReadStdoutChannel(Channel):
         """
         super().__init__(name, agent)
         self._config = config
+        self._prefix = config.get("prefix", "")
         self._process: asyncio.subprocess.Process | None = None
         self._exclude_patterns: list[str] = []
         # Populate exclude patterns from config
@@ -119,6 +120,7 @@ class ReadStdoutChannel(Channel):
             config = json.load(f)
         config.setdefault("pattern", ".*")
         config.setdefault("exclude", [])
+        config.setdefault("prefix", "")
         required = ["command"]
         missing = [k for k in required if k not in config]
         if missing:
@@ -173,18 +175,18 @@ class ReadStdoutChannel(Channel):
                     continue
                 for ex_pattern in self._exclude_patterns:
                     if re.search(ex_pattern, line):
-                        _logger.debug("Excluded by pattern '%s': %s", ex_pattern, line[:80])
-                        continue
-
-                message = Message(
-                    role="user",
-                    content=[ContentPart(part_type="text", text=line)],
-                )
-                try:
-                    await self._agent.get_session(self._session_uuid).queue_message(message)
-                    _logger.debug("Queued to session %s: %s", self._session_uuid, line[:80])
-                except (KeyError, AttributeError):
-                    _logger.warning("Session %s no longer exists, dropping message", self._session_uuid)
+                        _logger.debug("Excluded by pattern '%s': %s", ex_pattern, truncate(line))
+                        break
+                else:
+                    message = Message(
+                        role="user",
+                        content=[ContentPart(part_type="text", text=f"{self._prefix}{line}")],
+                    )
+                    try:
+                        await self._agent.get_session(self._session_uuid).queue_message(message)
+                        _logger.debug("Queued to session %s: %s", self._session_uuid, truncate(line))
+                    except (KeyError, AttributeError):
+                        _logger.warning("Session %s no longer exists, dropping message", self._session_uuid)
         except asyncio.CancelledError:
             pass
         except Exception as e:

@@ -198,7 +198,7 @@ async def main():
     from peteos.chatbot.message import SystemPromptMessage
     for msg in session.chat_history.messages:
         if isinstance(msg, SystemPromptMessage):
-            msg.add_hook(lambda: f"Context: {_state.last_context_tokens} tokens in use")
+            msg.add_hook(lambda: f"Context: {_state.last_context_tokens} of {max_tokens} tokens used.\n")
             break
 
     # Register rooms with the session (app owns session lifecycle)
