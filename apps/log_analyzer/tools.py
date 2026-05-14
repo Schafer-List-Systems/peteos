@@ -80,7 +80,7 @@ def unmute_router() -> str:
     return "Unmuted"
 
 
-def add_exclude_pattern(pattern: str, reason: str = "") -> str:
+def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_line: str = "") -> str:
     """Add a regex pattern to exclude future log messages from further observation.
 
     Lines matching an exclude pattern are dropped. Use this to suppress
@@ -92,12 +92,16 @@ def add_exclude_pattern(pattern: str, reason: str = "") -> str:
     security issue or hardware failure in any future log message. If
     you cannot confidently explain why it is safe, do not add it.
 
+    Always provide the actual log line that triggered this pattern so the
+    tool can verify the pattern matches the line that caused you to add it.
+
     Args:
         pattern: Regular expression pattern to exclude.
         reason: Your explanation of why this pattern is safe and will not hide future security or hardware issues.
+        triggering_log_line: The actual log entry that caused you to want this pattern. The tool will verify the pattern matches this line.
 
     Returns:
-        Status message with the index, or that the pattern already exists.
+        Status message with the index, or an error if the pattern is invalid or does not match the triggering log line.
     """
     ch = _state.channel
     if ch is None:
@@ -111,6 +115,11 @@ def add_exclude_pattern(pattern: str, reason: str = "") -> str:
     stripped = pattern.rstrip("$")
     if ".*" in stripped and not stripped.endswith(".*"):
         return "Pattern not included. Avoid matching arbitrary strings (.*) except at the end of the pattern."
+
+    # Verify pattern matches the actual triggering log line
+    import re
+    if triggering_log_line and not re.search(pattern, triggering_log_line):
+        return f"Pattern does not match the triggering log line. Test with: re.search({pattern!r}, {triggering_log_line!r})"
 
     index = ch.add_exclude_pattern(pattern)
     if index is not None:
