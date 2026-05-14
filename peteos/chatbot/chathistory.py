@@ -121,35 +121,45 @@ class ChatHistory:
     def __repr__(self) -> str:
         return f"ChatHistory(messages={len(self.messages)}, config={self.generation_config})"
 
-    def rolling_window_discard(self, max_tokens: int) -> tuple[int, int]:
-        """Discard oldest unanchored messages until total token count is within limit.
+    def rolling_window_discard(
+        self, trigger_threshold: int, target_tokens: int | None = None
+    ) -> tuple[int, int]:
+        """Discard oldest unanchored messages when token count exceeds threshold.
+
+        Only discards when total tokens exceed trigger_threshold. When that
+        happens, discards down to target_tokens (default: half of threshold).
+        This keeps the context size within a stable range and avoids frequent
+        KV cache rebuilds.
 
         Counts tokens for all messages (anchored + unanchored) but only
         discards from the unanchored list. Anchored messages are protected.
 
         Computes all message token counts once, then subtracts oldest from
-        the running total until it fits within max_tokens.
+        the running total until it fits within the target level.
 
         Args:
-            max_tokens: Maximum allowed token count for the entire history.
+            trigger_threshold: Token count above which discarding is triggered.
+            target_tokens: Token count to discard down to. Defaults to
+                trigger_threshold // 2.
 
         Returns:
             A tuple of (messages_removed, remaining_total_tokens).
         """
+        if target_tokens is None:
+            target_tokens = trigger_threshold // 2
+
         # Compute token counts once for all messages
         token_counts = {id(msg): msg.count_tokens() for msg in self.messages}
         total_tokens = sum(token_counts.values())
 
-        if total_tokens <= max_tokens:
+        if total_tokens <= trigger_threshold:
             return (0, total_tokens)
 
         # Subtract oldest unanchored messages from running total
         removed = 0
-        for msg in self._unanchored:
-            if total_tokens <= max_tokens:
-                break
+        while total_tokens > target_tokens and self._unanchored:
+            msg = self._unanchored.pop(0)
             total_tokens -= token_counts[id(msg)]
-            self._unanchored.pop(0)
             removed += 1
 
         return (removed, total_tokens)

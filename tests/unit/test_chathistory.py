@@ -539,11 +539,11 @@ class TestRollingWindowDiscard:
         history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="BBBB")]))
         history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="CCCC")]))
         removed, _ = history.rolling_window_discard(35)
-        # "A" should be gone; "B" and "C" remain
-        assert removed == 1
-        assert len(history._unanchored) == 2
-        assert history._unanchored[0].text == "BBBB"
-        assert history._unanchored[1].text == "CCCC"
+        # Two-tier: trigger=35, target=17 (35//2). Must discard enough to reach 17.
+        assert removed >= 1
+        # "AAAA" and "BBBB" should be gone; "CCCC" remains
+        assert len(history._unanchored) == 1
+        assert history._unanchored[0].text == "CCCC"
 
     def test_all_unanchored_removed_if_needed(self):
         """If anchored messages alone exceed limit, all unanchored are discarded."""

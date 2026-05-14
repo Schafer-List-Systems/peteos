@@ -176,7 +176,7 @@ async def main():
         max_tokens = 60000
 
     async def _on_before_loop_continue(_delta_messages, _max=max_tokens):
-        _, total_tokens = session.execution_environment.chat_history.rolling_window_discard(_max)
+        _, total_tokens = session.execution_environment.chat_history.rolling_window_discard(_max, _max // 2)
         _state.last_context_tokens = total_tokens
         return None
 

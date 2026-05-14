@@ -111,10 +111,12 @@ def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_line: str
     if not pattern.startswith("^"):
         return "Pattern not included. Pattern must start with '^' to match the beginning of the line."
 
-    # .* must only appear at the very end (before optional $)
+    # .* may only appear once, at the very end of the pattern (before optional $)
     stripped = pattern.rstrip("$")
-    if ".*" in stripped and not stripped.endswith(".*"):
-        return "Pattern not included. Avoid matching arbitrary strings (.*) except at the end of the pattern."
+    if ".*" in stripped:
+        prefix, rest = stripped.split(".*", 1)
+        if rest or ".*" in prefix:
+            return "Pattern not included. Avoid matching arbitrary strings (.*) except at the end of the pattern."
 
     # Verify pattern matches the actual triggering log line
     import re
