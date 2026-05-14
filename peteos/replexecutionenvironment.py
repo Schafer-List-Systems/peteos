@@ -165,6 +165,12 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 Message(role=response.data["role"], content=content_parts)
             )
 
+            # Fire hook so channels/app can snapshot per-message metadata
+            if self._session:
+                await self._call_hooks(
+                    "on_message_published", self.chat_history.messages[-1], self._session.uuid
+                )
+
             # Store tool calls for re-entry after tool_pending
             self._assistant_tool_calls = tool_calls_list if tool_calls_list else None
             self._last_response_text = response.data.get("text")

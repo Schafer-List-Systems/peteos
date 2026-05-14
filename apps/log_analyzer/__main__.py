@@ -192,6 +192,12 @@ async def main():
     _state.set_nextcloud_channel(nextcloud)
     _state.router_session_uuid = session.uuid
 
+    # Snapshot muted state as message metadata on every published message
+    async def _on_message_published(message, session_uuid):
+        message.metadata["_sent_muted"] = _state.is_muted
+
+    session.execution_environment.register_hook("on_message_published", _on_message_published)
+
     # Add context size awareness to the system prompt (reads cached count from _state)
     from peteos.chatbot.message import SystemPromptMessage
     for msg in session.chat_history.messages:

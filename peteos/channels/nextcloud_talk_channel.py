@@ -47,7 +47,6 @@ class NextcloudTalkChannel(Channel):
         self._tool_call_ids: dict[str, list[str]] = {}  # referenceId -> [tool_call_ids]
         self._sent_message_sessions: dict[str, uuid.UUID] = {}  # referenceId -> session_uuid
         self._sent_messages: list[dict] = []  # Local history: [{referenceId, message, tool_call_ids, session_uuid}]
-        self._session_muted: dict[uuid.UUID, bool] = {}
 
     @staticmethod
     def load_config(config_file: str = "examples/config/nextcloud_config.json") -> dict:
@@ -111,19 +110,6 @@ class NextcloudTalkChannel(Channel):
         if self._runner:
             await self._runner.cleanup()
 
-    def set_session_muted(self, session_uuid: uuid.UUID, muted: bool) -> None:
-        """Set muted mode for a specific session.
-
-        Args:
-            session_uuid: The session to set muted mode for.
-            muted: True to mute, False to unmute.
-        """
-        self._session_muted[session_uuid] = muted
-
-    def is_session_muted(self, session_uuid: uuid.UUID) -> bool:
-        """Return whether a specific session is muted."""
-        return self._session_muted.get(session_uuid, False)
-
     def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the originating Nextcloud conversation.
 
@@ -132,14 +118,14 @@ class NextcloudTalkChannel(Channel):
         For final-answer messages (text-only assistant), sends a checkmark
         reaction after the message text is delivered.
 
-        When a session is silenced, no messages are sent for that session.
+        Muted messages (``_sent_muted`` in metadata) are sent as empty
+        messages so reactions still fire, but no actual text payload goes
+        to the user.
 
         Args:
             message: The Message to send.
             session_uuid: The session UUID to route to.
         """
-        if session_uuid and self._session_muted.get(session_uuid, False):
-            return
         if not session_uuid:
             return
         conversation_token = self._session_conversations.get(session_uuid)
@@ -150,7 +136,11 @@ class NextcloudTalkChannel(Channel):
             return
 
         payloads = []
+        is_muted = message.metadata.get("_sent_muted", False)
         for part in message.content:
+            if is_muted:
+                # Skip all content parts for muted messages — reactions fire via _send_all_sequentially
+                continue
             if not self._should_send_part(part, message.get_role()):
                 continue
             payload = self._format_for_nextcloud(part, message.get_id())

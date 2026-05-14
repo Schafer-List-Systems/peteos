@@ -39,7 +39,8 @@ class ExecutionEnvironment(ABC):
             "before_tool_execution": [],
             "after_tool_execution": [],
             "before_loop_continue": [],
-            "before_loop_exit": []
+            "before_loop_exit": [],
+            "on_message_published": [],
         }
 
     @property

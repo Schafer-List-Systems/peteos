@@ -20,6 +20,7 @@ class LogState:
     nextcloud_channel: "NextcloudTalkChannel | None" = None
     router_session_uuid: "uuid.UUID | None" = None
     last_context_tokens: int = 0
+    is_muted: bool = False
     _previous_muted: bool | None = None
 
     def set_nextcloud_channel(self, ch: "NextcloudTalkChannel") -> None:
@@ -31,21 +32,16 @@ class LogState:
         Logs a debug message when the muted status changes
         from the previous call.
         """
-        is_muted = (
-            self.nextcloud_channel
-            and self.router_session_uuid
-            and self.nextcloud_channel.is_session_muted(self.router_session_uuid)
-        )
-        if self._previous_muted is not None and is_muted != self._previous_muted:
-            emoji = "🌙" if is_muted else "☀️"
+        if self._previous_muted is not None and self.is_muted != self._previous_muted:
+            emoji = "🌙" if self.is_muted else "☀️"
             _logger.debug(
                 "Muted status changed: %s -> %s %s",
                 "muted" if self._previous_muted else "unmuted",
-                "muted" if is_muted else "unmuted",
+                "muted" if self.is_muted else "unmuted",
                 emoji,
             )
-        self._previous_muted = is_muted
-        return f"Status: you are currently {'muted' if is_muted else 'unmuted'}.\n"
+        self._previous_muted = self.is_muted
+        return f"Status: you are currently {'muted' if self.is_muted else 'unmuted'}.\n"
 
 
 _state = LogState()
@@ -59,15 +55,12 @@ def mute_router() -> str:
     Nextcloud conversation. Call unmute_router when something needs
     to be reported.
     """
-    ch = _state.nextcloud_channel
-    session = _state.router_session_uuid
-    was_muted = ch.is_session_muted(session) if ch and session else False
-    if ch is not None and session is not None and not was_muted:
-        ch.set_session_muted(session, True)
-        _logger.debug("mute_router(): changed unmuted -> muted")
-        return "Muted"
-    _logger.debug("mute_router(): already muted")
-    return "Already muted"
+    if _state.is_muted:
+        _logger.debug("mute_router(): already muted")
+        return "Already muted"
+    _state.is_muted = True
+    _logger.debug("mute_router(): changed unmuted -> muted")
+    return "Muted"
 
 
 def unmute_router() -> str:
@@ -79,22 +72,19 @@ def unmute_router() -> str:
     Call mute_router when the conversation is done and no more
     output is needed.
     """
-    ch = _state.nextcloud_channel
-    session = _state.router_session_uuid
-    was_muted = ch.is_session_muted(session) if ch and session else False
-    if ch is not None and session is not None and was_muted:
-        ch.set_session_muted(session, False)
-        _logger.debug("unmute_router(): changed muted -> unmuted")
-        return "Unmuted"
-    _logger.debug("unmute_router(): already unmuted")
-    return "Already unmuted"
+    if not _state.is_muted:
+        _logger.debug("unmute_router(): already unmuted")
+        return "Already unmuted"
+    _state.is_muted = False
+    _logger.debug("unmute_router(): changed muted -> unmuted")
+    return "Unmuted"
 
 
 def add_exclude_pattern(pattern: str, reason: str = "") -> str:
-    """Add a regex exclude pattern to filter out future log messages.
+    """Add a regex pattern to exclude future log messages from further observation.
 
     Lines matching an exclude pattern are dropped. Use this to suppress
-    unwanted noise from spamming you in the future.
+    unwanted noise from spamming th log.
 
     Patterns must start with '^' and '.*' is only allowed at the very end.
 
@@ -104,8 +94,7 @@ def add_exclude_pattern(pattern: str, reason: str = "") -> str:
 
     Args:
         pattern: Regular expression pattern to exclude.
-        reason: Your explanation of why this pattern is safe to exclude
-            and will not hide future security or hardware issues.
+        reason: Your explanation of why this pattern is safe and will not hide future security or hardware issues.
 
     Returns:
         Status message with the index, or that the pattern already exists.
