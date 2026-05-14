@@ -90,14 +90,22 @@ def unmute_router() -> str:
     return "Already unmuted"
 
 
-def add_exclude_pattern(pattern: str) -> str:
+def add_exclude_pattern(pattern: str, reason: str = "") -> str:
     """Add a regex exclude pattern to filter out future log messages.
 
     Lines matching an exclude pattern are dropped. Use this to suppress
     unwanted noise from spamming you in the future.
 
+    Patterns must start with '^' and '.*' is only allowed at the very end.
+
+    Before adding a pattern, reason about whether it could ever hide a
+    security issue or hardware failure in any future log message. If
+    you cannot confidently explain why it is safe, do not add it.
+
     Args:
         pattern: Regular expression pattern to exclude.
+        reason: Your explanation of why this pattern is safe to exclude
+            and will not hide future security or hardware issues.
 
     Returns:
         Status message with the index, or that the pattern already exists.
@@ -105,6 +113,16 @@ def add_exclude_pattern(pattern: str) -> str:
     ch = _state.channel
     if ch is None:
         return "Error: channel not configured."
+
+    # Pattern must start with '^'
+    if not pattern.startswith("^"):
+        return "Pattern not included. Pattern must start with '^' to match the beginning of the line."
+
+    # .* must only appear at the very end (before optional $)
+    stripped = pattern.rstrip("$")
+    if ".*" in stripped and not stripped.endswith(".*"):
+        return "Pattern not included. Avoid matching arbitrary strings (.*) except at the end of the pattern."
+
     index = ch.add_exclude_pattern(pattern)
     if index is not None:
         return f"Added exclude pattern at index {index}: {pattern!r}"
