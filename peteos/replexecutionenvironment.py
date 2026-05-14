@@ -226,6 +226,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     result = tool.execute(**args)
                     self._append_tool_result(tool_name=tool_name, content=str(result), success=True)
                     await self._call_hooks("after_tool_execution", tool_call, str(result), True)
+                    _logger.debug("Tool %s returned: %s", tool_name, str(result))
                 except Exception as e:
                     self._append_tool_result(
                         tool_name=tool_name,
@@ -233,6 +234,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                         success=False,
                     )
                     await self._call_hooks("after_tool_execution", tool_call, str(e), False)
+                    _logger.debug("Tool %s failed: %s", tool_name, str(e))
 
                 self._executed_tool_ids.add(tool_call_id)
 
@@ -302,6 +304,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             result = tool.execute(**args)
             self._append_tool_result(tool_name=tool_name, content=str(result), success=True)
             await self._call_hooks("after_tool_execution", tool_call, str(result), True)
+            _logger.debug("Tool %s returned: %s", tool_name, str(result))
         except Exception as e:
             self._append_tool_result(
                 tool_name=tool_name,
@@ -309,6 +312,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 success=False,
             )
             await self._call_hooks("after_tool_execution", tool_call, str(e), False)
+            _logger.debug("Tool %s failed: %s", tool_name, str(e))
 
         self._executed_tool_ids.add(tool_call_id)
 

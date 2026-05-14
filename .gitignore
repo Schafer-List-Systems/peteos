@@ -54,5 +54,6 @@ http_client.md
 
 # internal TODO list
 TODO.md
+ISSUES.md
 *.json
 context-folding.md
