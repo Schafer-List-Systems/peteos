@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from peteos.channels.channel import Channel, NotificationEvent
 from peteos.chatbot import ChatBotManager, Message, ContentPart
-from peteos.logger import get_logger
+from peteos.logger import get_logger, truncate
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.session import Session
@@ -190,6 +190,7 @@ class Agent:
         """Hook callback fired when the loop continues after tool calls."""
         for msg in delta_messages:
             if msg.get_role() == "assistant" and msg.text:
+                _logger.debug("[agent] _on_before_loop_continue: publishing assistant msg %s text=%r", msg.get_id()[:8], truncate(msg.text)[:60])
                 self._publish_notification(session_uuid, msg)
 
     def _on_before_loop_exit(
@@ -198,6 +199,7 @@ class Agent:
         reason: str
     ) -> None:
         """Hook callback fired when the loop exits."""
+        _logger.debug("[agent] _on_before_loop_exit: reason=%s session=%s", reason, session_uuid)
         session = self.get_session(session_uuid)
         if session:
             history = session.chat_history.messages
@@ -209,6 +211,7 @@ class Agent:
                     break
             if last_assistant is not None:
                 last_assistant.metadata["finish"] = True
+                _logger.debug("[agent] _on_before_loop_exit: publishing assistant msg %s finish=%s muted=%s", last_assistant.get_id()[:8], last_assistant.metadata.get("finish"), last_assistant.metadata.get("_sent_muted"))
                 self._publish_notification(session_uuid, last_assistant)
 
     def _publish_notification(

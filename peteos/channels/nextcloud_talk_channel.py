@@ -127,16 +127,20 @@ class NextcloudTalkChannel(Channel):
             session_uuid: The session UUID to route to.
         """
         if not session_uuid:
+            logger.debug("[nextcloud] send(): NO session_uuid, dropping %s %s", message.get_role(), message.get_id()[:8])
             return
         conversation_token = self._session_conversations.get(session_uuid)
         if not conversation_token:
+            logger.debug("[nextcloud] send(): NO conversation_token for %s, dropping %s", session_uuid, message.get_id()[:8])
             return
 
         if not message.content:
+            logger.debug("[nextcloud] send(): NO content for %s, dropping %s", message.get_role(), message.get_id()[:8])
             return
 
         payloads = []
         is_muted = message.metadata.get("_sent_muted", False)
+        logger.debug("[nextcloud] send(): %s id=%s muted=%s parts=%d", message.get_role(), message.get_id()[:8], is_muted, len(message.content))
         for part in message.content:
             if is_muted:
                 # Skip all content parts for muted messages — reactions fire via _send_all_sequentially

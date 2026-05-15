@@ -53,6 +53,11 @@ class ReadStdoutChannel(Channel):
         self._exclude_patterns: list[str] = []
         # Populate exclude patterns from config
         self._exclude_patterns.extend(self._config.get("exclude", []))
+        # Load persisted patterns from file if configured
+        patterns_file = self._config.get("patterns_file")
+        if patterns_file:
+            self._exclude_patterns.extend(ReadStdoutChannel.load_patterns(patterns_file))
+        self._patterns_file = patterns_file  # Keep for save on stop
 
     def send(self, message, session_uuid: uuid.UUID | None = None) -> None:
         """No-op - this channel is read-only."""
@@ -98,6 +103,34 @@ class ReadStdoutChannel(Channel):
         """
         return list(self._exclude_patterns)
 
+    def save_patterns(self, path: str) -> None:
+        """Save current exclude patterns to a JSON file.
+
+        Args:
+            path: File path to save patterns to.
+        """
+        with open(path, "w") as f:
+            json.dump(self._exclude_patterns, f, indent=2)
+        _logger.info("Saved %d exclude patterns to %s", len(self._exclude_patterns), path)
+
+    @staticmethod
+    def load_patterns(path: str) -> list[str]:
+        """Load exclude patterns from a JSON file.
+
+        Args:
+            path: File path to load patterns from.
+
+        Returns:
+            List of loaded patterns, or empty list if file doesn't exist.
+        """
+        import os
+        if not os.path.exists(path):
+            return []
+        with open(path, "r") as f:
+            patterns = json.load(f)
+        _logger.info("Loaded %d exclude patterns from %s", len(patterns), path)
+        return patterns
+
 
     @staticmethod
     def load_config(config_file: str) -> dict:
@@ -120,6 +153,7 @@ class ReadStdoutChannel(Channel):
             config = json.load(f)
         config.setdefault("pattern", ".*")
         config.setdefault("exclude", [])
+        config.setdefault("patterns_file", None)
         config.setdefault("prefix", "")
         required = ["command"]
         missing = [k for k in required if k not in config]
@@ -146,8 +180,14 @@ class ReadStdoutChannel(Channel):
         asyncio.create_task(self._read_loop())
 
     async def stop(self) -> None:
-        """Stop the subprocess."""
+        """Stop the subprocess and save exclude patterns."""
         self._running = False
+        # Save patterns before stopping
+        if self._patterns_file:
+            try:
+                self.save_patterns(self._patterns_file)
+            except Exception as e:
+                _logger.error("Failed to save exclude patterns: %s", e)
         if self._process:
             self._process.terminate()
             try:

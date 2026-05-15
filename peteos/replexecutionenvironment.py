@@ -254,6 +254,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 if should_exit:
                     await self._call_hooks("before_loop_exit", reason)
                     return ("done", None)
+            _logger.debug("[repl] step(): tool calls executed, returning continue")
             # Clear state after processing all tool calls
             self._assistant_tool_calls = None
             self._executed_tool_ids = set()
@@ -261,11 +262,13 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             return ("continue", None)
         else:
             # No tool calls — check for final answer or reasoning-only response
+            _logger.debug("[repl] step(): no tool calls, _last_response_text=%r", self._last_response_text)
             self._assistant_tool_calls = None
             self._executed_tool_ids = set()
 
             if self._last_response_text:
                 await self._call_hooks("before_loop_exit", "final_answer")
+                _logger.debug("[repl] step(): returning done (final_answer)")
                 return ("done", None)
             # Only reasoning text
             hook_result = await self._call_hooks("before_loop_continue", [])
