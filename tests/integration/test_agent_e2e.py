@@ -112,11 +112,13 @@ class TestAgentE2E(AioHTTPTestCase):
             assert len(history) >= 2, f"Expected 2 messages, got {len(history)}"
 
             # Verify user message using new format
-            assert history[0].get_role() == "user"
-            assert history[0].content[0].text == question
+            user_msgs = [m for m in history if m.get_role() == "user"]
+            assert len(user_msgs) >= 1
+            assert user_msgs[0].content[0].text == question
 
             # Verify assistant response using new format
-            assert history[1].get_role() == "assistant"
+            assistant_msgs = [m for m in history if m.get_role() == "assistant"]
+            assert len(assistant_msgs) >= 1
             assert "2 + 2" in history[1].content[0].text
 
         finally:

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, List, Optional
 import uuid
 
 from peteos.activeclass import ActiveClass
-from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart, SystemPromptMessage
+from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
 from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -89,17 +89,10 @@ class Session(ActiveClass):
             )
 
         # Tool definitions anchored at back (persist, appear after conversation)
-        tool_list = tool_manager.get_tool_list()
-        for tool in tool_list:
-            chat_history.append_message(Message(
-                role="tool",
-                content=[ContentPart(
-                    part_type="tool",
-                    name=tool.name,
-                    description=tool.description,
-                    parameters=tool.parameters
-                )]
-            ), anchor="front")
+        chat_history.append_message(
+            ToolDefinitionsMessage(tool_manager=tool_manager),
+            anchor="front"
+        )
 
         return chat_history
 

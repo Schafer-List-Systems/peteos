@@ -7,6 +7,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .contentpart import ContentPart
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from peteos.toolmanager import ToolManager
+
 
 class Message:
     """A single message in chat history.
@@ -55,10 +59,15 @@ class Message:
             message_id: UUID identifying this message (auto-generated if not provided).
         """
         self._role = role
-        self.content = content
+        self._content = content
         self.metadata = metadata or {}
         self.creation_timestamp = creation_timestamp or datetime.now()
         self._id = message_id or str(uuid.uuid4())
+
+    @property
+    def content(self) -> List[ContentPart]:
+        """Return the list of content parts."""
+        return self._content
 
     def get_role(self) -> str:
         """Return the message role.
@@ -251,3 +260,73 @@ class SystemPromptMessage(Message):
     def count_tokens(self, encoding: str = "cl100k_base") -> int:
         """Count tokens, always recomputing since content is dynamic."""
         return self._compute_token_count(encoding)
+
+
+class ToolDefinitionsMessage(Message):
+    """A message whose content is dynamically generated from a ToolManager.
+
+    Like ``SystemPromptMessage``, the content is assembled at serialization
+    time rather than stored statically.  This allows tools to be registered
+    or deregistered on the ``ToolManager`` between calls and have the chat
+    history reflect the current set automatically.
+
+    Attributes:
+        tool_manager: The ToolManager whose current tool list is queried
+            each time ``content`` is accessed or ``serialize_content()``
+            is called.
+    """
+
+    def __init__(
+        self,
+        tool_manager: "ToolManager",
+        metadata: Optional[Dict[str, Any]] = None,
+        creation_timestamp: Optional[datetime] = None,
+        message_id: Optional[str] = None,
+    ) -> None:
+        # Set _content directly to bypass the property in the parent __init__
+        object.__setattr__(self, "_content", [])
+        super().__init__(
+            role="tool",
+            content=[],
+            metadata=metadata,
+            creation_timestamp=creation_timestamp,
+            message_id=message_id,
+        )
+        self._tool_manager = tool_manager
+
+    def get_role(self) -> str:
+        """Always returns 'tool'."""
+        return "tool"
+
+    @property
+    def content(self) -> List[ContentPart]:
+        """Return ContentParts for every tool currently registered."""
+        parts: List[ContentPart] = []
+        for tool in self._tool_manager.get_tool_list():
+            parts.append(ContentPart(
+                part_type="tool",
+                name=tool.name,
+                description=tool.description,
+                parameters=tool.parameters,
+            ))
+        return parts
+
+    def serialize_content(self) -> List[Dict[str, Any]]:
+        """Serialize tool definitions for API request bodies."""
+        return [part.to_dict() for part in self.content]
+
+    def count_tokens(self, encoding: str = "cl100k_base") -> int:
+        """Count tokens, always recomputing since content is dynamic."""
+        return self._compute_token_count(encoding)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dictionary.  Content is kept empty because it is
+        dynamically regenerated at load time from the ToolManager."""
+        d = {
+            "role": self.get_role(),
+            "id": self.get_id(),
+            "content": [],
+            **self.metadata
+        }
+        d["type"] = "tool_definitions"
+        return d

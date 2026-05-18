@@ -92,8 +92,9 @@ class TestMessageQueueProcessing(AioHTTPTestCase):
             await asyncio.sleep(1)
 
             assert len(session.chat_history.messages) >= 1
-            assert session.chat_history.messages[0].get_role() == "user"
-            assert session.chat_history.messages[0].content[0].text == "Hello"
+            user_msgs = [m for m in session.chat_history.messages if m.get_role() == "user"]
+            assert len(user_msgs) >= 1
+            assert user_msgs[0].content[0].text == "Hello"
         finally:
             await session.stop()
 
