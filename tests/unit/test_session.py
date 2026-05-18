@@ -93,20 +93,24 @@ def test_session_load_from_json():
     session_data = {
         "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
         "role": "test",
-        "chat_history": [
-            {
-                "content": [{"type": "text", "text": "Hello"}],
-                "role": "user",
-                "creation_timestamp": "2026-03-31T12:00:00",
-                "id": "msg-1"
-            },
-            {
-                "content": [{"type": "text", "text": "Hi!"}],
-                "role": "assistant",
-                "creation_timestamp": "2026-03-31T12:00:01",
-                "id": "msg-2"
-            }
-        ]
+        "chat_history": {
+            "unanchored": [
+                {
+                    "content": [{"type": "text", "text": "Hello"}],
+                    "role": "user",
+                    "creation_timestamp": "2026-03-31T12:00:00",
+                    "id": "msg-1"
+                },
+                {
+                    "content": [{"type": "text", "text": "Hi!"}],
+                    "role": "assistant",
+                    "creation_timestamp": "2026-03-31T12:00:01",
+                    "id": "msg-2"
+                }
+            ],
+            "anchors": {},
+            "generation_config": {}
+        }
     }
 
     session = Session.load_from_json(
@@ -134,7 +138,7 @@ def test_session_load_from_json_without_uuid():
 
     session_data = {
         "role": "test",
-        "chat_history": []
+        "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
     }
 
     session = Session.load_from_json(
@@ -156,7 +160,7 @@ def test_session_load_from_json_missing_role():
     session_data = {
         "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
         "role": "nonexistent",
-        "chat_history": []
+        "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
     }
 
     with pytest.raises(ValueError, match="not found in RoleManager"):
@@ -184,7 +188,7 @@ def test_session_load_from_json_missing_required_tool():
     session_data = {
         "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
         "role": "test",
-        "chat_history": []
+        "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
     }
 
     with pytest.raises(ValueError, match="requires tool"):
@@ -240,14 +244,18 @@ def test_session_load_from_file():
         session_data = {
             "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
             "role": "test",
-            "chat_history": [
-                {
-                    "content": [{"type": "text", "text": "Hello from file"}],
-                    "role": "user",
-                    "creation_timestamp": "2026-03-31T12:00:00",
-                    "id": "msg-file-1"
-                }
-            ]
+            "chat_history": {
+                "unanchored": [
+                    {
+                        "content": [{"type": "text", "text": "Hello from file"}],
+                        "role": "user",
+                        "creation_timestamp": "2026-03-31T12:00:00",
+                        "id": "msg-file-1"
+                    }
+                ],
+                "anchors": {},
+                "generation_config": {}
+            }
         }
 
         session_file.write_text(json.dumps(session_data))
@@ -278,13 +286,17 @@ def test_session_load_from_file_without_timestamps():
         session_file = Path(tmpdir) / "session.json"
         session_data = {
             "role": "test",
-            "chat_history": [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": "No timestamp"}],
-                    "id": "msg-no-ts"
-                }
-            ]
+            "chat_history": {
+                "unanchored": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "No timestamp"}],
+                        "id": "msg-no-ts"
+                    }
+                ],
+                "anchors": {},
+                "generation_config": {}
+            }
         }
 
         session_file.write_text(json.dumps(session_data))
@@ -314,7 +326,7 @@ def test_session_load_from_file_no_uuid():
         session_file = Path(tmpdir) / "session.json"
         session_data = {
             "role": "test",
-            "chat_history": []
+            "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
         }
 
         session_file.write_text(json.dumps(session_data))
@@ -341,7 +353,7 @@ def test_session_load_from_json_empty_chat_history():
     session_data = {
         "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
         "role": "test",
-        "chat_history": []
+        "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
     }
 
     session = Session.load_from_json(

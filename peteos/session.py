@@ -244,7 +244,7 @@ class Session(ActiveClass):
     ) -> "Session":
         uuid_str = json_data.get("uuid")
         role_name = json_data["role"]
-        chat_history_data = json_data.get("chat_history", [])
+        chat_history_data = json_data.get("chat_history", {})
 
         role = role_manager.get_role(role_name)
         if role is None:

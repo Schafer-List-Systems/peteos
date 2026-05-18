@@ -416,19 +416,10 @@ class TestMessageAnchors:
         assert rebuilt.messages[0].text == "f"
         assert rebuilt.messages[1].text == "u"
 
-    def test_from_dict_legacy_list_format(self):
-        """Legacy plain list format loads all messages as unanchored."""
-        data = [
-            {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
-            {"role": "assistant", "content": [{"type": "text", "text": "Hi"}]},
-        ]
-        history = ChatHistory.from_dict(data)
-        assert len(history.messages) == 2
-        assert history.messages[0].text == "Hello"
-        assert history.messages[1].text == "Hi"
-        assert len(history._unanchored) == 2
-        assert len(history._anchor_groups["front"]) == 0
-        assert len(history._anchor_groups["back"]) == 0
+    def test_from_dict_list_raises(self):
+        """Plain list format raises ValueError."""
+        with pytest.raises(ValueError, match="must be a dict"):
+            ChatHistory.from_dict([{"role": "user", "content": []}])
 
     def test_roundtrip_preserves_anchors(self):
         """Serialize then deserialize preserves anchor structure."""

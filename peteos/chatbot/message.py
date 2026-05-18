@@ -201,7 +201,7 @@ class Message:
             content=content,
             creation_timestamp=creation_timestamp,
             message_id=message_id,
-            **{k: v for k, v in data.items() if k not in ("role", "id", "content", "metadata")}
+            **{k: v for k, v in data.items() if k not in ("role", "id", "content", "metadata", "creation_timestamp", "message_id")}
         )
         if "id" in data and data["id"] and not message_id:
             msg._id = data["id"]

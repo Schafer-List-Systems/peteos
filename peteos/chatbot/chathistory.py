@@ -189,12 +189,11 @@ class ChatHistory:
         }
 
     @classmethod
-    def from_dict(cls, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> "ChatHistory":
+    def from_dict(cls, data: Dict[str, Any]) -> "ChatHistory":
         """Reconstruct ChatHistory from dictionary.
 
-        Supports two formats:
-        - New format: dict with 'unanchored', 'anchors', 'generation_config'
-        - Legacy format: plain list of message dicts (all go to unanchored)
+        Expects a dict with 'unanchored', 'anchors', and 'generation_config'.
+        Raises ValueError for invalid formats (e.g., a plain list).
 
         Args:
             data: Serialized chat history data.
@@ -202,24 +201,11 @@ class ChatHistory:
         Returns:
             Reconstructed ChatHistory instance.
         """
-        if isinstance(data, list):
-            # Legacy format: plain list of messages, all unanchored
-            msg_list = []
-            for msg_data in data:
-                creation_ts = None
-                ts = msg_data.get("creation_timestamp")
-                if ts:
-                    creation_ts = datetime.fromisoformat(ts)
-                msg_list.append(
-                    Message.from_dict(
-                        {"role": msg_data.get("role", "user"), "content": msg_data.get("content", [])},
-                        creation_timestamp=creation_ts,
-                        message_id=msg_data.get("id"),
-                    )
-                )
-            return cls(messages=msg_list, generation_config={})
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"ChatHistory data must be a dict, got {type(data).__name__}"
+            )
 
-        # New format with anchor groups
         generation_config = data.get("generation_config", {})
         chat_history = cls(messages=[], generation_config=generation_config)
 
