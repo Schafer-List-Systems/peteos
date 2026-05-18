@@ -150,15 +150,21 @@ class NextcloudTalkChannel(Channel):
             payload = self._format_for_nextcloud(part, message.get_id())
             # Extract tool_call_ids from tool_call/tool_calls content parts
             # so _send_all_sequentially can track the mapping
-            if part.type in ("tool_call", "tool_calls"):
-                tc = part.data.get("tool_call") or part.data.get("tool_calls")
-                tool_call_ids = []
-                if isinstance(tc, dict):
-                    id_val = tc.get("id", "")
+            if part.type in ("tool_call", "tool_calls", "tool_use"):
+                tool_call_ids: list[str] = []
+                if part.type == "tool_use":
+                    # Anthropic format: id is a direct key
+                    id_val = part.data.get("id", "")
                     if id_val:
                         tool_call_ids.append(id_val)
-                elif isinstance(tc, list):
-                    tool_call_ids = [item.get("id", "") for item in tc if item.get("id", "")]
+                else:
+                    tc = part.data.get("tool_call") or part.data.get("tool_calls")
+                    if isinstance(tc, dict):
+                        id_val = tc.get("id", "")
+                        if id_val:
+                            tool_call_ids.append(id_val)
+                    elif isinstance(tc, list):
+                        tool_call_ids = [item.get("id", "") for item in tc if item.get("id", "")]
                 if tool_call_ids:
                     payload["tool_call_ids"] = tool_call_ids
             payloads.append(payload)

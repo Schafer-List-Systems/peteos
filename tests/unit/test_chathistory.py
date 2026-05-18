@@ -378,13 +378,12 @@ class TestMessageAnchors:
         assert history.messages[0] is m1
         assert history.messages[1] is m2
 
-    def test_dynamic_custom_anchor(self):
-        """Custom anchor names are supported."""
+    def test_unknown_anchor_raises(self):
+        """Unknown anchor names raise ValueError."""
         history = ChatHistory()
         msg = Message(role="system", content=[ContentPart(part_type="text", text="custom")])
-        history.append_message(msg, anchor="system_header")
-        assert history._anchor_groups["system_header"][0] is msg
-        assert len(history.messages) == 1
+        with pytest.raises(ValueError, match="Unknown anchor 'system_header'"):
+            history.append_message(msg, anchor="system_header")
 
     def test_to_dict_serializes_all_messages(self):
         """to_dict includes all anchor groups and unanchored."""

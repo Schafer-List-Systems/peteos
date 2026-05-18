@@ -79,13 +79,19 @@ class ChatHistory:
             message: The message to append.
             anchor: Optional anchor name ("front", "back", or custom).
                 Messages with anchors persist across compaction.
+
+        Raises:
+            ValueError: If the anchor name is not one of the defined anchor groups.
         """
-        if anchor is not None:
-            if anchor not in self._anchor_groups:
-                self._anchor_groups[anchor] = []
-            self._anchor_groups[anchor].append(message)
-        else:
+        if anchor is None:
             self._unanchored.append(message)
+        elif anchor not in self._anchor_groups:
+            raise ValueError(
+                f"Unknown anchor {anchor!r}. "
+                f"Allowed anchors: {list(self._anchor_groups.keys())}"
+            )
+        else:
+            self._anchor_groups[anchor].append(message)
 
     def set_generation_config(self, key: str, value: Any) -> None:
         """
