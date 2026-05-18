@@ -176,7 +176,7 @@ class TestEventDispatch:
         agent._session_channels = {}
 
         # App registers the room with a session
-        channel.register_room(session_uuid, "conv1")
+        await channel.register_room(session_uuid, "conv1")
 
         event = {
             "type": "Create",
@@ -320,7 +320,7 @@ class TestSessionRouting:
         # subscribe_to_session needs _session_channels to exist
         agent._session_channels = {}
 
-        channel.register_room(session_uuid, "myroom")
+        await channel.register_room(session_uuid, "myroom")
 
         assert channel._rooms["myroom"] == session_uuid
         assert channel._session_conversations[session_uuid] == "myroom"
@@ -330,22 +330,24 @@ class TestSessionRouting:
 class TestSend:
     """Test send method."""
 
-    def test_send_no_active_session(self, agent):
+    @pytest.mark.asyncio
+    async def test_send_no_active_session(self, agent):
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
             config=_make_config(),
         )
         # No session_uuid means no-op
-        channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]))  # Should not raise
+        await channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]))  # Should not raise
 
-    def test_send_no_conversation_mapping(self, agent):
+    @pytest.mark.asyncio
+    async def test_send_no_conversation_mapping(self, agent):
         test_uuid = uuid.uuid4()
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
             config=_make_config(),
         )
         # session_uuid present but no mapping in _session_conversations
-        channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]), session_uuid=test_uuid)  # Should not raise
+        await channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]), session_uuid=test_uuid)  # Should not raise
 
     @pytest.mark.asyncio
     async def test_send_calls_nextcloud_api(self, agent):
@@ -374,7 +376,7 @@ class TestSend:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            channel.send(Message(
+            await channel.send(Message(
                 role="assistant",
                 content=[ContentPart(part_type="text", text="Hello!")],
             ), session_uuid=test_uuid)
@@ -414,7 +416,7 @@ class TestSend:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            channel.send(Message(
+            await channel.send(Message(
                 role="assistant",
                 content=[
                     ContentPart(part_type="reasoning", reasoning="Thinking..."),

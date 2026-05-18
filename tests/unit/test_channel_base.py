@@ -17,7 +17,7 @@ class _TestChannel(Channel):
         super().__init__(name, agent)
         self._sent_messages = []
 
-    def send(self, message: str, session_uuid: uuid.UUID | None = None) -> None:
+    async def send(self, message: str, session_uuid: uuid.UUID | None = None) -> None:
         """Send message by storing it."""
         self._sent_messages.append(message)
 
@@ -79,11 +79,12 @@ class TestChannelRegistry:
 class TestChannelMethods:
     """Test Channel instance methods."""
 
-    def test_channel_send(self):
+    @pytest.mark.asyncio
+    async def test_channel_send(self):
         """Test send stores message."""
         mock_agent = MagicMock()
         ch = _TestChannel("test", mock_agent)
-        ch.send("Hello, World!")
+        await ch.send("Hello, World!")
         assert len(ch._sent_messages) == 1
         assert ch._sent_messages[0] == "Hello, World!"
         # Clean up

@@ -227,13 +227,13 @@ async def main():
     # Register rooms with the session (app owns session lifecycle)
     auto_join_rooms = nextcloud_config.get("auto_join_rooms", [])
     for room_token in auto_join_rooms:
-        nextcloud.register_room(session.uuid, room_token)
+        await nextcloud.register_room(session.uuid, room_token)
         print(f"Registered room {room_token} with session {session.uuid}")
 
     # Callback for dynamic room joins
     async def on_room_joined(room_token: str):
         new_session = await agent.create_session(role_name)
-        nextcloud.register_room(new_session.uuid, room_token)
+        await nextcloud.register_room(new_session.uuid, room_token)
         print(f"Registered new room {room_token} with session {new_session.uuid}")
 
     nextcloud.on_room_joined = on_room_joined
@@ -276,7 +276,7 @@ async def main():
         print("\nSending goodbye message...")
         if nextcloud._rooms:
             for token, session_uuid in nextcloud._rooms.items():
-                nextcloud.send(
+                await nextcloud.send(
                     Message(role="assistant", content=[ContentPart(part_type="text", text="I am going offline.")]),
                     session_uuid=session_uuid,
                 )

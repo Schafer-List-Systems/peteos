@@ -56,7 +56,7 @@ class InteractiveShellChannel(Channel):
     def active_session_uuid(self, value: uuid.UUID | None) -> None:
         self._active_session_uuid = value
 
-    def send(self, message: Message | str, session_uuid: uuid.UUID | None = None) -> None:
+    async def send(self, message: Message | str, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the shell.
 
         Args:
@@ -250,7 +250,7 @@ class InteractiveShellChannel(Channel):
 
     async def read_input_loop(self) -> None:
         """Read user input and send events to the channel's queue."""
-        self.send("Connected. Commands: /new, /list, /select, /quit")
+        await self.send("Connected. Commands: /new, /list, /select, /quit")
 
         while self.is_running():
             # Print prompt before reading input
@@ -274,7 +274,7 @@ class InteractiveShellChannel(Channel):
 
             if line.startswith("/"):
                 should_continue, output = self.handle_command(line)
-                self.send(output)
+                await self.send(output)
                 if not should_continue:
                     break
             else:
@@ -284,10 +284,10 @@ class InteractiveShellChannel(Channel):
                 # we need to forward to the agent's message queue directly
                 # since this is a shell-specific flow.
                 if self._active_session_uuid is None:
-                    self.send("No session selected. Use /new <role> or /select <uuid>.")
+                    await self.send("No session selected. Use /new <role> or /select <uuid>.")
                     continue
 
                 try:
                     self._post_message_to_agent(self._active_session_uuid, line)
                 except Exception as e:
-                    self.send(f"Error: {type(e).__name__}: {str(e)}")
+                    await self.send(f"Error: {type(e).__name__}: {str(e)}")

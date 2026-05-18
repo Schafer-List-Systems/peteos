@@ -110,7 +110,7 @@ class NextcloudTalkChannel(Channel):
         if self._runner:
             await self._runner.cleanup()
 
-    def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
+    async def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the originating Nextcloud conversation.
 
         Iterates over content parts, formats each into text, and sends via
@@ -164,7 +164,7 @@ class NextcloudTalkChannel(Channel):
             payloads.append(payload)
 
         is_final_answer = message.metadata.get("finish", False)
-        asyncio.create_task(self._send_all_sequentially(conversation_token, payloads, is_final_answer, session_uuid))
+        await self._send_all_sequentially(conversation_token, payloads, is_final_answer, session_uuid)
 
     def _should_send_part(self, part: ContentPart, msg_role: str) -> bool:
         """Check if a content part should be sent based on enabled/disabled flags."""
@@ -283,7 +283,7 @@ class NextcloudTalkChannel(Channel):
         ).hexdigest()
         return hmac.compare_digest(computed, signature)
 
-    def register_room(self, session_uuid: uuid.UUID, conversation_token: str) -> None:
+    async def register_room(self, session_uuid: uuid.UUID, conversation_token: str) -> None:
         """Register a session with a Nextcloud Talk conversation token.
 
         The app creates sessions and calls this to map them to rooms.
@@ -298,7 +298,7 @@ class NextcloudTalkChannel(Channel):
         self._session_conversations[session_uuid] = conversation_token
         self.subscribe_to_session(session_uuid)
 
-        self.send(
+        await self.send(
             Message(role="assistant", content=[ContentPart(part_type="text", text="Hello, I am online now.")]),
             session_uuid=session_uuid,
         )

@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import AsyncIterator, Dict, Optional, Set
+from typing import AsyncIterator, Awaitable, Dict, Optional, Set
 
 from peteos.activeclass import ActiveClass
 from peteos.chatbot import Message
@@ -38,7 +38,7 @@ class Channel(ActiveClass, ABC):
         agent.register_channel(self)
 
     @abstractmethod
-    def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
+    async def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
         """
         Send a message to the user through this channel.
 
@@ -47,6 +47,7 @@ class Channel(ActiveClass, ABC):
 
         Args:
             message: The Message to send.
+            session_uuid: The session UUID to route to.
         """
         pass
 
@@ -107,7 +108,7 @@ class Channel(ActiveClass, ABC):
                     continue
                 elif message.get_role() == "tool_result" and not self._show_tool_results:
                     continue
-                self.send(message, session_uuid=session_uuid)
+                await self.send(message, session_uuid=session_uuid)
         finally:
             await self.stop()
 
