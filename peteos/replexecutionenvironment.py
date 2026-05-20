@@ -177,12 +177,14 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             # Handle denied tool calls (status set by _handle_approval)
             if record.approval_status == ToolApprovalStatus.DENIED:
                 denial_msg = record.tool_call.get("denied_reason", "Tool call was denied by user.")
+                tool_call_id = tool_call.get("id", "")
                 msg = Message(
                     role="tool_result",
                     content=[ContentPart(
                         part_type="tool_result",
                         name=tool_name,
                         content=denial_msg,
+                        tool_use_id=tool_call_id,
                     )],
                 )
                 self.chat_history.append_message(msg)
@@ -196,12 +198,14 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             tool = self.tool_manager.get_tool(tool_name)
 
             if not tool:
+                tool_call_id = tool_call.get("id", "")
                 tool_not_found_msg = Message(
                     role="tool_result",
                     content=[ContentPart(
                         part_type="tool_result",
                         name=tool_name,
                         content=f"Error: Tool '{tool_name}' not found",
+                        tool_use_id=tool_call_id,
                     )],
                 )
                 self.chat_history.append_message(tool_not_found_msg)
@@ -213,19 +217,21 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             if hook_result is not None:
                 allow, message = hook_result
                 if not allow:
-                    self._append_tool_result(tool_name=tool_name, content=message, success=False)
+                    tool_call_id = tool_call.get("id", "")
+                    self._append_tool_result(tool_name=tool_name, content=message, tool_use_id=tool_call_id)
                     return (ExecStatus.TOOL_DENIED, None)
 
+            tool_call_id = tool_call.get("id", "")
             try:
                 result = tool.execute(**args)
-                self._append_tool_result(tool_name=tool_name, content=str(result), success=True)
+                self._append_tool_result(tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
                 await self._call_hooks("after_tool_execution", tool_call, str(result), True)
                 _logger.debug("Tool %s returned: %s", tool_name, str(result))
             except Exception as e:
                 self._append_tool_result(
                     tool_name=tool_name,
                     content=f"Error: {type(e).__name__}: {str(e)}",
-                    success=False,
+                    tool_use_id=tool_call_id
                 )
                 _logger.debug("Tool %s failed: %s", tool_name, str(e))
                 return (ExecStatus.TOOL_FAILED, None)
@@ -249,62 +255,16 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         _logger.debug("[repl] step(): Response contained only reasoning part(s).")
         return (ExecStatus.CONTINUE, None)
 
-    async def execute_pending_tool(self, tool_call: dict) -> None:
-        """Execute a tool call that was previously pending approval.
-
-        Called by Session._handle_approval after an ApprovalEvent is received.
-
-        Args:
-            tool_call: Dict with 'name' and 'arguments' of the tool.
-        """
-        tool_call_id = tool_call.get("id", "")
-        tool_name = tool_call.get("name")
-        args = json.loads(tool_call.get("arguments", "{}"))
-        _logger.debug("Executing pending tool: %s(%s)", tool_name, args)
-        tool = self.tool_manager.get_tool(tool_name)
-
-        if not tool:
-            msg = Message(
-                role="tool_result",
-                content=[ContentPart(
-                    part_type="tool_result",
-                    name=tool_name,
-                    content=f"Error: Tool '{tool_name}' not found",
-                )],
-            )
-            self.chat_history.append_message(msg)
-            await self._call_hooks("after_tool_execution", tool_call, f"Error: Tool '{tool_name}' not found", False)
-            self._executed_tool_ids.add(tool_call_id)
-            return
-
-        args = _cast_args_to_types(tool.func, args)
-
-        try:
-            result = tool.execute(**args)
-            self._append_tool_result(tool_name=tool_name, content=str(result), success=True)
-            await self._call_hooks("after_tool_execution", tool_call, str(result), True)
-            _logger.debug("Tool %s returned: %s", tool_name, str(result))
-        except Exception as e:
-            self._append_tool_result(
-                tool_name=tool_name,
-                content=f"Error: {type(e).__name__}: {str(e)}",
-                success=False,
-            )
-            await self._call_hooks("after_tool_execution", tool_call, str(e), False)
-            _logger.debug("Tool %s failed: %s", tool_name, str(e))
-
-        self._executed_tool_ids.add(tool_call_id)
-
     def _append_tool_result(
         self,
         tool_name: str,
         content: str,
-        success: bool,
+        tool_use_id: str,
     ) -> None:
         msg = Message(
             role="tool_result",
             content=[
-                ContentPart(part_type="tool_result", name=tool_name, content=content)
+                ContentPart(part_type="tool_result", name=tool_name, content=content, tool_use_id=tool_use_id)
             ],
         )
         self.chat_history.append_message(msg)

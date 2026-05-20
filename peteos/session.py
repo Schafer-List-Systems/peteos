@@ -39,6 +39,7 @@ class ToolExecutionStatus(str, Enum):
     DENIED = "denied"
     EXECUTING = "executing"
     EXECUTED = "executed"
+    ABORTED = "aborted"
 
 
 @dataclass
@@ -186,9 +187,7 @@ class Session(ActiveClass):
                 if isinstance(event, Message):
                     self.chat_history.append_message(event)
                 elif isinstance(event, ApprovalEvent):
-                    if not self._handle_approval(event):
-                        _logger.error('[session] run(): Approval Event failed.')
-                        events_processed -= 1
+                    self._handle_approval(event)
                 else:
                     events_processed -= 1
                     continue  # Skip other event types
@@ -205,8 +204,17 @@ class Session(ActiveClass):
                 break
             elif status == ExecStatus.PENDING:
                 return  # Exit step loop, wait for ApprovalEvent
-            elif status in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED, ExecStatus.TOOL_FAILED):
-                break  # Fatal tool error — stop loop
+            elif status in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
+                continue  # let chatbot handle the error/denial message
+            elif status in (ExecStatus.TOOL_FAILED):
+                # Abort all remaining pending tool calls
+                for record in self._pending_tool_calls:
+                    if record.approval_status == ToolApprovalStatus.PENDING:
+                        record.approval_status = ToolApprovalStatus.DENIED
+                        record.execution_status = ToolExecutionStatus.ABORTED
+                        record.tool_call["denied_reason"] = "Tool call was aborted due to a previous tool failure."
+                _logger.debug("[session] Aborted all pending tool calls due to tool failure")
+                continue  # tool errors can be handled by chatbot
             # CONTINUE -> loop back to step()
 
     def add_tool_call(self, tool_call: dict) -> None:
