@@ -8,9 +8,12 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from enum import Enum
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Set
 
 import uuid
+
+if TYPE_CHECKING:
+    from peteos.channels.channel import Channel
 
 from peteos.activeclass import ActiveClass
 from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
@@ -20,6 +23,7 @@ from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
+from peteos.executionenvironment import ExecStatus
 
 _logger = get_logger(__name__)
 
@@ -111,6 +115,7 @@ class Session(ActiveClass):
         self.auto_approve_tools: list[str] = list(role.auto_approve_tools)
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
         self.chatbot_manager = chatbot_manager
+        self._channels: Set[Channel] = set()
 
         self.execution_environment = execution_environment if execution_environment is not None else REPLExecutionEnvironment(
             chatbot_manager=chatbot_manager,
@@ -121,6 +126,27 @@ class Session(ActiveClass):
         )
 
         self._pending_tool_calls: list[ToolCallRecord] = []
+        self.tool_failure_policy: str = "continue"
+
+    def subscribe(self, channel: "Channel") -> bool:
+        """Subscribe a channel to notifications for this session.
+
+        Returns False if the channel is already subscribed.
+        """
+        if channel in self._channels:
+            return False  # already subscribed
+        self._channels.add(channel)
+        return True
+
+    def unsubscribe(self, channel: "Channel") -> bool:
+        """Unsubscribe a channel from notifications for this session.
+
+        Returns False if the channel is not subscribed.
+        """
+        if channel not in self._channels:
+            return False  # not subscribed
+        self._channels.remove(channel)
+        return True
 
     async def queue_message(self, message: Message) -> None:
         """Queue a message for processing.
@@ -160,10 +186,11 @@ class Session(ActiveClass):
                 if isinstance(event, Message):
                     self.chat_history.append_message(event)
                 elif isinstance(event, ApprovalEvent):
-                    approved = await self._handle_approval(event)
-                    if not approved:
-                        break  # Tool denied — stop draining
-                elif not isinstance(event, Message):
+                    if not self._handle_approval(event):
+                        _logger.error('[session] run(): Approval Event failed.')
+                        events_processed -= 1
+                else:
+                    events_processed -= 1
                     continue  # Skip other event types
 
             # Process accumulated history only if we processed events
@@ -171,22 +198,74 @@ class Session(ActiveClass):
                 await self._run_session_loop()
 
     async def _run_session_loop(self) -> None:
-        """Run step loop until done, tool_pending, or interrupted."""
+        """Run step loop until finished, pending, or error."""
         while self.is_running():
-            status, data = await self.execution_environment.step()
-            if status == "done":
+            status, _ = await self.execution_environment.step()
+            if status in (ExecStatus.FINISHED, ExecStatus.INTERRUPTED, ExecStatus.ERROR):
                 break
-            elif status == "tool_pending":
-                tool_call = data["tool_call"]
-                record = ToolCallRecord(
-                    tool_call_id=tool_call.get("id", ""),
+            elif status == ExecStatus.PENDING:
+                return  # Exit step loop, wait for ApprovalEvent
+            elif status in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED, ExecStatus.TOOL_FAILED):
+                break  # Fatal tool error — stop loop
+            # CONTINUE -> loop back to step()
+
+    def add_tool_call(self, tool_call: dict) -> None:
+        """Add a tool call to the pending list, auto-approving if applicable."""
+        tc_id = tool_call.get("id")
+        if tc_id is None:
+            raise ValueError("Tool call missing required 'id' field")
+        for record in self._pending_tool_calls:
+            if record.tool_call_id == tc_id:
+                raise ValueError(f"Duplicate tool call id: {tc_id}")
+        tool_name = tool_call.get("name", "")
+        if tool_name in self.auto_approve_tools:
+            self._pending_tool_calls.append(
+                ToolCallRecord(
+                    tool_call_id=tc_id,
+                    tool_call=tool_call,
+                    approval_status=ToolApprovalStatus.APPROVED,
+                    execution_status=ToolExecutionStatus.EXECUTING,
+                )
+            )
+        else:
+            self._pending_tool_calls.append(
+                ToolCallRecord(
+                    tool_call_id=tc_id,
                     tool_call=tool_call,
                     approval_status=ToolApprovalStatus.PENDING,
                     execution_status=ToolExecutionStatus.WAITING_FOR_APPROVAL,
                 )
-                self._pending_tool_calls.append(record)
-                return  # Exit step loop, wait for ApprovalEvent
-            # "continue" -> loop back to step()
+            )
+
+    def has_pending_tool_call(self) -> bool:
+        """Check if the first pending tool call status is no longer PENDING."""
+        for record in self._pending_tool_calls:
+            if record.approval_status == ToolApprovalStatus.PENDING:
+                return True
+        return False
+
+    def has_unfinished_tool_call(self) -> bool:
+        """Check if the first pending tool call status is no longer PENDING."""
+        for record in self._pending_tool_calls:
+            if record.execution_status != ToolExecutionStatus.EXECUTED:
+                return True
+        return False
+
+    def has_reviewed_tool_call(self) -> bool:
+        """Check if the first pending tool call status is no longer PENDING."""
+        for record in self._pending_tool_calls:
+            if record.approval_status != ToolApprovalStatus.PENDING:
+                return True
+            return False
+        return False
+
+    def pop_pending_tool_call(self) -> None:
+        """Remove the first tool call from the pending list."""
+        if not self._pending_tool_calls:
+            raise RuntimeError("No pending tool calls")
+        tool_call = self._pending_tool_calls[0]
+        self._pending_tool_calls.pop(0)
+        return tool_call
 
     def _find_pending_record(self, tool_call_id: str) -> Optional[ToolCallRecord]:
         """Find a pending tool call record by its tool_call_id."""
@@ -199,7 +278,7 @@ class Session(ActiveClass):
         """Return all currently pending tool calls."""
         return list(self._pending_tool_calls)
 
-    async def _handle_approval(self, event: ApprovalEvent) -> bool:
+    def _handle_approval(self, event: ApprovalEvent) -> bool:
         """Handle an approval/denial event for a pending tool call.
 
         Returns True if the tool was approved (keep draining queue),
@@ -207,33 +286,24 @@ class Session(ActiveClass):
         """
         record = self._find_pending_record(event.tool_call_id)
         if record is None:
-            _logger.warning("No pending tool call found for tool_call_id=%s", event.tool_call_id)
-            return True
+            _logger.error("No pending tool call found for tool_call_id=%s", event.tool_call_id)
+            # TODO: raise an error
 
         if event.approved:
             record.approval_status = ToolApprovalStatus.APPROVED
-            record.execution_status = ToolExecutionStatus.EXECUTING
-            await self.execution_environment.execute_pending_tool(event.tool_call)
-            record.execution_status = ToolExecutionStatus.EXECUTED
-            self._pending_tool_calls.remove(record)
             return True
         else:
             record.approval_status = ToolApprovalStatus.DENIED
-            record.execution_status = ToolExecutionStatus.DENIED
-            tool_name = event.tool_call.get("name", "unknown")
-            denial_msg = event.tool_call.get("denied_reason", "Tool call was denied by user.")
-            msg = Message(
-                role="tool_result",
-                content=[ContentPart(
-                    part_type="tool_result",
-                    name=tool_name,
-                    content=denial_msg,
-                )],
-            )
-            self.chat_history.append_message(msg)
-            await self.execution_environment._call_hooks("after_tool_execution", event.tool_call, denial_msg, False)
-            self._pending_tool_calls.remove(record)
             return False
+
+    def publish_notification(
+            self,
+            message: Message
+    ) -> None:
+        """Publish a notification to all subscribed channels."""
+        from peteos.channels.channel import NotificationEvent
+        for channel in self._channels:
+            channel.push_event(NotificationEvent(self.uuid, message))
 
     @staticmethod
     def load_from_json(

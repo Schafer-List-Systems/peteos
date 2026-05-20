@@ -4,10 +4,10 @@ import inspect
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
-from peteos.executionenvironment import ExecutionEnvironment
+from peteos.executionenvironment import ExecutionEnvironment, ExecStatus
 from peteos.logger import get_logger
 from peteos.role import Role
-from peteos.toolmanager import ToolManager, Tool
+from peteos.toolmanager import ToolManager
 
 if TYPE_CHECKING:
     from peteos.session import Session  # circular import guard
@@ -88,7 +88,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         chat_history: ChatHistory,
         tool_manager: ToolManager,
         role: Role,
-        session: Optional["Session"] = None,
+        session: "Session"
     ):
         super().__init__(
             chatbot_manager=chatbot_manager,
@@ -97,10 +97,6 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             role=role,
         )
         self._session: "Session" = session
-        self._assistant_tool_calls: Optional[list[dict]] = None
-        self._executed_tool_ids: set[str] = set()
-        self._pending_tool_id: Optional[str] = None
-        self._last_response_text: Optional[str] = None
 
     async def step(self) -> tuple[str, dict | None]:
         """Execute one loop iteration.
@@ -114,170 +110,144 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             ("done", None) | ("continue", None) | ("tool_pending", {"tool_call": dict})
         """
         # --- Phase 1: Call chatbot (skip if re-entering after tool_pending) ---
-        if self._assistant_tool_calls is None:
+        has_text_part = False
+
+        # We only send the extended chat history to the chatbot to get a further response when there are no (more)
+        # pending tool calls.
+        if not self._session.has_unfinished_tool_call():
             response = await self.chatbot.send_message(self.chat_history)
             async for _ in response:
                 if self._interrupt:
                     await self._call_hooks("before_loop_exit", "interrupt")
-                    return ("done", None)
+                    return (ExecStatus.INTERRUPTED, None)
 
             if self._interrupt:
                 await self._call_hooks("before_loop_exit", "interrupt")
-                return ("done", None)
+                return (ExecStatus.INTERRUPTED, None)
 
             # --- Phase 2: Error handling ---
             if "error" in response.data:
                 _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
-                return ("done", None)
+                return (ExecStatus.ERROR, None)
 
             if "role" not in response.data:
                 _logger.error("ChatBot response missing 'role' field. Response data: %s", response.data)
-                return ("done", None)
+                return (ExecStatus.ERROR, None)
 
-            # --- Phase 3: Build content parts ---
+            # --- Phase 3: Build content parts from content array in original order ---
+            content_array: list = response.data.get("content", [])
             content_parts: list[ContentPart] = []
 
-            if response.data.get("reasoning"):
-                content_parts.append(
-                    ContentPart(part_type="reasoning", reasoning=response.data["reasoning"])
-                )
-
-            tool_calls_list: list[dict] = []
-            content_array = response.data.get("content", [])
-            if isinstance(content_array, list):
-                tool_calls_list = [
-                    item for item in content_array
-                    if isinstance(item, dict) and item.get("type") == "tool_use"
-                ]
-
-            if tool_calls_list:
-                content_parts.append(
-                    ContentPart(part_type="tool_calls", tool_calls=tool_calls_list)
-                )
-
-            if response.data.get("text"):
-                content_parts.append(ContentPart(part_type="text", text=response.data["text"]))
+            for item in content_array:
+                if not isinstance(item, dict):
+                    _logger.error("Expected content item to be a dict, got %s", type(item).__name__)
+                    continue
+                item_type = item["type"]
+                if item_type == "tool_use":
+                    content_parts.append(ContentPart(part_type="tool_use", **item))
+                    self._session.add_tool_call(item)
+                elif item_type == "text":
+                    content_value = item["content"]
+                    content_parts.append(ContentPart(part_type="text", text=content_value))
+                    has_text_part = True
+                elif item_type == "thinking":
+                    content_value = item["content"]
+                    content_parts.append(
+                        ContentPart(part_type="reasoning", reasoning=content_value)
+                    )
 
             # --- Phase 4: Append assistant message ---
-            from peteos.logger import truncate
-            _logger.debug("ChatBot response: role=%s, text=%r, content_keys=%s, reasoning=%r", response.data.get("role"), truncate(response.data.get("text")), [item.get("type") for item in response.data.get("content", [])] if isinstance(response.data.get("content"), list) else "N/A", truncate(response.data.get("reasoning")))
-            self.chat_history.append_message(
-                Message(role=response.data["role"], content=content_parts)
-            )
+            _logger.debug("ChatBot response: role=%s, content_types=%s", response.data.get("role"), [item.get("type") for item in content_array] if isinstance(content_array, list) else "N/A")
+            response_msg = Message(role=response.data["role"], content=content_parts)
+            self.chat_history.append_message(response_msg)
+            self._session.publish_notification(response_msg)
 
             # Fire hook so channels/app can snapshot per-message metadata
-            if self._session:
-                await self._call_hooks(
-                    "on_message_published", self.chat_history.messages[-1], self._session.uuid
-                )
-
-            # Store tool calls for re-entry after tool_pending
-            self._assistant_tool_calls = tool_calls_list if tool_calls_list else None
-            self._last_response_text = response.data.get("text")
-        else:
-            tool_calls_list = self._assistant_tool_calls
+            await self._call_hooks("on_message_published", response_msg, self._session.uuid)
 
         # --- Phase 5: Execute tool calls ---
-        if tool_calls_list:
-            history_length_before = len(self.chat_history.messages)
+        from peteos.session import ToolApprovalStatus
 
-            for idx, tool_call in enumerate(tool_calls_list):
-                tool_call_id = tool_call.get("id", "")
+        did_tool_calls = self._session.has_reviewed_tool_call()
+        while self._session.has_reviewed_tool_call():
+            record = self._session.pop_pending_tool_call()
+            tool_call = record.tool_call
+            tool_name = tool_call["name"]
 
-                # Skip already-executed tool calls
-                if tool_call_id in self._executed_tool_ids:
-                    continue
+            # Handle denied tool calls (status set by _handle_approval)
+            if record.approval_status == ToolApprovalStatus.DENIED:
+                denial_msg = record.tool_call.get("denied_reason", "Tool call was denied by user.")
+                msg = Message(
+                    role="tool_result",
+                    content=[ContentPart(
+                        part_type="tool_result",
+                        name=tool_name,
+                        content=denial_msg,
+                    )],
+                )
+                self.chat_history.append_message(msg)
+                self._session.publish_notification(msg)
+                await self._call_hooks("after_tool_execution", record.tool_call, denial_msg, False)
+                _logger.debug("[repl] step(): Tool call %s was denied by user", tool_name)
+                return (ExecStatus.TOOL_DENIED, None)
 
-                # If this is the pending tool from previous step (approved by session),
-                # it was already executed via execute_pending_tool — skip it
-                if self._pending_tool_id is not None and tool_call_id == self._pending_tool_id:
-                    self._pending_tool_id = None
-                    continue
+            args = json.loads(tool_call.get("arguments", "{}"))
+            _logger.debug("Attempting to execute tool: %s(%s)", tool_name, args)
+            tool = self.tool_manager.get_tool(tool_name)
 
-                tool_name = tool_call.get("name")
-                args = json.loads(tool_call.get("arguments", "{}"))
-                _logger.debug("Executing tool: %s(%s)", tool_name, args)
-                tool = self.tool_manager.get_tool(tool_name)
+            if not tool:
+                tool_not_found_msg = Message(
+                    role="tool_result",
+                    content=[ContentPart(
+                        part_type="tool_result",
+                        name=tool_name,
+                        content=f"Error: Tool '{tool_name}' not found",
+                    )],
+                )
+                self.chat_history.append_message(tool_not_found_msg)
+                self._session.publish_notification(tool_not_found_msg)
+                return (ExecStatus.TOOL_NOT_FOUND, None)
 
-                if not tool:
-                    msg = Message(
-                        role="tool_result",
-                        content=[ContentPart(
-                            part_type="tool_result",
-                            name=tool_name,
-                            content=f"Error: Tool '{tool_name}' not found",
-                        )],
-                    )
-                    self.chat_history.append_message(msg)
-                    await self._call_hooks("after_tool_execution", tool_call, f"Error: Tool '{tool_name}' not found", False)
-                    self._executed_tool_ids.add(tool_call_id)
-                    continue
-
-                args = _cast_args_to_types(tool.func, args)
-
-                hook_result = await self._call_hooks("before_tool_execution", tool_call)
-                if hook_result is not None:
-                    allow, message = hook_result
-                    if not allow:
-                        self._append_tool_result(tool_name=tool_name, content=message, success=False)
-                        await self._call_hooks("after_tool_execution", tool_call, message, False)
-                        self._executed_tool_ids.add(tool_call_id)
-                        continue
-                    # If hook returns "pending approval" (new convention for milestone 2)
-                    if allow is None or allow == "pending":
-                        self._pending_tool_id = tool_call_id
-                        return ("tool_pending", {"tool_call": tool_call})
-
-                try:
-                    result = tool.execute(**args)
-                    self._append_tool_result(tool_name=tool_name, content=str(result), success=True)
-                    await self._call_hooks("after_tool_execution", tool_call, str(result), True)
-                    _logger.debug("Tool %s returned: %s", tool_name, str(result))
-                except Exception as e:
-                    self._append_tool_result(
-                        tool_name=tool_name,
-                        content=f"Error: {type(e).__name__}: {str(e)}",
-                        success=False,
-                    )
-                    await self._call_hooks("after_tool_execution", tool_call, str(e), False)
-                    _logger.debug("Tool %s failed: %s", tool_name, str(e))
-
-                self._executed_tool_ids.add(tool_call_id)
-
-            new_count = len(self.chat_history.messages) - history_length_before
-            delta_messages = (
-                self.chat_history.messages[-new_count:] if new_count > 0 else []
-            )
-            hook_result = await self._call_hooks("before_loop_continue", delta_messages)
+            args = _cast_args_to_types(tool.func, args)
+            hook_result = await self._call_hooks("before_tool_execution", tool_call)
             if hook_result is not None:
-                should_exit, reason = hook_result
-                if should_exit:
-                    await self._call_hooks("before_loop_exit", reason)
-                    return ("done", None)
-            _logger.debug("[repl] step(): tool calls executed, returning continue")
-            # Clear state after processing all tool calls
-            self._assistant_tool_calls = None
-            self._executed_tool_ids = set()
-            self._last_response_text = None
-            return ("continue", None)
-        else:
+                allow, message = hook_result
+                if not allow:
+                    self._append_tool_result(tool_name=tool_name, content=message, success=False)
+                    return (ExecStatus.TOOL_DENIED, None)
+
+            try:
+                result = tool.execute(**args)
+                self._append_tool_result(tool_name=tool_name, content=str(result), success=True)
+                await self._call_hooks("after_tool_execution", tool_call, str(result), True)
+                _logger.debug("Tool %s returned: %s", tool_name, str(result))
+            except Exception as e:
+                self._append_tool_result(
+                    tool_name=tool_name,
+                    content=f"Error: {type(e).__name__}: {str(e)}",
+                    success=False,
+                )
+                _logger.debug("Tool %s failed: %s", tool_name, str(e))
+                return (ExecStatus.TOOL_FAILED, None)
+
+            _logger.debug("[repl] step(): tool call executed; continue")
+
+        if did_tool_calls and not self._session.has_pending_tool_call():
+            _logger.debug("[repl] step(): Did tool calls. Need to continue, such that the ChatBot can see the result.")
+            return (ExecStatus.CONTINUE, None)
+
+        if has_text_part and not self._session.has_pending_tool_call():
             # No tool calls — check for final answer or reasoning-only response
-            _logger.debug("[repl] step(): no tool calls, _last_response_text=%r", self._last_response_text)
-            self._assistant_tool_calls = None
-            self._executed_tool_ids = set()
+            _logger.debug("[repl] step(): Had final answer.")
+            return (ExecStatus.FINISHED, None)
 
-            if self._last_response_text:
-                await self._call_hooks("before_loop_exit", "final_answer")
-                _logger.debug("[repl] step(): returning done (final_answer)")
-                return ("done", None)
-            # Only reasoning text
-            hook_result = await self._call_hooks("before_loop_continue", [])
-            if hook_result is not None:
-                should_exit, reason = hook_result
-                if should_exit:
-                    await self._call_hooks("before_loop_exit", reason)
-                    return ("done", None)
-            return ("continue", None)
+        if self._session.has_pending_tool_call():
+            _logger.debug("[repl] step(): Waiting for user review of pending tool calls.")
+            return (ExecStatus.PENDING, None)
+
+        # no tool calls, no pending tools, no text part: only reasoning...
+        _logger.debug("[repl] step(): Response contained only reasoning part(s).")
+        return (ExecStatus.CONTINUE, None)
 
     async def execute_pending_tool(self, tool_call: dict) -> None:
         """Execute a tool call that was previously pending approval.
@@ -334,8 +304,8 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         msg = Message(
             role="tool_result",
             content=[
-                ContentPart(part_type="tool_result", name=tool_name, content=content),
-                ContentPart(part_type="bool", success=success),
+                ContentPart(part_type="tool_result", name=tool_name, content=content)
             ],
         )
         self.chat_history.append_message(msg)
+        self._session.publish_notification(msg)

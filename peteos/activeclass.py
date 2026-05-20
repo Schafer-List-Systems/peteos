@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Optional
+
+_logger = logging.getLogger(__name__)
 
 
 class ActiveClass:
@@ -98,8 +101,10 @@ class ActiveClass:
             True if an event is available, False if timeout expired.
         """
         if not self.event_queue.empty():
+            _logger.debug("[ActiveClass:%s] event already in queue, returning True immediately", type(self).__name__)
             return True
 
+        _logger.debug("[ActiveClass:%s] no event, starting wait", type(self).__name__)
         self._event_trigger.clear()
         deadline = (asyncio.get_event_loop().time() + timeout) if timeout else None
 
@@ -114,6 +119,7 @@ class ActiveClass:
                 return False
 
             if not self.event_queue.empty():
+                _logger.debug("[ActiveClass:%s] received event after wait, returning True", type(self).__name__)
                 return True
 
     async def _wait(self, timeout: Optional[float] = None) -> Optional[Any]:
@@ -134,3 +140,4 @@ class ActiveClass:
         """Push an event into the event queue and wake any _wait()."""
         self.event_queue.put_nowait(event)
         self._event_trigger.set()
+        _logger.debug("[ActiveClass:%s] pushed event (%s), queue_size=%d, trigger set", type(self).__name__, event.__class__.__name__ if event is not None else "None", self.event_queue.qsize())

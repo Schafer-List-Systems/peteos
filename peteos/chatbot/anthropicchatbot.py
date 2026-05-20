@@ -320,77 +320,32 @@ class AnthropicChatBotResponse(GenericChatBotResponse):
         if "content" in data and isinstance(data["content"], list):
             content_array = []
             for item in data["content"]:
-                if isinstance(item, dict):
-                    content_item = {"type": item.get("type", "text")}
-                    if item.get("type") == "tool_use":
-                        # Convert input dict to arguments JSON string
-                        if "id" in item:
-                            content_item["id"] = item["id"]
-                        if "name" in item:
-                            content_item["name"] = item["name"]
-                        if "input" in item:
-                            content_item["arguments"] = json.dumps(item["input"])
-                    elif item.get("type") == "thinking":
-                        # thinking blocks use "thinking" key, not "text"
-                        content_item["content"] = item.get("thinking", "")
-                    else:
-                        # text blocks
-                        content_item["content"] = item.get("text", "")
-                    content_array.append(content_item)
+                if not isinstance(item, dict):
+                    _logger.error("Expected content item to be a dict, got %s", type(item).__name__)
+                    continue
+                content_item = {"type": item.get("type", "text")}
+                if item.get("type") == "tool_use":
+                    # Convert input dict to arguments JSON string
+                    if "id" in item:
+                        content_item["id"] = item["id"]
+                    if "name" in item:
+                        content_item["name"] = item["name"]
+                    if "input" in item:
+                        content_item["arguments"] = json.dumps(item["input"])
+                elif item.get("type") == "thinking":
+                    # thinking blocks use "thinking" key, not "text"
+                    content_item["content"] = item.get("thinking", "")
+                else:
+                    # text blocks
+                    content_item["content"] = item.get("text", "")
+                content_array.append(content_item)
             response._data["content"] = content_array
-
-            # Extract text for backwards compatibility
-            text_parts = [
-                item.get("content", "")
-                for item in content_array
-                if isinstance(item, dict) and item.get("type") == "text"
-            ]
-            if text_parts:
-                response._data["text"] = "".join(text_parts)
-
-            # Extract reasoning from thinking blocks
-            reasoning_parts = [
-                item.get("content", "")
-                for item in content_array
-                if isinstance(item, dict) and item.get("type") == "thinking"
-            ]
-            if reasoning_parts:
-                response._data["reasoning"] = "".join(reasoning_parts)
 
         # Extract stop_reason
         if "stop_reason" in data:
             response._data["stop_reason"] = data["stop_reason"]
 
         return response
-
-    def _accumulate_event(self, event: Dict[str, Any]) -> None:
-        """
-        Accumulate translated event into response dict.
-
-        For Anthropic responses, also extract text from content array for
-        backwards compatibility.
-        """
-        super()._accumulate_event(event)
-
-        # Extract text from content array for backwards compatibility
-        # Text blocks in Anthropic have type='text', thinking blocks have type='thinking'
-        if "content" in self._data and isinstance(self._data["content"], list):
-            # Concatenate all text content to 'text' field
-            text_parts = [
-                item.get("content", "")
-                for item in self._data["content"]
-                if isinstance(item, dict) and item.get("type") == "text"
-            ]
-            if text_parts:
-                self._data["text"] = "".join(text_parts)
-            # Also concatenate thinking content to 'reasoning' field
-            reasoning_parts = [
-                item.get("content", "")
-                for item in self._data["content"]
-                if isinstance(item, dict) and item.get("type") == "thinking"
-            ]
-            if reasoning_parts:
-                self._data["reasoning"] = "".join(reasoning_parts)
 
     def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """

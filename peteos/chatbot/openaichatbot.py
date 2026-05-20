@@ -342,24 +342,5 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
     def _accumulate_event(self, event: Dict[str, Any]) -> None:
         """
         Accumulate translated event into response dict using delta merge.
-
-        For OpenAI responses:
-        - Content is plain text (not interleaved blocks like Anthropic)
-        - The 'content' array contains text blocks
-        - For backwards compatibility, also set 'text' field by concatenating text blocks
-
-        Args:
-            event: Translated event with target keys (and preserved index fields).
         """
         merge_delta_into_target(self._data, event)
-
-        # For OpenAI responses: extract text from content array for backwards compatibility
-        if "content" in self._data and isinstance(self._data["content"], list):
-            # Concatenate all text content to 'text' field
-            text_parts = [
-                item.get("content", "")
-                for item in self._data["content"]
-                if isinstance(item, dict) and item.get("type") == "text"
-            ]
-            if text_parts:
-                self._data["text"] = "".join(text_parts)

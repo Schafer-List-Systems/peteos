@@ -42,7 +42,6 @@ class Agent:
         self._sessions: Dict[uuid.UUID, Session] = {}
 
         # Track which channels are subscribed to which sessions
-        self._session_channels: Dict[uuid.UUID, Set[Channel]] = {}
 
         # Track registered channels (for Channel base class compatibility)
         self._channels: Dict[str, Channel] = {}
@@ -89,9 +88,6 @@ class Agent:
             chatbot_manager=self._chatbot_manager
         )
         self._sessions[session.uuid] = session
-
-        # Initialize channel tracking
-        self._session_channels[session.uuid] = set()
 
         # Register hooks on the session's execution environment
         env = session.execution_environment
@@ -145,18 +141,12 @@ class Agent:
     ) -> tuple:
         """Hook callback fired before each tool execution.
 
-        Publishes notification to all subscribed channels. Auto-approves
-        tools listed in the session's auto_approve_tools.
+        Auto-approves tools listed in the session's auto_approve_tools.
 
         Returns:
             Tuple (allow: bool | None, message: str | None) - Returns
             (True, None) for auto-approved tools, ("pending", None) otherwise.
         """
-        msg = Message(
-            role="tool",
-            content=[ContentPart(part_type="tool_call", tool_call=tool_call)],
-        )
-        self._publish_notification(session_uuid, msg)
 
         session = self.get_session(session_uuid)
         if session is not None:
@@ -174,13 +164,7 @@ class Agent:
         success: bool
     ) -> None:
         """Hook callback fired after tool execution completes."""
-        status = "error" if not success else "ok"
-        msg = Message(
-            role="tool_result",
-            content=[ContentPart(part_type="tool_result", content=result)],
-            metadata={"tool_status": status},
-        )
-        self._publish_notification(session_uuid, msg)
+        pass
 
     def _on_before_loop_continue(
         self,
@@ -191,7 +175,9 @@ class Agent:
         for msg in delta_messages:
             if msg.get_role() == "assistant" and msg.text:
                 _logger.debug("[agent] _on_before_loop_continue: publishing assistant msg %s text=%r", msg.get_id()[:8], truncate(msg.text)[:60])
-                self._publish_notification(session_uuid, msg)
+                session = self.get_session(session_uuid)
+                if session:
+                    session.publish_notification(msg)
 
     def _on_before_loop_exit(
         self,
@@ -201,26 +187,16 @@ class Agent:
         """Hook callback fired when the loop exits."""
         _logger.debug("[agent] _on_before_loop_exit: reason=%s session=%s", reason, session_uuid)
         session = self.get_session(session_uuid)
-        if session:
-            history = session.chat_history.messages
-            # Search for last assistant message (anchored messages sit at edges)
-            last_assistant = None
-            for msg in reversed(history):
-                if msg.get_role() == "assistant":
-                    last_assistant = msg
-                    break
-            if last_assistant is not None:
-                last_assistant.metadata["finish"] = True
-                _logger.debug("[agent] _on_before_loop_exit: publishing assistant msg %s finish=%s muted=%s", last_assistant.get_id()[:8], last_assistant.metadata.get("finish"), last_assistant.metadata.get("_sent_muted"))
-                self._publish_notification(session_uuid, last_assistant)
-
-    def _publish_notification(
-        self,
-        session_uuid: uuid.UUID,
-        message: Message
-    ) -> None:
-        """Publish a notification to all subscribed channels."""
-        channels = self._session_channels.get(session_uuid, set())
-        for channel in channels:
-            if channel:
-                channel.push_event(NotificationEvent(session_uuid, message))
+        if not session:
+            return
+        history = session.chat_history.messages
+        # Search for last assistant message (anchored messages sit at edges)
+        last_assistant = None
+        for msg in reversed(history):
+            if msg.get_role() == "assistant":
+                last_assistant = msg
+                break
+        if last_assistant is not None:
+            last_assistant.metadata["finish"] = True
+            _logger.debug("[agent] _on_before_loop_exit: publishing assistant msg %s finish=%s", last_assistant.get_id()[:8], last_assistant.metadata.get("finish"))
+            session.publish_notification(last_assistant)

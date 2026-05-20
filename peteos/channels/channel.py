@@ -112,31 +112,43 @@ class Channel(ActiveClass, ABC):
         finally:
             await self.stop()
 
-    def subscribe_to_session(self, session_uuid: uuid.UUID) -> None:
+    def subscribe_to_session(self, session_uuid: uuid.UUID) -> bool:
         """Subscribe this channel to notifications for a session.
 
-        Registers the channel with the agent's _session_channels and
-        starts the notification consumer (self.run()).
+        Raises no exception but returns False if already subscribed to
+        a different session, or if the session doesn't exist.
 
         Args:
             session_uuid: The session to subscribe to.
         """
+        if session_uuid not in self._agent._sessions:
+            return False
+        if self._session_uuid is not None and self._session_uuid != session_uuid:
+            return False  # already subscribed to a different session
         self._session_uuid = session_uuid
-        if session_uuid not in self._agent._session_channels:
-            self._agent._session_channels[session_uuid] = set()
-        self._agent._session_channels[session_uuid].add(self)
+        session = self._agent.get_session(session_uuid)
+        if session:
+            return session.subscribe(self)
+        return False
 
-    def unsubscribe_from_session(self, session_uuid: uuid.UUID) -> None:
+    def unsubscribe_from_session(self, session_uuid: uuid.UUID) -> bool:
         """Unsubscribe this channel from notifications for a session.
 
-        Removes the channel from the session's subscribed channels.
+        Returns False if the session doesn't exist or the channel is
+        not subscribed to it.
 
         Args:
             session_uuid: The session to unsubscribe from.
         """
-        if session_uuid in self._agent._session_channels:
-            if self in self._agent._session_channels[session_uuid]:
-                self._agent._session_channels[session_uuid].remove(self)
+        if session_uuid not in self._agent._sessions:
+            return False
+        session = self._agent.get_session(session_uuid)
+        if session:
+            result = session.unsubscribe(self)
+            if result:
+                self._session_uuid = None
+            return result
+        return False
 
     def enable_reasoning(self, on: bool) -> None:
         self._show_reasoning = on

@@ -2,10 +2,22 @@ import asyncio
 from abc import ABC, abstractmethod
 from functools import partial
 from typing import Any, Callable
+from enum import Enum
 
 from peteos.chatbot import ChatBot, ChatBotManager, ChatHistory
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
+
+
+class ExecStatus(str, Enum):
+    FINISHED = "finished"
+    INTERRUPTED = "interrupted"
+    CONTINUE = "continue"
+    PENDING = "pending"
+    ERROR = "error"
+    TOOL_NOT_FOUND = "tool_not_found"
+    TOOL_FAILED = "tool_failed"
+    TOOL_DENIED = "tool_denied"
 
 
 class ExecutionEnvironment(ABC):
