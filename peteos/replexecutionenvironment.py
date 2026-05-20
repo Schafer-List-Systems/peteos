@@ -189,7 +189,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 )
                 self.chat_history.append_message(msg)
                 self._session.publish_notification(msg)
-                await self._call_hooks("after_tool_execution", record.tool_call, denial_msg, False)
+                await self._call_hooks("after_tool_execution", self._session, record.tool_call, denial_msg, False)
                 _logger.debug("[repl] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
 
@@ -213,7 +213,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 return (ExecStatus.TOOL_NOT_FOUND, None)
 
             args = _cast_args_to_types(tool.func, args)
-            hook_result = await self._call_hooks("before_tool_execution", tool_call)
+            hook_result = await self._call_hooks("before_tool_execution", self._session, tool_call)
             if hook_result is not None:
                 allow, message = hook_result
                 if not allow:
@@ -225,7 +225,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             try:
                 result = tool.execute(**args)
                 self._append_tool_result(tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
-                await self._call_hooks("after_tool_execution", tool_call, str(result), True)
+                await self._call_hooks("after_tool_execution", self._session, tool_call, str(result), True)
                 _logger.debug("Tool %s returned: %s", tool_name, str(result))
             except Exception as e:
                 self._append_tool_result(

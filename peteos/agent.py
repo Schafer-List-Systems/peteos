@@ -2,12 +2,11 @@
 
 import asyncio
 import uuid
-from collections import deque
-from typing import Any, Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 
-from peteos.channels.channel import Channel, NotificationEvent
+from peteos.channels.channel import Channel
 from peteos.chatbot import ChatBotManager, Message, ContentPart
-from peteos.logger import get_logger, truncate
+from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.session import Session
@@ -93,16 +92,10 @@ class Agent:
         env = session.execution_environment
         env.register_hook("before_tool_execution",
                           self._on_before_tool_execution,
-                          session.uuid)
+                          session)
         env.register_hook("after_tool_execution",
                           self._on_after_tool_execution,
-                          session.uuid)
-        env.register_hook("before_loop_continue",
-                          self._on_before_loop_continue,
-                          session.uuid)
-        env.register_hook("before_loop_exit",
-                          self._on_before_loop_exit,
-                          session.uuid)
+                          session)
 
         # Start the session's event loop
         await session.start()
@@ -136,7 +129,7 @@ class Agent:
 
     def _on_before_tool_execution(
         self,
-        session_uuid: uuid.UUID,
+        session: Session,
         tool_call: dict
     ) -> tuple:
         """Hook callback fired before each tool execution.
@@ -147,56 +140,24 @@ class Agent:
             Tuple (allow: bool | None, message: str | None) - Returns
             (True, None) for auto-approved tools, ("pending", None) otherwise.
         """
-
-        session = self.get_session(session_uuid)
-        if session is not None:
-            tool_name = tool_call.get("name", "")
-            if tool_name in session.auto_approve_tools:
-                return (True, None)
+        tool_name = tool_call.get("name", "")
+        if tool_name in session.auto_approve_tools:
+            return (True, None)
 
         return ("pending", None)
 
     def _on_after_tool_execution(
         self,
-        session_uuid: uuid.UUID,
+        session: Session,
         tool_call: dict,
         result: str,
         success: bool
     ) -> None:
         """Hook callback fired after tool execution completes."""
-        pass
-
-    def _on_before_loop_continue(
-        self,
-        session_uuid: uuid.UUID,
-        delta_messages: List[Message]
-    ) -> None:
-        """Hook callback fired when the loop continues after tool calls."""
-        for msg in delta_messages:
-            if msg.get_role() == "assistant" and msg.text:
-                _logger.debug("[agent] _on_before_loop_continue: publishing assistant msg %s text=%r", msg.get_id()[:8], truncate(msg.text)[:60])
-                session = self.get_session(session_uuid)
-                if session:
-                    session.publish_notification(msg)
-
-    def _on_before_loop_exit(
-        self,
-        session_uuid: uuid.UUID,
-        reason: str
-    ) -> None:
-        """Hook callback fired when the loop exits."""
-        _logger.debug("[agent] _on_before_loop_exit: reason=%s session=%s", reason, session_uuid)
-        session = self.get_session(session_uuid)
-        if not session:
-            return
-        history = session.chat_history.messages
-        # Search for last assistant message (anchored messages sit at edges)
-        last_assistant = None
-        for msg in reversed(history):
-            if msg.get_role() == "assistant":
-                last_assistant = msg
-                break
-        if last_assistant is not None:
-            last_assistant.metadata["finish"] = True
-            _logger.debug("[agent] _on_before_loop_exit: publishing assistant msg %s finish=%s", last_assistant.get_id()[:8], last_assistant.metadata.get("finish"))
-            session.publish_notification(last_assistant)
+        status = "error" if not success else "ok"
+        msg = Message(
+            role="tool_result",
+            content=[ContentPart(part_type="tool_result", content=result)],
+            metadata={"tool_status": status},
+        )
+        session.publish_notification(msg)

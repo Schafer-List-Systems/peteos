@@ -50,9 +50,6 @@ class ExecutionEnvironment(ABC):
         self._hooks: dict[str, list[Callable]] = {
             "before_tool_execution": [],
             "after_tool_execution": [],
-            "before_loop_continue": [],
-            "before_loop_exit": [],
-            "on_message_published": [],
         }
 
     @property
@@ -145,8 +142,7 @@ class ExecutionEnvironment(ABC):
         """Register a hook callback for a specific hook point.
 
         Args:
-            hook_point: One of "before_tool_execution", "after_tool_execution",
-                "before_loop_continue", or "before_loop_exit".
+            hook_point: "before_tool_execution" or "after_tool_execution".
             callback: The hook function to register. Can be sync or async.
             *args: Additional arguments to pass to the callback when called.
                 These will be prepended to any arguments passed at call time.

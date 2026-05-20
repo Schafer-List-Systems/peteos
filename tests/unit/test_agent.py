@@ -155,10 +155,10 @@ def test_publish_notification_to_channels(agent_with_sessions):
 
     channel = MagicMock()
     channel.name = "shell"
-    agent_with_sessions._session_channels[session.uuid] = {channel}
+    session.subscribe(channel)
 
-    agent_with_sessions._publish_notification(
-        session.uuid, Message(role="user", content=[ContentPart(part_type="text", text="Test")])
+    session.publish_notification(
+        Message(role="user", content=[ContentPart(part_type="text", text="Test")])
     )
 
     channel.push_event.assert_called_once()
@@ -170,7 +170,7 @@ async def test_on_before_tool_execution(agent_with_sessions):
     session = await agent_with_sessions.create_session("test")
     tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
 
-    result = agent_with_sessions._on_before_tool_execution(session.uuid, tool_call)
+    result = agent_with_sessions._on_before_tool_execution(session, tool_call)
     assert result == ("pending", None)
 
 
