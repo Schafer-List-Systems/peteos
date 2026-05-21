@@ -149,8 +149,8 @@ async def main():
     # Register awakeness status hook on the role's system prompt
     role_name = nextcloud_config.get("default_role", "router")
     role = role_manager.get_role(role_name)
-    if role is not None:
-        role.add_system_prompt_hook(_state.status_text)
+    # if role is not None:
+    #     role.add_system_prompt_hook(_state.status_text)
 
     # Create the stdout channel first so its methods are available for tool registration
     # (tools access the channel via _state.channel, not the tool manager)
@@ -175,28 +175,17 @@ async def main():
     except FileNotFoundError:
         max_tokens = 60000
 
-    async def _on_before_loop_continue(_delta_messages, _max=max_tokens):
+    def _on_before_send_to_chatbot(_sess, _history, _max=max_tokens):
         _, total_tokens = session.execution_environment.chat_history.rolling_window_discard(_max, _max // 2)
         _state.last_context_tokens = total_tokens
-        return None
 
-    session.execution_environment.register_hook("before_loop_continue", _on_before_loop_continue)
+    session.execution_environment.register_hook("before_send_to_chatbot", _on_before_send_to_chatbot)
 
     print(f"Created session: {session.uuid}")
     print()
 
     # Create the Nextcloud Talk channel (user-facing, sends and receives)
     nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=nextcloud_config)
-
-    # Wire the nextcloud channel to the tools for per-session muted mode
-    _state.set_nextcloud_channel(nextcloud)
-    _state.router_session_uuid = session.uuid
-
-    # Snapshot muted state as message metadata on every published message
-    async def _on_message_published(message, session_uuid):
-        message.metadata["_sent_muted"] = _state.is_muted
-
-    session.execution_environment.register_hook("on_message_published", _on_message_published)
 
     # Add context size awareness to the system prompt (reads cached count from _state)
     from peteos.chatbot.message import SystemPromptMessage

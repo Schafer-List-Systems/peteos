@@ -17,31 +17,8 @@ class LogState:
 
     _filters: list[str] = []
     channel: "ReadStdoutChannel | None" = None
-    nextcloud_channel: "NextcloudTalkChannel | None" = None
-    router_session_uuid: "uuid.UUID | None" = None
     last_context_tokens: int = 0
     is_muted: bool = False
-    _previous_muted: bool | None = None
-
-    def set_nextcloud_channel(self, ch: "NextcloudTalkChannel") -> None:
-        self.nextcloud_channel = ch
-
-    def status_text(self) -> str:
-        """Return the status line for the system prompt.
-
-        Logs a debug message when the muted status changes
-        from the previous call.
-        """
-        if self._previous_muted is not None and self.is_muted != self._previous_muted:
-            emoji = "🌙" if self.is_muted else "☀️"
-            _logger.debug(
-                "Muted status changed: %s -> %s %s",
-                "muted" if self._previous_muted else "unmuted",
-                "muted" if self.is_muted else "unmuted",
-                emoji,
-            )
-        self._previous_muted = self.is_muted
-        return f"Status: you are currently {'muted' if self.is_muted else 'unmuted'}.\n"
 
 
 _state = LogState()
@@ -170,14 +147,60 @@ def list_exclude_patterns() -> str:
     return "Exclude patterns:\n" + "\n".join(lines)
 
 
+namespaces = {}
+
+def eval_python(python_string: str, namespace_name: str = "") -> str:
+    """Execute Python code and return stdout and return_value.
+
+    The return value is captured by setting _result in the code.
+    Use the same namespace_name across calls to maintain state (variables defined in one call are available in subsequent calls).
+    Omit namespace_name or pass '' for a fresh anonymous namespace destroyed after each call.
+    Pass 'globals' to execute in the module's global namespace (sharing module-level imports and definitions).
+    Pass a named namespace_name for persistent state.
+
+    Args:
+        python_string: A string containing valid Python code to execute.
+        namespace_name: The namespace name for state persistence. Empty string for ephemeral (default).
+    """
+    import io
+    import sys
+
+    if namespace_name == "globals":
+        ns: dict = globals()
+    elif namespace_name == "":
+        ns = {}
+    else:
+        ns = namespaces.get(namespace_name)
+        if ns is None:
+            namespaces[namespace_name] = {}
+            ns = namespaces[namespace_name]
+
+    stdout_capture = io.StringIO()
+    old_stdout = sys.stdout
+    return_value = None
+    try:
+        sys.stdout = stdout_capture
+        code = compile(python_string, "<eval>", "exec")
+        exec(code, ns)
+        return_value = ns.get("_result")
+    except Exception as e:
+        return_value = f"Error: {type(e).__name__}: {e}"
+    finally:
+        sys.stdout = old_stdout
+
+    stdout = stdout_capture.getvalue()
+    return f"stdout: {stdout!r}\nreturn_value: {return_value!r}"
+
+
 def register_state_tools(tool_manager: ToolManager) -> None:
-    """Register router mute/unmute tools on the given tool manager.
+    """Register state tools on the given tool manager.
 
     Args:
         tool_manager: The ToolManager to register the tools on.
     """
     tool_manager.register_tool(func=mute_router)
     tool_manager.register_tool(func=unmute_router)
+    tool_manager.register_tool(func=eval_python)
 
 
 def register_filter_tools(
