@@ -222,6 +222,35 @@ class OpenAIChatBot(GenericChatBot):
                         else:
                             # Unknown source type - include as-is
                             content_parts.append(item)
+                    elif item.get("type") == "video":
+                        # Transform video to OpenAI media format
+                        source = item.get("source", {})
+                        if source.get("type") == "base64":
+                            b64_data = source.get("data", "")
+                            media_type = source.get("media_type", "video/mp4")
+                            media_url = f"data:{media_type};base64,{b64_data}"
+                            content_parts.append({"type": "media", "source": {"type": "base64", "media_type": media_type, "data": b64_data}})
+                        elif source.get("type") == "url":
+                            content_parts.append({"type": "media", "source": {"type": "url", "url": source["url"]}})
+                        else:
+                            content_parts.append(item)
+                    elif item.get("type") == "pdf":
+                        # Transform PDF to OpenAI input_file format
+                        source = item.get("source", {})
+                        if source.get("type") == "base64":
+                            b64_data = source.get("data", "")
+                            media_type = source.get("media_type", "application/pdf")
+                            content_parts.append({
+                                "type": "input_file",
+                                "file_url": f"data:{media_type};base64,{b64_data}"
+                            })
+                        elif source.get("type") == "url":
+                            content_parts.append({
+                                "type": "input_file",
+                                "file_url": source["url"]
+                            })
+                        else:
+                            content_parts.append(item)
                     elif item.get("type") == "reasoning":
                         # Translate reasoning to content for OpenAI
                         content_parts.append({

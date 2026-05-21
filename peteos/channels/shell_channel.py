@@ -87,8 +87,8 @@ class InteractiveShellChannel(Channel):
             )
             asyncio.create_task(session.queue_message(message))
 
-    def _handle_image(self, args: str) -> tuple[bool, str]:
-        """Handle /image command: post an image to the current session."""
+    def _handle_file(self, args: str) -> tuple[bool, str]:
+        """Handle /image or /file command."""
         if self._active_session_uuid is None:
             return (True, "No session selected")
         parts = args.split(maxsplit=1)
@@ -98,27 +98,38 @@ class InteractiveShellChannel(Channel):
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.create_task(self._queue_image_message(src, text))
+                asyncio.create_task(self._queue_file_message(src, text, "auto"))
                 return (True, "")
             else:
-                loop.run_until_complete(self._queue_image_message(src, text))
+                loop.run_until_complete(self._queue_file_message(src, text, "auto"))
                 return (True, "")
         except (FileNotFoundError, RuntimeError) as e:
             return (True, f"Error: {e}")
         except Exception as e:
             return (True, f"Error: {type(e).__name__}: {e}")
 
-    async def _queue_image_message(self, src: str, text: str) -> None:
-        """Queue an image message to the current session."""
-        from peteos.utils.image import create_image_content_part_async
+    async def _queue_file_message(
+        self, src: str, text: str, file_type: str = "auto"
+    ) -> None:
+        """Queue a file message to the current session."""
+        from peteos.utils.image import create_content_part_async
+
+        if file_type == "image":
+            from peteos.utils.image import create_image_content_part_async
+            file_part = await create_image_content_part_async(src)
+        else:
+            file_part = await create_content_part_async(src)
+
         parts = [ContentPart(part_type="text", text=text)] if text else []
-        img_part = await create_image_content_part_async(src)
-        parts.append(img_part)
+        parts.append(file_part)
         message = Message(role="user", content=parts)
         session = self._agent.get_session(self._active_session_uuid)
         if session:
             await session.queue_message(message)
-            _logger.debug("Image message queued for session %s from %s", self._active_session_uuid, src)
+            _logger.debug(
+                "%s message queued for session %s from %s",
+                file_type, self._active_session_uuid, src,
+            )
 
     def _get_input_line(self) -> Optional[str]:
         """Synchronous input reader for use with run_in_executor."""
@@ -268,10 +279,10 @@ class InteractiveShellChannel(Channel):
                 output += f"\n  [{record.tool_call_id}] {record.tool_call.get('name', '?')} ({record.approval_status.value})"
             return (True, output)
 
-        elif command == "/image":
+        elif command in ("/image", "/file"):
             if not args or self._active_session_uuid is None:
-                return (True, "Usage: /image <filepath or url> [text]")
-            return self._handle_image(args)
+                return (True, "Usage: /file <filepath or url> [text]")
+            return self._handle_file(args)
 
         elif command == "/quit":
             self._running = False

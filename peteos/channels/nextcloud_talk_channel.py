@@ -236,6 +236,26 @@ class NextcloudTalkChannel(Channel):
             else:
                 payload["message"] = "[Image]"
 
+        elif part.type == "video":
+            source = part.source or {}
+            if source.get("type") == "url":
+                payload["message"] = f"📹 [Video]({source['url']})"
+            elif source.get("type") == "base64":
+                media_type = source.get("media_type", "video/mp4")
+                payload["message"] = f"[Video] (base64 encoded, {media_type})"
+            else:
+                payload["message"] = "[Video]"
+
+        elif part.type == "pdf":
+            source = part.source or {}
+            if source.get("type") == "url":
+                payload["message"] = f"📄 [Document]({source['url']})"
+            elif source.get("type") == "base64":
+                media_type = source.get("media_type", "application/pdf")
+                payload["message"] = f"[Document] (base64 encoded, {media_type})"
+            else:
+                payload["message"] = "[Document]"
+
         return payload
 
 
