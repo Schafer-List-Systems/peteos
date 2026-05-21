@@ -10,6 +10,7 @@ from peteos.chatbot.chatbotresponse import ChatBotResponse
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
 from peteos.chatbot import ChatBotManager
+from peteos.executionenvironment import ExecStatus
 
 
 def _user_msg(text: str) -> Message:
@@ -73,17 +74,17 @@ class MockExecutionEnvironment:
     async def wait_for_stop(self):
         await self._completion_signal.wait()
 
-    async def step(self):
-        """Simulate one step: return ('done', None) unless waiting_on_interrupt."""
+    async def step(self, session):
+        """Simulate one step: return (ExecStatus, None) unless waiting_on_interrupt."""
         if self.simulate_running:
             await asyncio.sleep(0.01)
         self._running = True
         self.run_count += 1
         if self.wait_on_interrupt and self._interrupt:
             self._running = False
-            return ("done", None)
+            return (ExecStatus.FINISHED, None)
         self._running = False
-        return ("done", None)
+        return (ExecStatus.FINISHED, None)
 
     async def execute_pending_tool(self, tool_call):
         pass

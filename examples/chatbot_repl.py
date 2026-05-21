@@ -1,6 +1,6 @@
 """Example: ChatBot REPL with multi-turn conversation.
 
-This example demonstrates how to use REPLExecutionEnvironment for a multi-turn
+This example demonstrates how to use Session for a multi-turn
 conversation where the model remembers previous responses.
 
 Requirements:
@@ -26,10 +26,11 @@ Note:
 import asyncio
 import os
 
-from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
-from peteos.httpclient import HTTPClient
-from peteos.chathistory import ChatHistory
-from peteos.replexecutionenvironment import REPLExecutionEnvironment
+from peteos.agent import Agent
+from peteos.chatbot.manager import ChatBotManager
+from peteos.chatbot import Message, ContentPart
+from peteos.role import Role
+from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
@@ -38,40 +39,25 @@ async def main():
     base_url = os.getenv("BASE_URL", "http://localhost:8000")
     model = os.getenv("MODEL", "qwen3.5-35b")
     chat_protocol = os.getenv("CHAT_PROTOCOL", "anthropic").lower()
-    use_streaming = os.getenv("USE_STREAMING", "true").lower() == "true"
 
     print(f"Connecting to {base_url} with model {model}")
     print(f"Protocol: {chat_protocol}")
-    print(f"Streaming mode: {use_streaming}")
     print()
 
-    # Create HTTP client with timeout
-    http_client = HTTPClient(timeout=60.0)
-
-    # Create ChatBot instance based on protocol
-    if chat_protocol == "openai":
-        chatbot = OpenAIChatBot(
-            http_client=http_client,
-            model=model,
-            base_url=base_url
-        )
-    else:  # default to anthropic
-        chatbot = AnthropicChatBot(
-            http_client=http_client,
-            model=model,
-            base_url=base_url
-        )
-
-    # Create chat history and tool manager
-    chat_history = ChatHistory()
-    tool_manager = ToolManager()
-
-    # Create execution environment
-    env = REPLExecutionEnvironment(
-        chatbot=chatbot,
-        chat_history=chat_history,
-        tool_manager=tool_manager
+    # Create role manager with a role
+    role_manager = RoleManager()
+    role_manager.register_role(
+        Role(name="test", description="Test role", model=model)
     )
+
+    # Create chatbot manager
+    chatbot_manager = ChatBotManager()
+    await chatbot_manager.add_backend(chat_protocol, base_url)
+
+    tool_manager = ToolManager()
+    agent = Agent(role_manager, chatbot_manager, tool_manager)
+
+    session = await agent.create_session("test")
 
     # Define the multi-turn conversation
     questions = [
@@ -84,26 +70,23 @@ async def main():
         print(f"Turn {i}: {question}")
         print('='*60)
 
-        # Add user question to history
-        from peteos.message import Message
-        chat_history.append_message(Message(content={"role": "user", "content": question}))
+        # Add user question to session
+        session.push_event(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text=question)]
+        ))
 
-        # Run the REPL loop
-        await env.run()
+        # Wait for response
+        await asyncio.sleep(1)
 
         # Print accumulated response
-        from peteos.message import Message
-        # Find the last assistant message in chat history
-        last_msg = chat_history.messages[-1]
-        if last_msg.content.get("role") == "assistant":
-            text = last_msg.content.get("text", "")
-            print(text)
+        last_msg = session.chat_history.messages[-1]
+        if last_msg.get_role() == "assistant" and last_msg.content:
+            print(last_msg.content[0].text)
 
-        # Clear interrupt flag for next turn
-        env.clear_interrupt()
+        session.execution_environment.clear_interrupt()
 
-        # Reset interrupt flag
-        env._interrupt = False
+    await session.stop()
 
 
 if __name__ == "__main__":

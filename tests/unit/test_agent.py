@@ -180,32 +180,16 @@ async def test_on_after_tool_execution(agent_with_sessions):
     session = await agent_with_sessions.create_session("test")
     tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
 
-    agent_with_sessions._on_after_tool_execution(session.uuid, tool_call, "result", True)
+    agent_with_sessions._on_after_tool_execution(session, tool_call, "result", True)
 
 
 @pytest.mark.asyncio
-async def test_on_before_loop_continue(agent_with_sessions):
-    """Test before_loop_continue hook callback."""
+async def test_on_before_notification_publish(agent_with_sessions):
+    """Test before_notification_publish hook callback."""
     session = await agent_with_sessions.create_session("test")
-    delta_messages = [
-        Message(role="tool", content=[ContentPart(
-            part_type="tool", name="test_tool", description="test", parameters={}
-        )]),
-        Message(role="assistant", content=[ContentPart(part_type="text", text="Hello")])
-    ]
+    msg = Message(role="assistant", content=[ContentPart(part_type="text", text="Hello")])
 
-    agent_with_sessions._on_before_loop_continue(session.uuid, delta_messages)
-
-
-@pytest.mark.asyncio
-async def test_on_before_loop_exit(agent_with_sessions):
-    """Test before_loop_exit hook callback."""
-    session = await agent_with_sessions.create_session("test")
-    session.chat_history.append_message(
-        Message(role="assistant", content=[ContentPart(part_type="text", text="Final answer")])
-    )
-
-    agent_with_sessions._on_before_loop_exit(session.uuid, "final_answer")
+    agent_with_sessions._on_before_notification_publish(session, msg)
 
 
 @pytest.mark.asyncio
@@ -216,8 +200,8 @@ async def test_agent_creates_session_hooks(agent_with_sessions):
     env = session.execution_environment
     assert "before_tool_execution" in env._hooks
     assert "after_tool_execution" in env._hooks
-    assert "before_loop_continue" in env._hooks
-    assert "before_loop_exit" in env._hooks
+    assert "before_notification_publish" in env._hooks
+    assert "before_send_to_chatbot" in env._hooks
 
 
 @pytest.mark.asyncio
@@ -227,13 +211,13 @@ async def test_on_before_tool_execution_auto_approve(agent_with_auto_approve):
 
     # Tool in auto_approve_tools should return (True, None)
     approved_result = agent_with_auto_approve._on_before_tool_execution(
-        session.uuid, {"name": "web_fetch", "arguments": "{}"}
+        session, {"name": "web_fetch", "arguments": "{}"}
     )
     assert approved_result == (True, None)
 
     # Tool not in auto_approve_tools should still return ("pending", None)
     pending_result = agent_with_auto_approve._on_before_tool_execution(
-        session.uuid, {"name": "file_write", "arguments": "{}"}
+        session, {"name": "file_write", "arguments": "{}"}
     )
     assert pending_result == ("pending", None)
 
@@ -244,6 +228,6 @@ async def test_on_before_tool_execution_auto_approve_empty_list(agent_with_sessi
     session = await agent_with_sessions.create_session("test")
 
     result = agent_with_sessions._on_before_tool_execution(
-        session.uuid, {"name": "test_tool", "arguments": {"param": "value"}}
+        session, {"name": "test_tool", "arguments": {"param": "value"}}
     )
     assert result == ("pending", None)

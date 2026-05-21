@@ -113,15 +113,11 @@ class Agent:
     async def destroy_session(self, session_uuid: uuid.UUID) -> bool:
         """Destroy a session by its UUID.
 
-        Cleans up channel tracking and stops the session's event loop.
+        Stops the session's event loop.
         """
         if session_uuid in self._sessions:
             session = self._sessions[session_uuid]
             await session.stop()
-
-            # Clean up channel tracking
-            if session_uuid in self._session_channels:
-                del self._session_channels[session_uuid]
 
             del self._sessions[session_uuid]
             return True

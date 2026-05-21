@@ -88,7 +88,6 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         chat_history: ChatHistory,
         tool_manager: ToolManager,
         role: Role,
-        session: "Session"
     ):
         super().__init__(
             chatbot_manager=chatbot_manager,
@@ -96,15 +95,17 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             tool_manager=tool_manager,
             role=role,
         )
-        self._session: "Session" = session
 
-    async def step(self) -> tuple[str, dict | None]:
+    async def step(self, session: "Session") -> tuple[ExecStatus, dict | None]:
         """Execute one loop iteration.
 
         1. Call chatbot, collect response (skip on re-entry after tool_pending)
         2. Append assistant message to chat_history
         3. For each tool call: fire before_tool hook → execute or return tool_pending
         4. Continue/exit based on response type
+
+        Args:
+            session: The Session owning the state consumed by this step.
 
         Returns:
             ("done", None) | ("continue", None) | ("tool_pending", {"tool_call": dict})
@@ -114,9 +115,9 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
         # We only send the extended chat history to the chatbot to get a further response when there are no (more)
         # pending tool calls.
-        if not self._session.has_unfinished_tool_call():
-            self._call_hooks("before_send_to_chatbot", self._session, self.chat_history)
-            response = await self.chatbot.send_message(self.chat_history)
+        if not session.has_unfinished_tool_call():
+            self._call_hooks("before_send_to_chatbot", session, session.chat_history)
+            response = await self.chatbot.send_message(session.chat_history)
             async for _ in response:
                 if self._interrupt:
                     return (ExecStatus.INTERRUPTED, None)
@@ -144,7 +145,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 item_type = item["type"]
                 if item_type == "tool_use":
                     content_parts.append(ContentPart(part_type="tool_use", **item))
-                    self._session.add_tool_call(item)
+                    session.add_tool_call(item)
                 elif item_type == "text":
                     content_value = item["content"]
                     content_parts.append(ContentPart(part_type="text", text=content_value))
@@ -158,15 +159,15 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             # --- Phase 4: Append assistant message ---
             _logger.debug("ChatBot response: role=%s, content_types=%s", response.data.get("role"), [item.get("type") for item in content_array] if isinstance(content_array, list) else "N/A")
             response_msg = Message(role=response.data["role"], content=content_parts)
-            self.chat_history.append_message(response_msg)
-            self._session.publish_notification(response_msg)
+            session.chat_history.append_message(response_msg)
+            session.publish_notification(response_msg)
 
         # --- Phase 5: Execute tool calls ---
         from peteos.session import ToolApprovalStatus
 
-        did_tool_calls = self._session.has_reviewed_tool_call()
-        while self._session.has_reviewed_tool_call():
-            record = self._session.pop_pending_tool_call()
+        did_tool_calls = session.has_reviewed_tool_call()
+        while session.has_reviewed_tool_call():
+            record = session.pop_pending_tool_call()
             tool_call = record.tool_call
             tool_name = tool_call["name"]
 
@@ -183,15 +184,15 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                         tool_use_id=tool_call_id,
                     )],
                 )
-                self.chat_history.append_message(msg)
-                self._session.publish_notification(msg)
-                self._call_hooks("after_tool_execution", self._session, record.tool_call, denial_msg, False)
+                session.chat_history.append_message(msg)
+                session.publish_notification(msg)
+                self._call_hooks("after_tool_execution", session, record.tool_call, denial_msg, False)
                 _logger.debug("[repl] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
 
             args = json.loads(tool_call.get("arguments", "{}"))
             _logger.debug("Attempting to execute tool: %s(%s)", tool_name, args)
-            tool = self.tool_manager.get_tool(tool_name)
+            tool = session.tool_manager.get_tool(tool_name)
 
             if not tool:
                 tool_call_id = tool_call.get("id", "")
@@ -204,27 +205,28 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                         tool_use_id=tool_call_id,
                     )],
                 )
-                self.chat_history.append_message(tool_not_found_msg)
-                self._session.publish_notification(tool_not_found_msg)
+                session.chat_history.append_message(tool_not_found_msg)
+                session.publish_notification(tool_not_found_msg)
                 return (ExecStatus.TOOL_NOT_FOUND, None)
 
             args = _cast_args_to_types(tool.func, args)
-            hook_result = self._call_hooks("before_tool_execution", self._session, tool_call)
+            hook_result = self._call_hooks("before_tool_execution", session, tool_call)
             if hook_result is not None:
                 allow, message = hook_result
                 if not allow:
                     tool_call_id = tool_call.get("id", "")
-                    self._append_tool_result(tool_name=tool_name, content=message, tool_use_id=tool_call_id)
+                    self._append_tool_result(session, tool_name=tool_name, content=message, tool_use_id=tool_call_id)
                     return (ExecStatus.TOOL_DENIED, None)
 
             tool_call_id = tool_call.get("id", "")
             try:
                 result = tool.execute(**args)
-                self._append_tool_result(tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
-                self._call_hooks("after_tool_execution", self._session, tool_call, str(result), True)
+                self._append_tool_result(session, tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
+                self._call_hooks("after_tool_execution", session, tool_call, str(result), True)
                 _logger.debug("Tool %s returned: %s", tool_name, str(result))
             except Exception as e:
                 self._append_tool_result(
+                    session,
                     tool_name=tool_name,
                     content=f"Error: {type(e).__name__}: {str(e)}",
                     tool_use_id=tool_call_id
@@ -234,16 +236,16 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
             _logger.debug("[repl] step(): tool call executed; continue")
 
-        if did_tool_calls and not self._session.has_pending_tool_call():
+        if did_tool_calls and not session.has_pending_tool_call():
             _logger.debug("[repl] step(): Did tool calls. Need to continue, such that the ChatBot can see the result.")
             return (ExecStatus.CONTINUE, None)
 
-        if has_text_part and not self._session.has_pending_tool_call():
+        if has_text_part and not session.has_pending_tool_call():
             # No tool calls — check for final answer or reasoning-only response
             _logger.debug("[repl] step(): Had final answer.")
             return (ExecStatus.FINISHED, None)
 
-        if self._session.has_pending_tool_call():
+        if session.has_pending_tool_call():
             _logger.debug("[repl] step(): Waiting for user review of pending tool calls.")
             return (ExecStatus.PENDING, None)
 
@@ -253,6 +255,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
     def _append_tool_result(
         self,
+        session: "Session",
         tool_name: str,
         content: str,
         tool_use_id: str,
@@ -263,5 +266,5 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 ContentPart(part_type="tool_result", name=tool_name, content=content, tool_use_id=tool_use_id)
             ],
         )
-        self.chat_history.append_message(msg)
-        self._session.publish_notification(msg)
+        session.chat_history.append_message(msg)
+        session.publish_notification(msg)

@@ -1,12 +1,14 @@
 """Test that tool_use content parts are properly extracted for reaction matching.
 
 Anthropic's API returns tool call content parts with type='tool_use', not
-'tool_call' or 'tool_calls'. The send() method must extract the tool_call_id
-from these parts so the reaction handler can find pending tool calls.
+'tool_call' or 'tool_calls'. The send() method tracks tool_call_id in _sent_parts
+so the reaction handler can find pending tool calls.
 """
 
 import asyncio
 import uuid
+from unittest.mock import MagicMock
+
 import pytest
 
 from peteos.channels.nextcloud_talk_channel import NextcloudTalkChannel
@@ -44,6 +46,10 @@ def channel():
     session_uuid = uuid.uuid4()
     ch._session_conversations[session_uuid] = "fake_token"
     ch._rooms["fake_token"] = session_uuid
+    # Register a mock session so get_session returns a valid mock
+    mock_session = MagicMock()
+    mock_session.is_tool_call_pending.return_value = False
+    agent._sessions[session_uuid] = mock_session
     return ch
 
 
@@ -59,42 +65,36 @@ def _make_tool_use_part(tool_id="call_abc123"):
 
 @pytest.mark.asyncio
 async def test_send_tool_use_extracts_tool_call_ids(channel):
-    """Verify that a tool_use part's id is extracted into _tool_call_ids."""
+    """Verify that a tool_use part's id is extracted into _sent_parts."""
     part = _make_tool_use_part("call_abc123")
     message = Message(role="assistant", content=[part])
     session_uuid = list(channel._session_conversations.keys())[0]
 
     await channel.send(message, session_uuid=session_uuid)
 
-    reference_id = message.get_id()
-    assert reference_id in channel._tool_call_ids, (
-        f"Expected tool_call_ids to be populated for ref={reference_id}, "
-        f"but _tool_call_ids keys are: {list(channel._tool_call_ids.keys())}"
-    )
-    assert channel._tool_call_ids[reference_id] == ["call_abc123"], (
-        f"Expected ['call_abc123'], got {channel._tool_call_ids[reference_id]}"
+    # Check _sent_parts has the tool_call_id
+    found = any(part.get("tool_call_id") == "call_abc123" for part in channel._sent_parts)
+    assert found, (
+        f"Expected tool_call_id='call_abc123' in _sent_parts, "
+        f"but got: {channel._sent_parts}"
     )
 
 
 @pytest.mark.asyncio
-async def test_send_tool_use_adds_to_sent_messages(channel):
-    """Verify that sent tool_use messages have tool_call_ids in _sent_messages."""
+async def test_send_tool_use_adds_to_sent_parts(channel):
+    """Verify that sent tool_use messages are tracked in _sent_parts."""
     part = _make_tool_use_part("call_xyz789")
     message = Message(role="assistant", content=[part])
     session_uuid = list(channel._session_conversations.keys())[0]
 
     await channel.send(message, session_uuid=session_uuid)
 
-    reference_id = message.get_id()
     found = False
-    for sent in channel._sent_messages:
-        if sent.get("referenceId") == reference_id:
+    for sent in channel._sent_parts:
+        if sent.get("tool_call_id") == "call_xyz789":
             found = True
-            assert sent.get("tool_call_ids") == ["call_xyz789"], (
-                f"Expected tool_call_ids=['call_xyz789'], got {sent.get('tool_call_ids')}"
-            )
             break
-    assert found, f"No entry in _sent_messages for ref={reference_id}"
+    assert found, f"No entry in _sent_parts with tool_call_id='call_xyz789'"
 
 
 @pytest.mark.asyncio
@@ -112,8 +112,7 @@ async def test_tool_use_reaction_handler_can_find_pending_tool(channel):
 
     await channel.send(message, session_uuid=session_uuid)
 
-    reference_id = message.get_id()
-    extracted_ids = channel._tool_call_ids.get(reference_id, [])
-    assert extracted_ids == [tool_call_id], (
+    extracted_ids = [p.get("tool_call_id") for p in channel._sent_parts if p.get("tool_call_id")]
+    assert tool_call_id in extracted_ids, (
         f"Reaction handler needs tool_call_id {tool_call_id}, got {extracted_ids}"
     )

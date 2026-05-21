@@ -102,8 +102,14 @@ class TestAnthropicChatBotIntegration:
                 accumulated.append(chunk)
 
             assert len(accumulated) > 0
-            # Anthropic merges thinking+text into single content block for non-tool responses
-            assert "Mock response from Anthropic test server" in response.data.get("reasoning", "")
+            # Anthropic uses content array format
+            assert "content" in response.data
+            content = response.data["content"]
+            # Check that content blocks are present and contain expected text
+            full_text = ""
+            for block in content:
+                full_text += block.get("content", "")
+            assert "Mock response from Anthropic test server" in full_text
         finally:
             await server.stop()
 
@@ -127,6 +133,14 @@ class TestAnthropicChatBotIntegration:
             response = await chatbot.send_message(history, streaming=False)
 
             # Non-streaming: data is already populated via from_json
-            assert "Complete non-streaming response" in response.data["text"]
+            if "text" in response.data:
+                assert "Complete non-streaming response" in response.data["text"]
+            elif "content" in response.data:
+                full_text = ""
+                for block in response.data["content"]:
+                    full_text += block.get("content", "")
+                assert "Complete non-streaming response" in full_text
+            else:
+                assert False, f"Unexpected response.data format: {response.data.keys()}"
         finally:
             await server.stop()

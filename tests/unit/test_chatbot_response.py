@@ -122,9 +122,16 @@ class TestGenericChatBotResponseAnthropic:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify reasoning and text fields were extracted
-        assert response.data["reasoning"] == "Thinking step by step..."
-        assert response.data["text"] == "Hello World"
+        # Anthropic response uses content array format
+        assert "content" in response.data
+        content = response.data["content"]
+        assert len(content) >= 1
+        # First content item is thinking block
+        assert content[0]["type"] == "thinking"
+        assert content[0]["content"] == "Thinking step by step..."
+        # Second content item is text block
+        assert content[1]["type"] == "text"
+        assert content[1]["content"] == "Hello World"
 
     @pytest.mark.asyncio
     async def test_anthropic_message_start(self):
@@ -143,9 +150,15 @@ class TestGenericChatBotResponseAnthropic:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify reasoning and text extracted from content_block events
-        assert "Initial reasoning" in response.data["reasoning"]
-        assert response.data["text"] == "Hello World"
+        # Anthropic response uses content array format
+        assert "content" in response.data
+        content = response.data["content"]
+        assert content[0]["type"] == "thinking"
+        assert "Initial reasoning" in content[0]["content"]
+        assert content[1]["type"] == "text"
+        assert content[1]["content"] == "Hello World"
+        assert "role" in response.data
+        assert response.data["role"] == "assistant"
 
     @pytest.mark.asyncio
     async def test_anthropic_compatible_thinking(self):
@@ -164,9 +177,13 @@ class TestGenericChatBotResponseAnthropic:
         async for chunk in response:
             accumulated.append(chunk)
 
-        # Verify reasoning content is extracted from thinking_delta
-        assert response.data["reasoning"] == "Thinking Process:"
-        assert response.data["text"] == "Hello"
+        # Anthropic response uses content array format
+        assert "content" in response.data
+        content = response.data["content"]
+        assert content[0]["type"] == "thinking"
+        assert content[0]["content"] == "Thinking Process:"
+        assert content[1]["type"] == "text"
+        assert content[1]["content"] == "Hello"
 
     @pytest.mark.asyncio
     async def test_anthropic_non_streaming(self):
@@ -183,7 +200,9 @@ class TestGenericChatBotResponseAnthropic:
 
         # Non-streaming yields all content at once
         assert len(accumulated) >= 1
-        assert response.data["text"] == "Complete response"
+        assert "content" in response.data
+        assert response.data["content"][0]["type"] == "text"
+        assert response.data["content"][0]["content"] == "Complete response"
 
 
 class TestAnthropicChatBotResponseRole:
@@ -205,7 +224,9 @@ class TestAnthropicChatBotResponseRole:
             accumulated.append(chunk)
 
         assert response.data["role"] == "assistant"
-        assert response.data["text"] == "Hello World"
+        assert "content" in response.data
+        assert response.data["content"][0]["type"] == "text"
+        assert response.data["content"][0]["content"] == "Hello World"
 
     @pytest.mark.asyncio
     async def test_anthropic_message_start_with_role(self):
@@ -224,7 +245,9 @@ class TestAnthropicChatBotResponseRole:
 
         # Role extracted from message_start.message.role
         assert response.data["role"] == "bot"
-        assert response.data["text"] == "Hello World"
+        assert "content" in response.data
+        assert response.data["content"][0]["type"] == "text"
+        assert response.data["content"][0]["content"] == "Hello World"
 
 
 class TestChatBotResponseProperties:

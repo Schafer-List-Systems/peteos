@@ -176,7 +176,7 @@ async def main():
         max_tokens = 60000
 
     def _on_before_send_to_chatbot(_sess, _history, _max=max_tokens):
-        _, total_tokens = session.execution_environment.chat_history.rolling_window_discard(_max, _max // 2)
+        _, total_tokens = session.chat_history.rolling_window_discard(_max, _max // 2)
         _state.last_context_tokens = total_tokens
 
     session.execution_environment.register_hook("before_send_to_chatbot", _on_before_send_to_chatbot)

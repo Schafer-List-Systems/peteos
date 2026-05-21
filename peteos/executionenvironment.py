@@ -34,16 +34,12 @@ class ExecutionEnvironment(ABC):
         Initialize ExecutionEnvironment.
 
         Args:
-            chatbot_manager: The ChatBotManager instance to use (obligatory).
-            chat_history: The ChatHistory instance to use (obligatory).
-            tool_manager: The ToolManager instance to use (obligatory).
-            role: The Role instance to use (for model_regex and future properties).
+            chatbot_manager: The ChatBotManager instance to use.
+            chat_history: The ChatHistory instance to use.
+            tool_manager: The ToolManager instance to use.
+            role: The Role instance to use (for model selection).
         """
-        self.tool_manager = tool_manager
-        self.chat_history = chat_history
-        self.chatbot_manager = chatbot_manager
-        self.role = role
-        self._chatbot: ChatBot = self._select_chatbot()
+        self._chatbot: ChatBot = ExecutionEnvironment._select_chatbot(chatbot_manager, role)
         self._interrupt = False
         self._completion_signal: asyncio.Event = asyncio.Event()
         self._completion_signal.set()  # Start as signaled (not running)
@@ -59,13 +55,14 @@ class ExecutionEnvironment(ABC):
         """Get current ChatBot, selecting from manager if available."""
         return self._chatbot
 
-    def _select_chatbot(self) -> ChatBot:
+    @staticmethod
+    def _select_chatbot(chatbot_manager: ChatBotManager, role: Role) -> ChatBot:
         """Select a ChatBot from the manager based on role.model."""
-        chatbots = self.chatbot_manager.list_chatbots(self.role.model)
+        chatbots = chatbot_manager.list_chatbots(role.model)
         if not chatbots:
             raise ValueError(
-                f"No ChatBot found matching model pattern '{self.role.model}' "
-                f"for role '{self.role.name}'"
+                f"No ChatBot found matching model pattern '{role.model}' "
+                f"for role '{role.name}'"
             )
         return chatbots[0][1]
 
@@ -86,51 +83,16 @@ class ExecutionEnvironment(ABC):
         """Get the internal chat history."""
         return self.chat_history
 
-    async def run(self) -> None:
-        """
-        Run the agentic loop until the LLM responds with a final answer or the loop is interrupted.
-
-        This is a concrete implementation that wraps the abstract _run_impl() method
-        to provide completion signaling. Derived classes should override _run_impl().
-
-        Guards against concurrent calls: if another run() is already executing,
-        sets _interrupt and returns immediately to prevent race conditions on
-        shared data (chat_history, tool execution, etc.).
-        """
-        if not self._completion_signal.is_set():
-            # Another run() is already executing. Prevent concurrent _run_impl().
-            self._interrupt = True
-            return
-        self._completion_signal.clear()
-        try:
-            await self._run_impl()
-        finally:
-            self._completion_signal.set()
-
-    async def step(self) -> tuple[str, dict | None]:
+    async def step(self, session: "Session") -> tuple[ExecStatus, dict | None]:
         """Execute one loop iteration: chatbot call → tool(s) → continue/exit.
 
-        Returns:
-            Tuple of (status, data). Status is one of:
-            - "done": loop finished (final answer or interrupt)
-            - "continue": loop back to chatbot
-            - "tool_pending": waiting for user approval
+        Args:
+            session: The Session owning the state consumed by this step.
 
-            When status is "tool_pending", data is {"tool_call": dict}.
+        Returns:
+            Tuple of (status, data).
         """
         raise NotImplementedError
-
-    async def _run_impl(self) -> None:
-        """
-        Run the agentic loop by calling step() repeatedly.
-
-        Subclasses can override this for custom loop behavior,
-        but the default implementation calls step() in a loop.
-        """
-        while not self._interrupt:
-            status, _ = await self.step()
-            if status == "done":
-                break
 
     async def wait_for_stop(self) -> None:
         """

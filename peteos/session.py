@@ -123,7 +123,6 @@ class Session(ActiveClass):
             chat_history=self.chat_history,
             tool_manager=tool_manager,
             role=role,
-            session=self,
         )
 
         self._pending_tool_calls: list[ToolCallRecord] = []
@@ -199,7 +198,7 @@ class Session(ActiveClass):
     async def _run_session_loop(self) -> None:
         """Run step loop until finished, pending, or error."""
         while self.is_running():
-            status, _ = await self.execution_environment.step()
+            status, _ = await self.execution_environment.step(self)
             if status in (ExecStatus.FINISHED, ExecStatus.INTERRUPTED, ExecStatus.ERROR):
                 break
             elif status == ExecStatus.PENDING:
@@ -342,15 +341,7 @@ class Session(ActiveClass):
                 )
 
         chat_history = ChatHistory.from_dict(chat_history_data)
-
         session_uuid = uuid.UUID(uuid_str) if uuid_str else None
-
-        env = REPLExecutionEnvironment(
-            chatbot_manager=chatbot_manager,
-            chat_history=chat_history,
-            tool_manager=tool_manager,
-            role=role,
-        )
 
         return Session(
             role=role,
@@ -358,7 +349,6 @@ class Session(ActiveClass):
             chatbot_manager=chatbot_manager,
             chat_history=chat_history,
             session_uuid=session_uuid,
-            execution_environment=env,
         )
 
     @staticmethod
