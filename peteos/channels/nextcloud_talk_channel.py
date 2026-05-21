@@ -139,7 +139,7 @@ class NextcloudTalkChannel(Channel):
         logger.debug("[nextcloud] send(): %s id=%s parts=%d", message.get_role(), message.get_id()[:8], len(message.content))
 
         for part in message.content:
-            muted = message.metadata.get("muted", False) or not self._should_send_part(part)
+            muted = message.metadata.get("mute", False) or not self._should_send_part(part)
             tool_call_id = part.data.get("id") if part.type == "tool_use" else None
             if tool_call_id is not None:
                 session = self._agent.get_session(session_uuid)

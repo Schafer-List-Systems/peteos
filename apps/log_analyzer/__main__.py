@@ -181,6 +181,12 @@ async def main():
 
     session.execution_environment.register_hook("before_send_to_chatbot", _on_before_send_to_chatbot)
 
+    # Copy log state mute flag into message metadata
+    def _on_before_notification_publish(_sess, message: Message) -> None:
+        message.metadata["mute"] = _state.is_muted
+
+    session.execution_environment.register_hook("before_notification_publish", _on_before_notification_publish)
+
     print(f"Created session: {session.uuid}")
     print()
 
