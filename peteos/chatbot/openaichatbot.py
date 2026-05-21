@@ -192,6 +192,7 @@ class OpenAIChatBot(GenericChatBot):
                 # Conversation messages
                 msg_dict = {"role": role}
                 tool_calls = []
+                content_parts: List[Dict[str, Any]] = []
 
                 serialized = msg.serialize_content()
                 for item in serialized:
@@ -205,15 +206,47 @@ class OpenAIChatBot(GenericChatBot):
                                     "arguments": tool_call.get("arguments", "")
                                 }
                             })
+                    elif item.get("type") == "image":
+                        # Transform Anthropic image format to OpenAI image_url format
+                        source = item.get("source", {})
+                        if source.get("type") == "base64":
+                            b64_data = source.get("data", "")
+                            media_type = source.get("media_type", "image/png")
+                            img_url = f"data:{media_type};base64,{b64_data}"
+                            content_parts.append({"type": "image_url", "image_url": {"url": img_url}})
+                        elif source.get("type") == "url":
+                            content_parts.append({
+                                "type": "image_url",
+                                "image_url": {"url": source["url"]}
+                            })
+                        else:
+                            # Unknown source type - include as-is
+                            content_parts.append(item)
+                    elif item.get("type") == "reasoning":
+                        # Translate reasoning to content for OpenAI
+                        content_parts.append({
+                            "type": "text",
+                            "content": item.get("reasoning", "")
+                        })
                     else:
-                        # Apply key translation to flatten to OpenAI format
+                        # Text or other content part - apply key translation
+                        translated = {}
                         for key, value in item.items():
                             if key in (self._config.request_translations or {}):
                                 api_key = self._config.request_translations[key]
                             else:
                                 api_key = key
                             if api_key != "type":
-                                msg_dict[api_key] = value
+                                translated[api_key] = value
+                        content_parts.append({"type": "text", **translated})
+
+                if content_parts:
+                    if len(content_parts) == 1:
+                        # Single text part: keep backward-compatible flat format
+                        msg_dict["content"] = content_parts[0].get("content", "")
+                    else:
+                        # Multi-part: use content array
+                        msg_dict["content"] = content_parts
 
                 if tool_calls:
                     msg_dict["tool_calls"] = tool_calls

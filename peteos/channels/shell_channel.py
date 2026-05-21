@@ -87,6 +87,39 @@ class InteractiveShellChannel(Channel):
             )
             asyncio.create_task(session.queue_message(message))
 
+    def _handle_image(self, args: str) -> tuple[bool, str]:
+        """Handle /image command: post an image to the current session."""
+        if self._active_session_uuid is None:
+            return (True, "No session selected")
+        parts = args.split(maxsplit=1)
+        src = parts[0]
+        text = parts[1] if len(parts) > 1 else ""
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(self._queue_image_message(src, text))
+                return (True, "")
+            else:
+                loop.run_until_complete(self._queue_image_message(src, text))
+                return (True, "")
+        except (FileNotFoundError, RuntimeError) as e:
+            return (True, f"Error: {e}")
+        except Exception as e:
+            return (True, f"Error: {type(e).__name__}: {e}")
+
+    async def _queue_image_message(self, src: str, text: str) -> None:
+        """Queue an image message to the current session."""
+        from peteos.utils.image import create_image_content_part_async
+        parts = [ContentPart(part_type="text", text=text)] if text else []
+        img_part = await create_image_content_part_async(src)
+        parts.append(img_part)
+        message = Message(role="user", content=parts)
+        session = self._agent.get_session(self._active_session_uuid)
+        if session:
+            await session.queue_message(message)
+            _logger.debug("Image message queued for session %s from %s", self._active_session_uuid, src)
+
     def _get_input_line(self) -> Optional[str]:
         """Synchronous input reader for use with run_in_executor."""
         try:
@@ -234,6 +267,11 @@ class InteractiveShellChannel(Channel):
             for record in pending:
                 output += f"\n  [{record.tool_call_id}] {record.tool_call.get('name', '?')} ({record.approval_status.value})"
             return (True, output)
+
+        elif command == "/image":
+            if not args or self._active_session_uuid is None:
+                return (True, "Usage: /image <filepath or url> [text]")
+            return self._handle_image(args)
 
         elif command == "/quit":
             self._running = False

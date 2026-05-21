@@ -173,6 +173,8 @@ class NextcloudTalkChannel(Channel):
             return False
         if part.type == "tool_result" and not self._config.get("show_tool_results", True):
             return False
+        if part.type == "image":
+            return True  # Images are always sent
         return True
 
     def _format_for_nextcloud(self, part: ContentPart, reference_id: str) -> dict:
@@ -223,6 +225,16 @@ class NextcloudTalkChannel(Channel):
                 payload["message"] = content
             else:
                 payload["message"] = str(content)
+
+        elif part.type == "image":
+            source = part.source or {}
+            if source.get("type") == "url":
+                payload["message"] = f"![image]({source['url']})"
+            elif source.get("type") == "base64":
+                media_type = source.get("media_type", "image/png")
+                payload["message"] = f"[Image] (base64 encoded, {media_type})"
+            else:
+                payload["message"] = "[Image]"
 
         return payload
 

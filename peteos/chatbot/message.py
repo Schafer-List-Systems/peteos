@@ -99,10 +99,16 @@ class Message:
     def printable(self) -> str:
         """Return a string suitable for display to a human.
 
-        Subclasses can override to provide custom formatting (e.g.
-        multi-modal messages with image/video references).
+        Text ContentParts are concatenated with spaces. Non-text parts
+        (images, video, etc.) are shown as [Image] placeholders.
         """
-        return self.text
+        parts: List[str] = []
+        for part in self.content:
+            if part.type == "text" and part.text:
+                parts.append(part.text)
+            else:
+                parts.append("[Image]")
+        return " ".join(parts).replace("  ", " ")
 
     def serialize_content(self) -> List[Dict[str, Any]]:
         """Serialize content parts as API-agnostic dicts for message bodies.
@@ -119,8 +125,9 @@ class Message:
     def _compute_token_count(self, encoding: str = "cl100k_base") -> int:
         """Compute token count from serialized content without caching.
 
-        Subclasses that override serialize_content() automatically get the
-        correct count here.
+        Image ContentParts are counted by their actual data volume (the
+        base64 string), ensuring compaction triggers at the right time
+        even when large images are in the history.
 
         Args:
             encoding: Tiktoken encoding to use.
