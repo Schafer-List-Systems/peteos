@@ -282,6 +282,11 @@ class Session(ActiveClass):
                 return record
         return None
 
+    def is_tool_call_pending(self, tool_call_id: str) -> bool:
+        """Check if a tool call needs user approval (approval status is PENDING)."""
+        record = self._find_pending_record(tool_call_id)
+        return record is not None and record.approval_status == ToolApprovalStatus.PENDING
+
     def get_pending_tool_calls(self) -> List[ToolCallRecord]:
         """Return all currently pending tool calls."""
         return list(self._pending_tool_calls)
@@ -310,6 +315,7 @@ class Session(ActiveClass):
     ) -> None:
         """Publish a notification to all subscribed channels."""
         from peteos.channels.channel import NotificationEvent
+        self.execution_environment._call_hooks("before_notification_publish", self, message)
         for channel in self._channels:
             channel.push_event(NotificationEvent(self.uuid, message))
 

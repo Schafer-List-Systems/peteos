@@ -104,7 +104,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         1. Call chatbot, collect response (skip on re-entry after tool_pending)
         2. Append assistant message to chat_history
         3. For each tool call: fire before_tool hook → execute or return tool_pending
-        4. Fire before_loop_continue or before_loop_exit hook
+        4. Continue/exit based on response type
 
         Returns:
             ("done", None) | ("continue", None) | ("tool_pending", {"tool_call": dict})
@@ -115,14 +115,13 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         # We only send the extended chat history to the chatbot to get a further response when there are no (more)
         # pending tool calls.
         if not self._session.has_unfinished_tool_call():
+            self._call_hooks("before_send_to_chatbot", self._session, self.chat_history)
             response = await self.chatbot.send_message(self.chat_history)
             async for _ in response:
                 if self._interrupt:
-                    await self._call_hooks("before_loop_exit", "interrupt")
                     return (ExecStatus.INTERRUPTED, None)
 
             if self._interrupt:
-                await self._call_hooks("before_loop_exit", "interrupt")
                 return (ExecStatus.INTERRUPTED, None)
 
             # --- Phase 2: Error handling ---
@@ -162,9 +161,6 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             self.chat_history.append_message(response_msg)
             self._session.publish_notification(response_msg)
 
-            # Fire hook so channels/app can snapshot per-message metadata
-            await self._call_hooks("on_message_published", response_msg, self._session.uuid)
-
         # --- Phase 5: Execute tool calls ---
         from peteos.session import ToolApprovalStatus
 
@@ -189,7 +185,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 )
                 self.chat_history.append_message(msg)
                 self._session.publish_notification(msg)
-                await self._call_hooks("after_tool_execution", self._session, record.tool_call, denial_msg, False)
+                self._call_hooks("after_tool_execution", self._session, record.tool_call, denial_msg, False)
                 _logger.debug("[repl] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
 
@@ -213,7 +209,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 return (ExecStatus.TOOL_NOT_FOUND, None)
 
             args = _cast_args_to_types(tool.func, args)
-            hook_result = await self._call_hooks("before_tool_execution", self._session, tool_call)
+            hook_result = self._call_hooks("before_tool_execution", self._session, tool_call)
             if hook_result is not None:
                 allow, message = hook_result
                 if not allow:
@@ -225,7 +221,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             try:
                 result = tool.execute(**args)
                 self._append_tool_result(tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
-                await self._call_hooks("after_tool_execution", self._session, tool_call, str(result), True)
+                self._call_hooks("after_tool_execution", self._session, tool_call, str(result), True)
                 _logger.debug("Tool %s returned: %s", tool_name, str(result))
             except Exception as e:
                 self._append_tool_result(

@@ -91,11 +91,11 @@ class Agent:
         # Register hooks on the session's execution environment
         env = session.execution_environment
         env.register_hook("before_tool_execution",
-                          self._on_before_tool_execution,
-                          session)
+                          self._on_before_tool_execution)
         env.register_hook("after_tool_execution",
-                          self._on_after_tool_execution,
-                          session)
+                          self._on_after_tool_execution)
+        env.register_hook("before_notification_publish",
+                          self._on_before_notification_publish)
 
         # Start the session's event loop
         await session.start()
@@ -154,10 +154,11 @@ class Agent:
         success: bool
     ) -> None:
         """Hook callback fired after tool execution completes."""
-        status = "error" if not success else "ok"
-        msg = Message(
-            role="tool_result",
-            content=[ContentPart(part_type="tool_result", content=result)],
-            metadata={"tool_status": status},
-        )
-        session.publish_notification(msg)
+        pass
+
+    def _on_before_notification_publish(
+        self,
+        session: Session,
+        message: Message
+    ) -> None:
+        """Hook callback fired before a notification is published to channels."""

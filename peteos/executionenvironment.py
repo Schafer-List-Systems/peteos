@@ -50,6 +50,8 @@ class ExecutionEnvironment(ABC):
         self._hooks: dict[str, list[Callable]] = {
             "before_tool_execution": [],
             "after_tool_execution": [],
+            "before_notification_publish": [],
+            "before_send_to_chatbot": [],
         }
 
     @property
@@ -142,7 +144,8 @@ class ExecutionEnvironment(ABC):
         """Register a hook callback for a specific hook point.
 
         Args:
-            hook_point: "before_tool_execution" or "after_tool_execution".
+            hook_point: "before_tool_execution", "after_tool_execution",
+                or "before_notification_publish".
             callback: The hook function to register. Can be sync or async.
             *args: Additional arguments to pass to the callback when called.
                 These will be prepended to any arguments passed at call time.
@@ -159,8 +162,8 @@ class ExecutionEnvironment(ABC):
         """Deregister a specific hook callback.
 
         Args:
-            hook_point: One of "before_tool_execution", "after_tool_execution",
-                "before_loop_continue", or "before_loop_exit".
+            hook_point: "before_tool_execution", "after_tool_execution",
+                "before_notification_publish", or "before_send_to_chatbot".
             callback: The hook function to remove.
 
         Raises:
@@ -184,8 +187,8 @@ class ExecutionEnvironment(ABC):
         """Deregister all hooks for a specific hook point.
 
         Args:
-            hook_point: One of "before_tool_execution", "after_tool_execution",
-                "before_loop_continue", or "before_loop_exit".
+            hook_point: "before_tool_execution", "after_tool_execution",
+                "before_notification_publish", or "before_send_to_chatbot".
 
         Raises:
             ValueError: If hook_point is not a valid hook point.
@@ -194,18 +197,15 @@ class ExecutionEnvironment(ABC):
             raise ValueError(f"Unknown hook point: {hook_point}")
         self._hooks[hook_point].clear()
 
-    async def _call_hooks(self, hook_point: str, *args: Any) -> Any | None:
+    def _call_hooks(self, hook_point: str, *args: Any) -> Any | None:
         """Call all hooks registered for a specific hook point.
 
         For `before_tool_execution`, returns the first non-None result from hooks,
         which can be a tuple (allow: bool, message: str) to disallow the tool call.
 
-        For `before_loop_continue`, returns the first non-None result from hooks,
-        which can be a tuple (should_exit: bool, reason: str) to interrupt the loop.
-
         Args:
-            hook_point: One of "before_tool_execution", "after_tool_execution",
-                "before_loop_continue", or "before_loop_exit".
+            hook_point: "before_tool_execution", "after_tool_execution",
+                "before_notification_publish", or "before_send_to_chatbot".
             *args: Arguments to pass to each hook callback.
 
         Returns:
@@ -218,10 +218,7 @@ class ExecutionEnvironment(ABC):
             raise ValueError(f"Unknown hook point: {hook_point}")
 
         for callback in self._hooks[hook_point]:
-            if asyncio.iscoroutinefunction(callback):
-                result = await callback(*args)
-            else:
-                result = callback(*args)
+            result = callback(*args)
             if result is not None:
                 return result
         return None

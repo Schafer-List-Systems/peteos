@@ -12,7 +12,13 @@ from aiohttp import web
 
 from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
-from peteos.session import ApprovalEvent, ToolCallRecord, ToolApprovalStatus, ToolExecutionStatus
+from peteos.session import (
+    ApprovalEvent,
+    Session,
+    ToolApprovalStatus,
+    ToolCallRecord,
+    ToolExecutionStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +118,7 @@ class NextcloudTalkChannel(Channel):
         """Send a message to the originating Nextcloud conversation.
 
         Sends each content part individually. Tracks sent parts for reaction matching.
+        Skips muted messages unless they contain pending tool calls that need user review.
 
         Args:
             message: The Message to send.
@@ -132,12 +139,17 @@ class NextcloudTalkChannel(Channel):
         logger.debug("[nextcloud] send(): %s id=%s parts=%d", message.get_role(), message.get_id()[:8], len(message.content))
 
         for part in message.content:
-            if not self._should_send_part(part):
+            muted = message.metadata.get("muted", False) or not self._should_send_part(part)
+            tool_call_id = part.data.get("id") if part.type == "tool_use" else None
+            if tool_call_id is not None:
+                session = self._agent.get_session(session_uuid)
+                if session.is_tool_call_pending(tool_call_id):
+                    muted = False
+            if muted:
                 continue
             payload = self._format_for_nextcloud(part, message.get_id())
 
             # Track the sent part for reaction matching
-            tool_call_id = part.data.get("id") if part.type == "tool_use" else None
             self._sent_parts.append({
                 "content": payload["message"],
                 "tool_call_id": tool_call_id,
