@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from .message import Message
+from .message import Message, FoldedMessage
 from .contentpart import ContentPart
 
 
@@ -210,12 +210,20 @@ class ChatHistory:
         chat_history = cls(messages=[], generation_config=generation_config)
 
         for msg_data in data.get("unanchored", []):
-            chat_history._unanchored.append(Message.from_dict(msg_data))
+            if msg_data.get("type") == "folded":
+                chat_history._unanchored.append(FoldedMessage.from_dict(msg_data))
+            else:
+                chat_history._unanchored.append(Message.from_dict(msg_data))
 
         for anchor_name, msg_list in data.get("anchors", {}).items():
             for msg_data in msg_list:
-                chat_history._anchor_groups[anchor_name].append(
-                    Message.from_dict(msg_data)
-                )
+                if msg_data.get("type") == "folded":
+                    chat_history._anchor_groups[anchor_name].append(
+                        FoldedMessage.from_dict(msg_data)
+                    )
+                else:
+                    chat_history._anchor_groups[anchor_name].append(
+                        Message.from_dict(msg_data)
+                    )
 
         return chat_history

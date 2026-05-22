@@ -159,8 +159,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             # --- Phase 4: Append assistant message ---
             _logger.debug("ChatBot response: role=%s, content_types=%s", response.data.get("role"), [item.get("type") for item in content_array] if isinstance(content_array, list) else "N/A")
             response_msg = Message(role=response.data["role"], content=content_parts)
-            session.chat_history.append_message(response_msg)
-            session.publish_notification(response_msg)
+            session.append_and_notify(response_msg)
 
         # --- Phase 5: Execute tool calls ---
         from peteos.session import ToolApprovalStatus
@@ -184,8 +183,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                         tool_use_id=tool_call_id,
                     )],
                 )
-                session.chat_history.append_message(msg)
-                session.publish_notification(msg)
+                session.append_and_notify(msg)
                 self._call_hooks("after_tool_execution", session, record.tool_call, denial_msg, False)
                 _logger.debug("[repl] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
@@ -205,8 +203,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                         tool_use_id=tool_call_id,
                     )],
                 )
-                session.chat_history.append_message(tool_not_found_msg)
-                session.publish_notification(tool_not_found_msg)
+                session.append_and_notify(tool_not_found_msg)
                 return (ExecStatus.TOOL_NOT_FOUND, None)
 
             args = _cast_args_to_types(tool.func, args)
@@ -266,5 +263,4 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 ContentPart(part_type="tool_result", name=tool_name, content=content, tool_use_id=tool_use_id)
             ],
         )
-        session.chat_history.append_message(msg)
-        session.publish_notification(msg)
+        session.append_and_notify(msg)

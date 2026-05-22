@@ -48,6 +48,7 @@ class ExecutionEnvironment(ABC):
             "after_tool_execution": [],
             "before_notification_publish": [],
             "before_send_to_chatbot": [],
+            "after_message_append": [],
         }
 
     @property
@@ -107,7 +108,8 @@ class ExecutionEnvironment(ABC):
 
         Args:
             hook_point: "before_tool_execution", "after_tool_execution",
-                or "before_notification_publish".
+                "before_notification_publish", "before_send_to_chatbot", or
+                "after_message_append".
             callback: The hook function to register. Can be sync or async.
             *args: Additional arguments to pass to the callback when called.
                 These will be prepended to any arguments passed at call time.
@@ -125,7 +127,8 @@ class ExecutionEnvironment(ABC):
 
         Args:
             hook_point: "before_tool_execution", "after_tool_execution",
-                "before_notification_publish", or "before_send_to_chatbot".
+                "before_notification_publish", "before_send_to_chatbot", or
+                "after_message_append".
             callback: The hook function to remove.
 
         Raises:
@@ -150,7 +153,8 @@ class ExecutionEnvironment(ABC):
 
         Args:
             hook_point: "before_tool_execution", "after_tool_execution",
-                "before_notification_publish", or "before_send_to_chatbot".
+                "before_notification_publish", "before_send_to_chatbot", or
+                "after_message_append".
 
         Raises:
             ValueError: If hook_point is not a valid hook point.
@@ -162,16 +166,19 @@ class ExecutionEnvironment(ABC):
     def _call_hooks(self, hook_point: str, *args: Any) -> Any | None:
         """Call all hooks registered for a specific hook point.
 
-        For `before_tool_execution`, returns the first non-None result from hooks,
-        which can be a tuple (allow: bool, message: str) to disallow the tool call.
+        For ``before_tool_execution``, returns the first non-None result
+        from hooks, which can be a tuple ``(allow: bool, message: str)`` to
+        disallow the tool call.  For all other hook points every callback is
+        invoked and the last return value is returned.
 
         Args:
-            hook_point: "before_tool_execution", "after_tool_execution",
-                "before_notification_publish", or "before_send_to_chatbot".
+            hook_point: One of the registered hook points.
             *args: Arguments to pass to each hook callback.
 
         Returns:
-            The return value from the first hook that returns a value, or None.
+            The return value from the first hook that returns a value for
+            ``before_tool_execution``, or the last hook's return value
+            (which may be ``None``) for other hook points.
 
         Raises:
             ValueError: If hook_point is not a valid hook point.
@@ -179,8 +186,9 @@ class ExecutionEnvironment(ABC):
         if hook_point not in self._hooks:
             raise ValueError(f"Unknown hook point: {hook_point}")
 
+        last_result = None
         for callback in self._hooks[hook_point]:
-            result = callback(*args)
-            if result is not None:
-                return result
-        return None
+            last_result = callback(*args)
+            if hook_point == "before_tool_execution" and last_result is not None:
+                return last_result
+        return last_result

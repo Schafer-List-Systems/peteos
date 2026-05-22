@@ -185,7 +185,7 @@ class Session(ActiveClass):
                 events_processed += 1
 
                 if isinstance(event, Message):
-                    self.chat_history.append_message(event)
+                    self.append_and_notify(event)
                 elif isinstance(event, ApprovalEvent):
                     self._handle_approval(event)
                 else:
@@ -310,6 +310,22 @@ class Session(ActiveClass):
         else:
             record.approval_status = ToolApprovalStatus.DENIED
             return False
+
+    def append_and_notify(self, message: Message) -> None:
+        """Append a message to chat history and publish a notification.
+
+        Replaces the inline pattern:
+            self.chat_history.append_message(msg)
+            self.publish_notification(msg)
+
+        Calls the ``after_message_append`` hook between append and publish.
+
+        Args:
+            message: The message to append and notify on.
+        """
+        self.chat_history.append_message(message)
+        self.execution_environment._call_hooks("after_message_append", self, message)
+        self.publish_notification(message)
 
     def publish_notification(
             self,

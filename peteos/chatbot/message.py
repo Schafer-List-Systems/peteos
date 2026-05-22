@@ -337,3 +337,115 @@ class ToolDefinitionsMessage(Message):
         }
         d["type"] = "tool_definitions"
         return d
+
+
+class FoldedMessage(Message):
+    """A message that folds a consecutive sequence of messages into a summary.
+
+    The serialized content contains fold metadata (number of messages,
+    their IDs) plus a summary so the LLM can identify and unfold it.
+    Original messages are stored as live references, allowing nested folds.
+
+    Example:
+        >>> folded = FoldedMessage(
+        ...     summary="Discussion about deployment strategy.",
+        ...     original_messages=[msg1, msg2, msg3],
+        ... )
+        >>> folded.serialize_content()
+        [{'type': 'text', 'text': 'Folded: 3 messages [id1, id2, id3]\\nDiscussion about deployment strategy.'}]
+    """
+
+    def __init__(
+        self,
+        summary: str,
+        original_messages: List["Message"],
+        role: str = "system",
+        message_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        creation_timestamp: Optional[datetime] = None,
+    ) -> None:
+        # _content is set via the content property; bypass the parent __init__
+        object.__setattr__(self, "_content", [])
+        super().__init__(
+            role="system",
+            content=[],
+            metadata=metadata,
+            creation_timestamp=creation_timestamp,
+            message_id=message_id,
+        )
+        object.__setattr__(self, "_role", role)
+        self._summary = summary
+        self._original_messages: List["Message"] = list(original_messages)
+
+    @property
+    def content(self) -> List[ContentPart]:
+        """Return a single text ContentPart with fold metadata + summary."""
+        return [ContentPart(part_type="text", text=self._build_text())]
+
+    def _build_text(self) -> str:
+        """Build the serialized text: fold info + summary."""
+        ids = ", ".join(msg.get_id() for msg in self._original_messages)
+        return f"Folded: {len(self._original_messages)} messages [{ids}]\n{self._summary}"
+
+    def serialize_content(self) -> List[Dict[str, Any]]:
+        """Serialize as a single text content part with fold info + summary."""
+        return [{"type": "text", "text": self._build_text()}]
+
+    def count_tokens(self, encoding: str = "cl100k_base") -> int:
+        """Count tokens, caching the result (content is fixed)."""
+        if "token_count" in self.metadata:
+            return self.metadata["token_count"]
+        token_count = self._compute_token_count(encoding)
+        self.metadata["token_count"] = token_count
+        return token_count
+
+    def get_original_tokens(self, encoding: str = "cl100k_base") -> int:
+        """Sum of token counts of all original messages."""
+        return sum(msg.count_tokens(encoding) for msg in self._original_messages)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dictionary, preserving fold info for roundtrip."""
+        d = {
+            "role": self.get_role(),
+            "id": self.get_id(),
+            "content": [part.to_dict() for part in self.content],
+            "type": "folded",
+            **self.metadata,
+        }
+        d["_original_message_ids"] = [msg.get_id() for msg in self._original_messages]
+        return d
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FoldedMessage":
+        """Reconstruct from serialized dictionary.
+
+        Note: original messages are not rehydrated here — they remain in
+        the chat history.  ``_original_messages`` is set to an empty list
+        because ``unfold`` operates on live Message objects in the chat
+        history.
+        """
+        # Extract original message IDs
+        original_ids = data.get("_original_message_ids", [])
+
+        # Build content parts for the summary text
+        content_parts = []
+        for part_data in data.get("content", []):
+            content_parts.append(ContentPart.from_dict(part_data))
+
+        # Extract summary from content text
+        summary_parts = [p.text for p in content_parts if p.type == "text" and p.text]
+        summary = summary_parts[0] if summary_parts else ""
+
+        msg = cls(
+            summary=summary,
+            original_messages=[],  # originals stay in chat history
+            role=data.get("role", "system"),
+            message_id=data.get("id"),
+            creation_timestamp=None,
+        )
+
+        # Restore ID
+        if "id" in data and data["id"]:
+            msg._id = data["id"]
+
+        return msg

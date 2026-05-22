@@ -19,6 +19,7 @@ class LogState:
     channel: "ReadStdoutChannel | None" = None
     last_context_tokens: int = 0
     is_muted: bool = False
+    session: "Session | None" = None  # Set after session creation
 
 
 _state = LogState()
