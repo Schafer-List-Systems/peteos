@@ -165,9 +165,9 @@ class Session(ActiveClass):
     async def run(self) -> None:
         """Main event loop for the session.
 
-        Waits for the first event, then drains all accumulated events.
-        Processes messages into chat history, handles tool approvals/denials.
-        Runs the session loop only if at least one event was processed.
+        In each iteration: waits for an event, drains all accumulated events,
+        calls step(), then evaluates the status. Events are drained after
+        every step() so messages arriving during execution are picked up.
         """
         while self.is_running():
             # Block until at least one event arrives
@@ -191,21 +191,18 @@ class Session(ActiveClass):
                     events_processed -= 1
                     continue  # Skip other event types
 
-            # Process accumulated history only if we processed events
-            if self.is_running() and events_processed > 0:
-                await self._run_session_loop()
+            if events_processed == 0:
+                continue
 
-    async def _run_session_loop(self) -> None:
-        """Run step loop until finished, pending, or error."""
-        while self.is_running():
             status, _ = await self.execution_environment.step(self)
+
             if status in (ExecStatus.FINISHED, ExecStatus.INTERRUPTED, ExecStatus.ERROR):
                 break
             elif status == ExecStatus.PENDING:
-                return  # Exit step loop, wait for ApprovalEvent
+                continue  # Re-enter: check for approvals in drained events
             elif status in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
-                continue  # let chatbot handle the error/denial message
-            elif status in (ExecStatus.TOOL_FAILED):
+                continue  # Re-enter: let chatbot handle the error/denial message
+            elif status == ExecStatus.TOOL_FAILED:
                 # Abort all remaining pending tool calls
                 for record in self._pending_tool_calls:
                     if record.approval_status == ToolApprovalStatus.PENDING:
