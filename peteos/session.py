@@ -166,14 +166,19 @@ class Session(ActiveClass):
     async def run(self) -> None:
         """Main event loop for the session.
 
-        Waits for the first event, then drains all accumulated events.
-        Processes messages into chat history, handles tool approvals/denials.
-        Runs the session loop only if at least one event was processed.
+        In each iteration: waits for an event, drains all accumulated events,
+        calls step(), then evaluates the status. Events are drained after
+        every step() so messages arriving during execution are picked up.
+        When step() returns a reentry status (PENDING, tool errors), the loop
+        re-enters step() immediately without waiting for new events.
         """
+        need_reentry = False
+
         while self.is_running():
-            # Block until at least one event arrives
-            if not await self._wait_for_event():
-                continue
+            if not need_reentry:
+                # Block until at least one event arrives
+                if not await self._wait_for_event():
+                    continue
 
             # Drain all accumulated events
             events_processed = 0
@@ -192,32 +197,43 @@ class Session(ActiveClass):
                     events_processed -= 1
                     continue  # Skip other event types
 
-            _logger.debug('[session] run(): Drained event queue.')
+            if not need_reentry and events_processed == 0:
+                continue
+            need_reentry = False
 
-            # Process accumulated history only if we processed events
-            if self.is_running() and events_processed > 0:
-                await self._run_session_loop()
-
-    async def _run_session_loop(self) -> None:
-        """Run step loop until finished, pending, or error."""
-        while self.is_running():
             status, _ = await self.execution_environment.step(self)
-            if status in (ExecStatus.FINISHED, ExecStatus.INTERRUPTED, ExecStatus.ERROR):
+
+            if status == ExecStatus.INTERRUPTED:
+                _logger.debug("[session] run(): Execution interrupted, exiting loop.")
                 break
-            elif status == ExecStatus.PENDING:
-                return  # Exit step loop, wait for ApprovalEvent
-            elif status in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
-                continue  # let chatbot handle the error/denial message
-            elif status in (ExecStatus.TOOL_FAILED):
+            if status == ExecStatus.ERROR:
+                _logger.debug("[session] run(): Execution error, exiting loop.")
+                break
+            if status == ExecStatus.FINISHED:
+                _logger.debug("[session] run(): Step finished, waiting for next events.")
+                continue
+            if status == ExecStatus.PENDING:
+                _logger.debug("[session] run(): Pending tool approval, re-entering step.")
+                continue
+            if status in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
+                _logger.debug("[session] run(): Tool call failed/denied, re-entering step loop.")
+                need_reentry = True
+                continue
+            if status == ExecStatus.TOOL_FAILED:
                 # Abort all remaining pending tool calls
                 for record in self._pending_tool_calls:
                     if record.approval_status == ToolApprovalStatus.PENDING:
                         record.approval_status = ToolApprovalStatus.DENIED
                         record.execution_status = ToolExecutionStatus.ABORTED
-                        record.tool_call["denied_reason"] = "Tool call was aborted due to a previous tool failure."
+                        record.tool_call["denied_reason"] = (
+                            "Tool call was aborted due to a previous tool failure."
+                        )
                 _logger.debug("[session] Aborted all pending tool calls due to tool failure")
-                continue  # tool errors can be handled by chatbot
-            # CONTINUE -> loop back to step()
+                need_reentry = True
+                continue
+            # CONTINUE -> step returned success, re-enter to process tool results
+            need_reentry = True
+            continue
 
     def add_tool_call(self, tool_call: dict) -> None:
         """Add a tool call to the pending list, auto-approving if applicable."""
