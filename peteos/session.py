@@ -113,6 +113,7 @@ class Session(ActiveClass):
         super().__init__()
         self.uuid = session_uuid if session_uuid is not None else uuid.uuid4()
         self.role = role
+        self.tool_manager = tool_manager
         self.auto_approve_tools: list[str] = list(role.auto_approve_tools)
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
         self.chatbot_manager = chatbot_manager
@@ -190,6 +191,8 @@ class Session(ActiveClass):
                 else:
                     events_processed -= 1
                     continue  # Skip other event types
+
+            _logger.debug('[session] run(): Drained event queue.')
 
             # Process accumulated history only if we processed events
             if self.is_running() and events_processed > 0:
