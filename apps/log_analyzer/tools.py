@@ -219,3 +219,135 @@ def register_filter_tools(
     tool_manager.register_tool(func=add_exclude_pattern)
     tool_manager.register_tool(func=remove_exclude_pattern)
     tool_manager.register_tool(func=list_exclude_patterns)
+
+
+def fold(message_ids: list[str], summary: str) -> str:
+    """Fold consecutive messages into a single summary message.
+
+    Takes a list of message IDs, finds them in the session's unanchored
+    messages, verifies they are consecutive, removes them, and inserts
+    a single FoldedMessage with the provided summary.
+
+    Args:
+        message_ids: List of message IDs to fold (must be consecutive).
+        summary: Concise summary of the folded messages.
+
+    Returns:
+        Status message with token savings information.
+    """
+    from peteos.chatbot import FoldedMessage
+
+    sess = _state.session
+    if not sess:
+        return "Error: session not configured."
+
+    unanchored = sess.chat_history._unanchored
+
+    # Find the first matching message
+    first_idx = None
+    for i, msg in enumerate(unanchored):
+        if msg.get_id() == message_ids[0]:
+            first_idx = i
+            break
+
+    if first_idx is None:
+        return f"Error: Could not find message with ID {message_ids[0]!r} in unanchored history."
+
+    # Verify consecutive match
+    matched = []
+    for j, expected_id in enumerate(message_ids):
+        target_idx = first_idx + j
+        if target_idx >= len(unanchored):
+            return (
+                f"Error: Message at expected position {target_idx} does not exist. "
+                "Messages must be consecutive."
+            )
+        actual_id = unanchored[target_idx].get_id()
+        if actual_id != expected_id:
+            return (
+                f"Error: Messages must be consecutive. Expected ID {expected_id!r} "
+                f"at position {first_idx + j} but found {actual_id!r}."
+            )
+        matched.append(unanchored[target_idx])
+
+    # Calculate original token count
+    original_token_count = sum(msg.count_tokens() for msg in matched)
+
+    # Remove matched messages from unanchored
+    del unanchored[first_idx:first_idx + len(matched)]
+
+    # Create and insert FoldedMessage
+    folded = FoldedMessage(
+        summary=summary,
+        original_messages=matched,
+        message_id=str(uuid.uuid4()),
+    )
+    unanchored.insert(first_idx, folded)
+
+    # Calculate folded token count
+    folded_token_count = folded.count_tokens()
+    savings = original_token_count - folded_token_count
+
+    return (
+        f"Folded {len(matched)} messages into a summary. "
+        f"Token savings: {savings} (original: {original_token_count}, "
+        f"folded: {folded_token_count})."
+    )
+
+
+def unfold(message_id: str) -> str:
+    """Unfold a FoldedMessage, restoring the original messages.
+
+    Finds the FoldedMessage containing the specified message ID in the
+    session's unanchored messages, removes it, and inserts all original
+    messages at that position.
+
+    Args:
+        message_id: ID of a message that is inside a FoldedMessage.
+
+    Returns:
+        Status message with number of restored messages.
+    """
+    from peteos.chatbot import FoldedMessage
+
+    sess = _state.session
+    if not sess:
+        return "Error: session not configured."
+
+    unanchored = sess.chat_history._unanchored
+
+    # Find the folded message containing the target ID
+    folded_idx = None
+    folded_msg = None
+    for i, msg in enumerate(unanchored):
+        if isinstance(msg, FoldedMessage):
+            for orig in msg._original_messages:
+                if orig.get_id() == message_id:
+                    folded_idx = i
+                    folded_msg = msg
+                    break
+            if folded_msg:
+                break
+
+    if folded_msg is None:
+        return f"Error: No FoldedMessage contains a message with ID {message_id!r}."
+
+    # Remove the folded message
+    del unanchored[folded_idx]
+
+    # Insert original messages in order
+    for orig_msg in folded_msg._original_messages:
+        unanchored.insert(folded_idx, orig_msg)
+        folded_idx += 1
+
+    return f"Unfolded: restored {len(folded_msg._original_messages)} messages."
+
+
+def register_fold_tools(tool_manager: ToolManager) -> None:
+    """Register fold/unfold tools on the given tool manager.
+
+    Args:
+        tool_manager: The ToolManager to register the tools on.
+    """
+    tool_manager.register_tool(func=fold)
+    tool_manager.register_tool(func=unfold)

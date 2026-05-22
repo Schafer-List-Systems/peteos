@@ -40,7 +40,8 @@ from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
-from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools
+from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_fold_tools
+from peteos.chatbot import ContentPart, FoldedMessage
 
 
 async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
@@ -167,6 +168,10 @@ async def main():
     # Create a shared session that both channels attach to
     session = await agent.create_session(role_name)
 
+    # Register fold/unfold tools and set session reference
+    _state.session = session
+    register_fold_tools(tm)
+
     # Register rolling window discard hook
     try:
         with open("apps/log_analyzer/config/app_config.json", "r") as f:
@@ -186,6 +191,17 @@ async def main():
         message.metadata["mute"] = _state.is_muted
 
     session.execution_environment.register_hook("before_notification_publish", _on_before_notification_publish)
+
+    # Inject message IDs into unanchored messages at creation time
+    def _on_after_message_append(session, message: Message) -> None:
+        if isinstance(message, FoldedMessage):
+            return
+        for part in message.content:
+            if part.type == "text" and part.text:
+                part.data["text"] = f"[msg:{message.get_id()}]\n{part.text}"
+                break
+
+    session.execution_environment.register_hook("after_message_append", _on_after_message_append)
 
     print(f"Created session: {session.uuid}")
     print()
