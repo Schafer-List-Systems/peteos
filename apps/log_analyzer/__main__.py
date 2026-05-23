@@ -198,7 +198,8 @@ async def main():
             return
         for part in message.content:
             if part.type == "text" and part.text:
-                part.data["text"] = f"[msg:{message.get_id()}]\n{part.text}"
+                token_count = message.count_tokens()
+                part.data["text"] = f"[msg:{message.get_id()} ({token_count} tokens)]\n{part.text}"
                 break
 
     session.execution_environment.register_hook("after_message_append", _on_after_message_append)

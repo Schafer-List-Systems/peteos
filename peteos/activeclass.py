@@ -79,11 +79,10 @@ class ActiveClass:
         """Internal loop that runs self.run() and handles cancellation."""
         try:
             await self.run()
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            self._running = False
-            raise
+        except Exception as e:
+            _logger.error("[%s]: _main_loop: exception raised: %s", type(self).__name__, e)
+        finally:
+            await self.stop()
 
     async def _wait_for_event(self, timeout: Optional[float] = None) -> bool:
         """Block until an event arrives in the queue.
