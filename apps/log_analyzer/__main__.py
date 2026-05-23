@@ -35,13 +35,13 @@ from peteos.agent import Agent
 from peteos.channels import NextcloudTalkChannel, ReadStdoutChannel
 from peteos.chatbot import Message, ContentPart
 from peteos.chatbot.manager import ChatBotManager
+from peteos.chatbot import FoldedMessage
 from peteos.logger import setup_logging
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_fold_tools
-from peteos.chatbot import ContentPart, FoldedMessage
 
 
 async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
@@ -147,11 +147,7 @@ async def main():
     # Create the Agent
     agent = Agent(role_manager, chatbot_manager, tm)
 
-    # Register awakeness status hook on the role's system prompt
     role_name = nextcloud_config.get("default_role", "router")
-    role = role_manager.get_role(role_name)
-    # if role is not None:
-    #     role.add_system_prompt_hook(_state.status_text)
 
     # Create the stdout channel first so its methods are available for tool registration
     # (tools access the channel via _state.channel, not the tool manager)
