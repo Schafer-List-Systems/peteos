@@ -77,7 +77,7 @@ async def test_message_processed_during_execution_env_run():
             Role(name="test", description="Test role", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock", f"http://{server.host}:{server.port}"
         )
@@ -120,7 +120,7 @@ async def test_multiple_messages_processed_in_sequence():
             Role(name="test", description="Test role", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock", f"http://{server.host}:{server.port}"
         )
@@ -166,7 +166,7 @@ async def test_messages_not_lost_when_queue_polling():
             Role(name="test", description="Test role", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock", f"http://{server.host}:{server.port}"
         )
