@@ -30,9 +30,17 @@ class HTTPClient:
 
         Yields:
             Raw SSE lines as strings.
+
+        Raises:
+            RuntimeError: If the response status code is not 2xx.
         """
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             async with client.stream("POST", url, json=body) as response:
+                if response.status_code >= 300:
+                    error_text = await response.aread()
+                    raise RuntimeError(
+                        f"HTTP {response.status_code} from {url}: {error_text.decode(errors='replace')}"
+                    )
                 async for line in response.aiter_lines():
                     if line:
                         yield line
@@ -46,9 +54,17 @@ class HTTPClient:
 
         Returns:
             Parsed JSON response.
+
+        Raises:
+            RuntimeError: If the response status code is not 2xx.
         """
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.get(url)
+            if response.status_code >= 300:
+                error_text = response.content.decode(errors='replace')
+                raise RuntimeError(
+                    f"HTTP {response.status_code} from {url}: {error_text}"
+                )
             return response.json()
 
     async def post(self, url: str, body: dict) -> dict:
@@ -61,7 +77,15 @@ class HTTPClient:
 
         Returns:
             Parsed JSON response.
+
+        Raises:
+            RuntimeError: If the response status code is not 2xx.
         """
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(url, json=body)
+            if response.status_code >= 300:
+                error_text = response.content.decode(errors='replace')
+                raise RuntimeError(
+                    f"HTTP {response.status_code} from {url}: {error_text}"
+                )
             return response.json()

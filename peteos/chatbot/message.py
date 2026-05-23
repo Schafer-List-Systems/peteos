@@ -359,7 +359,7 @@ class FoldedMessage(Message):
         self,
         summary: str,
         original_messages: List["Message"],
-        role: str = "system",
+        role: str = "assistant",
         message_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         creation_timestamp: Optional[datetime] = None,
