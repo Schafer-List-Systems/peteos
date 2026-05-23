@@ -54,7 +54,14 @@ class MockExecutionEnvironment:
         self.run_count = 0
         self.simulate_running = simulate_running
         self.wait_on_interrupt = wait_on_interrupt
-        self._hooks: dict[str, list] = {}
+        self._hooks: dict[str, list] = {
+            "before_tool_execution": [],
+            "after_tool_execution": [],
+            "before_notification_publish": [],
+            "before_send_to_chatbot": [],
+            "after_message_append": [],
+            "after_step": [],
+        }
 
     @property
     def is_running(self) -> bool:

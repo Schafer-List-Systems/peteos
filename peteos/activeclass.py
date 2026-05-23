@@ -80,7 +80,7 @@ class ActiveClass:
         try:
             await self.run()
         except Exception as e:
-            _logger.error("[%s]: _main_loop: exception raised: %s", type(self).__name__, e)
+            _logger.error("[%s]: _main_loop: exception raised: %s: %r", type(self).__name__, type(e).__name__, e)
         finally:
             await self.stop()
 
