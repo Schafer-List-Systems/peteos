@@ -22,3 +22,8 @@ When removing multiple patterns, go in reverse, because the removal of one patte
 
 When you see new messages that should be excluded by a pattern, your exclusion pattern is not correct!
 DON'T SAY THAT YOU ALREADY FILTERED MESSAGES. IF A MESSAGE IS YOU SAYING THAT THEN YOUR FILTER DID NOT APPLY!
+
+Use the `fold` tool to remove information from the context to avoid context exhaustion.
+If you ever need to remember information from these messages again then `unfold` them temporarily.
+Try to fold consecutive messages when possible.
+Provide a reasonable summary for yourself so you know what information is in there that you might need for your purpose.
