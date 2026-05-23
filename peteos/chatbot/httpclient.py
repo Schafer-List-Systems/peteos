@@ -3,6 +3,10 @@
 import httpx
 from typing import AsyncGenerator, Optional
 
+from peteos.logger import get_logger
+
+_logger = get_logger(__name__)
+
 
 class HTTPClient:
     """Async HTTP client with streaming support for SSE."""
@@ -38,8 +42,10 @@ class HTTPClient:
             async with client.stream("POST", url, json=body) as response:
                 if response.status_code >= 300:
                     error_text = await response.aread()
+                    error_str = error_text.decode(errors='replace')
+                    _logger.error("HTTP %d from %s: %s", response.status_code, url, error_str)
                     raise RuntimeError(
-                        f"HTTP {response.status_code} from {url}: {error_text.decode(errors='replace')}"
+                        f"HTTP {response.status_code} from {url}: {error_str}"
                     )
                 async for line in response.aiter_lines():
                     if line:
@@ -62,6 +68,7 @@ class HTTPClient:
             response = await client.get(url)
             if response.status_code >= 300:
                 error_text = response.content.decode(errors='replace')
+                _logger.error("HTTP %d from %s: %s", response.status_code, url, error_text)
                 raise RuntimeError(
                     f"HTTP {response.status_code} from {url}: {error_text}"
                 )
@@ -85,6 +92,7 @@ class HTTPClient:
             response = await client.post(url, json=body)
             if response.status_code >= 300:
                 error_text = response.content.decode(errors='replace')
+                _logger.error("HTTP %d from %s: %s", response.status_code, url, error_text)
                 raise RuntimeError(
                     f"HTTP {response.status_code} from {url}: {error_text}"
                 )
