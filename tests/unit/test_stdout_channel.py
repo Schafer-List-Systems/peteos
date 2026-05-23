@@ -33,7 +33,7 @@ class TestReadStdoutChannelInit:
         _cleanup_channels()
 
     def test_channel_creation(self):
-        channel = ReadStdoutChannel("test", self.agent, {"command": ["echo", "hi"], "pattern": ".*"})
+        channel = ReadStdoutChannel("test", self.agent, {"command": ["echo", "hi"], "pattern": ".*", "process_terminate_timeout": 5.0})
         assert channel.name == "test"
         assert channel._running is False
 
@@ -118,7 +118,7 @@ class TestReadStdoutChannelLoadConfig:
     @patch("builtins.open")
     def test_load_config_default_exclude(self, mock_open):
         mock_open.return_value.__enter__.return_value.read.return_value = (
-            '{"command": ["tail", "-f", "/var/log/syslog"], "pattern": "ERROR"}'
+            '{"command": ["tail", "-f", "/var/log/syslog"], "pattern": "ERROR", "process_terminate_timeout": 5.0}'
         )
         config = ReadStdoutChannel.load_config("fake.json")
         assert config["exclude"] == []
@@ -126,14 +126,14 @@ class TestReadStdoutChannelLoadConfig:
     @patch("builtins.open")
     def test_load_config_preserves_exclude(self, mock_open):
         mock_open.return_value.__enter__.return_value.read.return_value = (
-            '{"command": ["tail", "-f", "/var/log/syslog"], "pattern": ".*", "exclude": ["DEBUG", "INFO"]}'
+            '{"command": ["tail", "-f", "/var/log/syslog"], "pattern": ".*", "exclude": ["DEBUG", "INFO"], "process_terminate_timeout": 5.0}'
         )
         config = ReadStdoutChannel.load_config("fake.json")
         assert config["exclude"] == ["DEBUG", "INFO"]
 
     @patch("builtins.open")
     def test_load_config_missing_command_raises(self, mock_open):
-        mock_open.return_value.__enter__.return_value.read.return_value = '{"pattern": ".*"}'
+        mock_open.return_value.__enter__.return_value.read.return_value = '{"pattern": ".*", "process_terminate_timeout": 5.0}'
         with pytest.raises(KeyError, match="Missing required config fields"):
             ReadStdoutChannel.load_config("fake.json")
 

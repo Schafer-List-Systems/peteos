@@ -155,7 +155,7 @@ class ReadStdoutChannel(Channel):
         config.setdefault("exclude", [])
         config.setdefault("patterns_file", None)
         config.setdefault("prefix", "")
-        required = ["command"]
+        required = ["command", "process_terminate_timeout"]
         missing = [k for k in required if k not in config]
         if missing:
             raise KeyError(f"Missing required config fields: {', '.join(missing)}")
@@ -191,7 +191,7 @@ class ReadStdoutChannel(Channel):
         if self._process:
             self._process.terminate()
             try:
-                await asyncio.wait_for(self._process.wait(), timeout=5)
+                await asyncio.wait_for(self._process.wait(), timeout=self._config["process_terminate_timeout"])
             except asyncio.TimeoutError:
                 self._process.kill()
             _logger.info("Stopped %s: %s", self.name, self._config["command"])

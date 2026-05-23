@@ -62,6 +62,13 @@ class ActiveClass:
 
         self._running = False
 
+        # When called from within the running task itself (e.g. exception unwind
+        # in _main_loop), we can't await the current task — that's a deadlock.
+        # Just clean up state and return.
+        if asyncio.current_task() is self._loop_task:
+            self._loop_task = None
+            return
+
         # Send sentinel to unblock _wait() so it can see _running is False.
         # Without this, stop() cancelling the task could steal the wakeup
         # before _wait() has a chance to drain the queue.

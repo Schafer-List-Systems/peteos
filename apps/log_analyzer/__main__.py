@@ -46,7 +46,7 @@ from apps.log_analyzer.tools import _state, register_filter_tools, register_stat
 
 async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
     """Setup ChatBotManager from configuration file."""
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=None)
 
     try:
         await chatbot_manager.load_from_file(config_file)

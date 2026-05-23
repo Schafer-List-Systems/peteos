@@ -218,7 +218,7 @@ class TestOpenAIRequestTranslation:
         """Text content parts should be sent as OpenAI content string."""
         from peteos.chatbot import Message, ContentPart
 
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -240,7 +240,7 @@ class TestOpenAIRequestTranslation:
         """Reasoning content parts should be sent as reasoning in OpenAI."""
         from peteos.chatbot import Message, ContentPart
 
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()

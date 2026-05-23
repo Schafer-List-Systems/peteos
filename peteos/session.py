@@ -419,7 +419,7 @@ async def invoke_role(
     *,
     existing_session: Optional["Session"] = None,
     keep_session: bool = False,
-    timeout: float = 120.0,
+    timeout: float,
 ) -> Dict[str, Any]:
     """Invoke an agent role and return its final answer.
 
@@ -437,7 +437,7 @@ async def invoke_role(
         keep_session: If False (default), stop the session before returning.
             If True, the returned dict includes the running session so
             the caller can queue more messages.
-        timeout: Maximum seconds to wait for a response.
+        timeout: Maximum seconds to wait for a response (user-configured, no default).
 
     Returns:
         dict with keys:

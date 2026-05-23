@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 class HTTPClient:
     """Async HTTP client with streaming support for SSE."""
 
-    def __init__(self, timeout: float = 60.0):
+    def __init__(self, timeout: float):
         """
         Initialize HTTPClient.
 

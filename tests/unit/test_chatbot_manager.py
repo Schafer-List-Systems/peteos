@@ -14,7 +14,7 @@ class TestChatBotManagerAddBackend:
     @pytest.mark.asyncio
     async def test_add_backend_openai(self):
         """Test adding OpenAI-compatible backend."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {
             "data": [
@@ -38,7 +38,7 @@ class TestChatBotManagerAddBackend:
     @pytest.mark.asyncio
     async def test_add_backend_anthropic(self):
         """Test adding Anthropic-compatible backend."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {
             "models": [
@@ -59,7 +59,7 @@ class TestChatBotManagerAddBackend:
     @pytest.mark.asyncio
     async def test_add_backend_duplicate_name(self):
         """Test adding backend with duplicate name raises error."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {"data": [{"id": "model-1"}]}
 
@@ -72,7 +72,7 @@ class TestChatBotManagerAddBackend:
     @pytest.mark.asyncio
     async def test_add_backend_empty_models(self):
         """Test adding backend with no models raises error."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {"data": []}
 
@@ -83,7 +83,7 @@ class TestChatBotManagerAddBackend:
     @pytest.mark.asyncio
     async def test_add_backend_unrecognized_format(self):
         """Test adding backend with unrecognized response format raises error."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {"unknown": "format"}
 
@@ -98,7 +98,7 @@ class TestChatBotManagerRemoveBackend:
     @pytest.mark.asyncio
     async def test_remove_backend_success(self):
         """Test successful backend removal."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {"data": [{"id": "model-1"}]}
 
@@ -112,7 +112,7 @@ class TestChatBotManagerRemoveBackend:
     @pytest.mark.asyncio
     async def test_remove_backend_not_found(self):
         """Test removing non-existent backend returns False."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         assert manager.remove_backend("nonexistent") is False
         assert len(manager._backends) == 0
@@ -124,7 +124,7 @@ class TestChatBotManagerListChatbots:
     @pytest.mark.asyncio
     async def test_list_chatbots_all(self):
         """Test listing all chatbots with wildcard pattern."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {"data": [{"id": "model-a"}, {"id": "model-b"}]}
 
@@ -140,7 +140,7 @@ class TestChatBotManagerListChatbots:
     @pytest.mark.asyncio
     async def test_list_chatbots_regex_filter(self):
         """Test filtering chatbots by regex pattern."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {"data": [{"id": "qwen-7b"}, {"id": "qwen-14b"}, {"id": "mistral-7b"}]}
 
@@ -156,7 +156,7 @@ class TestChatBotManagerListChatbots:
     @pytest.mark.asyncio
     async def test_list_chatbots_multiple_backends(self):
         """Test listing chatbots from multiple backends."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response_openai = {"data": [{"id": "openai-model"}]}
         mock_response_anthropic = {"models": [{"id": "anthropic-model"}]}
@@ -175,7 +175,7 @@ class TestChatBotManagerListChatbots:
     @pytest.mark.asyncio
     async def test_list_chatbots_no_match(self):
         """Test listing chatbots with no matches."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         mock_response = {"data": [{"id": "model-1"}]}
 
@@ -193,7 +193,7 @@ class TestChatBotManagerLoadFromJson:
     @pytest.mark.asyncio
     async def test_load_from_json_openai(self):
         """Test loading OpenAI backend from JSON."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         json_obj = {
             "backends": [
@@ -223,7 +223,7 @@ class TestChatBotManagerLoadFromJson:
     @pytest.mark.asyncio
     async def test_load_from_json_anthropic(self):
         """Test loading Anthropic backend from JSON."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         json_obj = {
             "backends": [
@@ -252,7 +252,7 @@ class TestChatBotManagerLoadFromJson:
     @pytest.mark.asyncio
     async def test_load_from_json_multiple_backends(self):
         """Test loading multiple backends from JSON."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         json_obj = {
             "backends": [
@@ -284,7 +284,7 @@ class TestChatBotManagerLoadFromJson:
     @pytest.mark.asyncio
     async def test_load_from_json_clears_existing(self):
         """Test that load_from_json clears existing backends."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         # Add initial backend
         mock_response = {"data": [{"id": "old-model"}]}
@@ -313,7 +313,7 @@ class TestChatBotManagerLoadFromJson:
     @pytest.mark.asyncio
     async def test_load_from_json_empty(self):
         """Test loading empty JSON object."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         json_obj = {"backends": []}
 
@@ -328,7 +328,7 @@ class TestChatBotManagerLoadFromFile:
     @pytest.mark.asyncio
     async def test_load_from_file(self, tmp_path):
         """Test loading from JSON file."""
-        manager = ChatBotManager()
+        manager = ChatBotManager(timeout=5.0)
 
         # Create test JSON file
         json_file = tmp_path / "backends.json"

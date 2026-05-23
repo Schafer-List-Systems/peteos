@@ -70,6 +70,7 @@ def _make_config(**overrides) -> dict:
         "host": "0.0.0.0",
         "port": 0,
         "default_role": "test",
+        "nextcloud_api_timeout": 10.0,
         **overrides,
     }
     return config

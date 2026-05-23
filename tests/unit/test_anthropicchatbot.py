@@ -176,7 +176,7 @@ class TestAnthropicRequestTranslation:
     @pytest.mark.asyncio
     async def test_build_body_with_text_message(self):
         """Text content parts should be sent as Anthropic content array."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = AnthropicChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -197,7 +197,7 @@ class TestAnthropicRequestTranslation:
     @pytest.mark.asyncio
     async def test_build_body_with_reasoning_message(self):
         """Reasoning content parts should be sent as thinking in Anthropic."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = AnthropicChatBot(http_client, config)
         chat_history = ChatHistory()

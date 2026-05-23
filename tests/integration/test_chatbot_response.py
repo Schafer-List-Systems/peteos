@@ -20,7 +20,7 @@ class TestOpenAIChatBotResponse:
     @pytest.mark.asyncio
     async def test_openai_response_has_role_field(self):
         """Test that OpenAIChatBot adds role to response.data."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -52,7 +52,7 @@ class TestOpenAIChatBotResponse:
     @pytest.mark.asyncio
     async def test_openai_response_non_streaming_has_role(self):
         """Test that non-streaming OpenAI response also has role."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -85,7 +85,7 @@ class TestAnthropicChatBotResponse:
     @pytest.mark.asyncio
     async def test_anthropic_response_has_role_field(self):
         """Test that AnthropicChatBot adds role to response.data."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = AnthropicChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -117,7 +117,7 @@ class TestAnthropicChatBotResponse:
     @pytest.mark.asyncio
     async def test_anthropic_response_has_role_field_2(self):
         """Test Anthropic with simple content_block_delta (no index)."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = AnthropicChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -152,7 +152,7 @@ class TestGenericChatBotResponse:
     @pytest.mark.asyncio
     async def test_response_data_structure_unified_format(self):
         """Test that response.data has correct unified format with content array."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(
             name="test",
             url="http://test:8000",
@@ -194,7 +194,7 @@ class TestChatBotResponseIntegration:
     @pytest.mark.asyncio
     async def test_response_valid_for_execution_environment(self):
         """Test that response format satisfies ExecutionEnvironment requirements."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
