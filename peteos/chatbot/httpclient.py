@@ -1,18 +1,18 @@
 """HTTP client for communicating with LLM APIs."""
 
 import httpx
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 
 class HTTPClient:
     """Async HTTP client with streaming support for SSE."""
 
-    def __init__(self, timeout: float):
+    def __init__(self, timeout: Optional[float]):
         """
         Initialize HTTPClient.
 
         Args:
-            timeout: Request timeout in seconds.
+            timeout: Request timeout in seconds. Pass None for no timeout.
         """
         self._timeout = timeout
 

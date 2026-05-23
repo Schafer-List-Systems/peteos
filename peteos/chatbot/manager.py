@@ -28,12 +28,12 @@ class ChatBotManager:
     and provides filtered access to ChatBot instances.
     """
 
-    def __init__(self, timeout: float):
+    def __init__(self, timeout: Optional[float]):
         """Initialize empty manager.
 
         Args:
-            timeout: HTTP request timeout in seconds. Must be provided explicitly
-                from user configuration — no defaults allowed.
+            timeout: HTTP request timeout in seconds. Pass None for no timeout.
+                Must be provided explicitly from user configuration — no defaults.
         """
         self._backends: Dict[str, BackendInfo] = {}
         self._http_client = HTTPClient(timeout=timeout)

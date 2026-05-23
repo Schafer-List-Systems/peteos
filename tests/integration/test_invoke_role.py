@@ -11,11 +11,12 @@ from aiohttp.test_utils import TestServer
 
 from peteos.agent import Agent
 from peteos.chatbot.manager import ChatBotManager
-from peteos.chatbot import Message, ContentPart
+from peteos.chatbot import Message, ContentPart, ChatHistory
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 from peteos.session import invoke_role, _extract_last_assistant_text, ExecStatus, Session
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # --- Mock HTTP Backend ---
@@ -82,7 +83,7 @@ async def mock_agent(mock_server):
         Role(name="test", description="Test", model="test-model")
     )
 
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=None)
     await chatbot_manager.add_backend(
         "mock",
         f"http://{mock_server.host}:{mock_server.port}"
@@ -163,12 +164,23 @@ class TestInvokeRole:
     @pytest.mark.asyncio
     async def test_invoke_role_timeout(self, mock_agent):
         """invoke_role raises TimeoutError when chatbot doesn't respond."""
-        # Use a port that won't respond
-        chatbot_manager = ChatBotManager()
-        await chatbot_manager.add_backend(
-            "mock",
-            "http://localhost:19999"  # No server listening
-        )
+        # Patch the backend's model discovery so we don't hit the network
+        async def noop_models(*args, **kwargs):
+            return ["test-model"]
+
+        # Create a mock agent with a broken backend
+        chatbot_manager = ChatBotManager(timeout=1.0)
+        with patch.object(
+            chatbot_manager,
+            "_list_models_for_api_type",
+            noop_models,
+        ):
+            await chatbot_manager.add_backend(
+                "mock",
+                "http://localhost:19999",  # No server listening
+                api_type="openai",
+            )
+
         agent = Agent(mock_agent._role_manager, chatbot_manager, mock_agent._tool_manager)
 
         try:
@@ -187,7 +199,7 @@ class TestInvokeRole:
     async def test_invoke_role_no_existing_session_or_agent(self):
         """invoke_role raises ValueError without agent or existing_session."""
         with pytest.raises(ValueError, match="Either agent or existing_session"):
-            await invoke_role(role_name="test", prompt="Hello")
+            await invoke_role(role_name="test", prompt="Hello", timeout=10.0)
 
     @pytest.mark.asyncio
     async def test_invoke_role_existing_session_not_running(self):
@@ -196,17 +208,24 @@ class TestInvokeRole:
         role_manager.register_role(
             Role(name="test", description="Test", model="test-model")
         )
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         role = role_manager.get_role("test")
         tool_manager = ToolManager()
+        mock_env = MagicMock()
+        mock_env._hooks = {"before_tool_execution": [], "after_tool_execution": [],
+                          "before_notification_publish": [], "before_send_to_chatbot": [],
+                          "before_loop_continue": [], "after_step": []}
         session = Session(
             role=role,
             tool_manager=tool_manager,
             chatbot_manager=chatbot_manager,
+            execution_environment=mock_env,
         )
+        # Session must be started to be "running"
+        # This session was never started, so is_running() should return False
 
         with pytest.raises(RuntimeError, match="existing_session is not running"):
-            await invoke_role(role_name="test", prompt="Hello", existing_session=session)
+            await invoke_role(role_name="test", prompt="Hello", existing_session=session, timeout=10.0)
 
 
 class TestExtractLastAssistantText:
@@ -215,94 +234,58 @@ class TestExtractLastAssistantText:
     @pytest.mark.asyncio
     async def test_extract_returns_last_assistant(self):
         """Extracts the last assistant message text."""
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test", model="test-model")
-        )
-        chatbot_manager = ChatBotManager()
+        chat_history = ChatHistory(messages=[])
 
-        role = role_manager.get_role("test")
-        tool_manager = ToolManager()
-        session = Session(
-            role=role,
-            tool_manager=tool_manager,
-            chatbot_manager=chatbot_manager,
-        )
-
-        session.append_and_notify(Message(
+        chat_history.append_message(Message(
             role="user",
             content=[ContentPart(part_type="text", text="Question 1")],
         ))
-        session.append_and_notify(Message(
+        chat_history.append_message(Message(
             role="assistant",
             content=[ContentPart(part_type="text", text="Answer 1")],
         ))
-        session.append_and_notify(Message(
+        chat_history.append_message(Message(
             role="user",
             content=[ContentPart(part_type="text", text="Question 2")],
         ))
-        session.append_and_notify(Message(
+        chat_history.append_message(Message(
             role="assistant",
             content=[ContentPart(part_type="text", text="Answer 2")],
         ))
 
-        result = _extract_last_assistant_text(session.chat_history)
+        result = _extract_last_assistant_text(chat_history)
         assert result == "Answer 2"
 
     @pytest.mark.asyncio
     async def test_extract_returns_empty_when_no_assistant(self):
         """Returns empty string when no assistant message exists."""
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test", model="test-model")
-        )
-        chatbot_manager = ChatBotManager()
+        chat_history = ChatHistory(messages=[])
 
-        role = role_manager.get_role("test")
-        tool_manager = ToolManager()
-        session = Session(
-            role=role,
-            tool_manager=tool_manager,
-            chatbot_manager=chatbot_manager,
-        )
-
-        session.append_and_notify(Message(
+        chat_history.append_message(Message(
             role="user",
             content=[ContentPart(part_type="text", text="Just a user message")],
         ))
 
-        result = _extract_last_assistant_text(session.chat_history)
+        result = _extract_last_assistant_text(chat_history)
         assert result == ""
 
     @pytest.mark.asyncio
     async def test_extract_skips_non_assistant(self):
         """Skips non-assistant messages to find the last assistant."""
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test", model="test-model")
-        )
-        chatbot_manager = ChatBotManager()
+        chat_history = ChatHistory(messages=[])
 
-        role = role_manager.get_role("test")
-        tool_manager = ToolManager()
-        session = Session(
-            role=role,
-            tool_manager=tool_manager,
-            chatbot_manager=chatbot_manager,
-        )
-
-        session.append_and_notify(Message(
+        chat_history.append_message(Message(
             role="assistant",
             content=[ContentPart(part_type="text", text="Assistant msg")],
         ))
-        session.append_and_notify(Message(
+        chat_history.append_message(Message(
             role="tool_result",
             content=[ContentPart(part_type="tool_result", name="test", content="result", tool_use_id="id1")],
         ))
-        session.append_and_notify(Message(
+        chat_history.append_message(Message(
             role="user",
             content=[ContentPart(part_type="text", text="User msg")],
         ))
 
-        result = _extract_last_assistant_text(session.chat_history)
+        result = _extract_last_assistant_text(chat_history)
         assert result == "Assistant msg"
