@@ -71,21 +71,56 @@ Arguments arrive as fragments in `tool_calls[0].function.arguments`.
 
 ## Translation Rules
 
+### Post-Processing
+
+After path-based translation, `_set_text_types()` and `_set_tool_call_types()` inject type discriminators:
+
+1. `_set_tool_call_types`: Sets `type: "tool_use"` on items with `name` + `arguments`/`id`
+2. `_set_text_types`: Sets `type: "text"` on items without a `type`
+
 ### Examples
 
-#### Example 1: String Dictionary (No Array)
+#### Example 1: Reasoning Fragment
 
 **OpenAI SSE:**
 ```json
-{"choices": [{"index": 0, "delta": {"reasoning": "Hello"}}]}
+{"choices": [{"delta": {"reasoning": "Hello"}}]}
 ```
 
 **Translates to uniform delta:**
 ```python
-{"reasoning": "Hello"}
+{"_reasoning": "Hello"}
 ```
 
-#### Example 2: Array with Index (tool call at position 0)
+**After post-processing → thinking block in content array:**
+```python
+{
+    "content": [{
+        "index": 0,
+        "type": "thinking",
+        "content": "Hello"
+    }]
+}
+```
+
+#### Example 2: Text Fragment
+
+**OpenAI SSE:**
+```json
+{"choices": [{"delta": {"content": "Hello"}}]}
+```
+
+**Translates to uniform delta:**
+```python
+{"content": [{"index": 0, "content": "Hello"}]}
+```
+
+**After `_set_text_types` post-processing:**
+```python
+{"content": [{"index": 0, "type": "text", "content": "Hello"}]}
+```
+
+#### Example 3: Tool Call
 
 **OpenAI SSE:**
 ```json
@@ -106,9 +141,8 @@ Arguments arrive as fragments in `tool_calls[0].function.arguments`.
 **Translates to uniform delta:**
 ```python
 {
-    "tool_calls": [{
+    "content": [{
         "index": 0,
-        "type": "tool_use",
         "id": "call_abc",
         "name": "add",
         "arguments": "{}"
@@ -116,32 +150,14 @@ Arguments arrive as fragments in `tool_calls[0].function.arguments`.
 }
 ```
 
-#### Example 3: Array with Index (tool call at position 1)
-
-**OpenAI SSE:**
-```json
-{
-  "choices": [{
-    "delta": {
-      "tool_calls": [{
-        "index": 1,
-        "id": "call_def",
-        "type": "function",
-        "function": {"name": "sub", "arguments": "{}"}
-      }]
-    }
-  }]
-}
-```
-
-**Translates to uniform delta:**
+**After `_set_tool_call_types` post-processing:**
 ```python
 {
-    "tool_calls": [{
-        "index": 1,
+    "content": [{
+        "index": 0,
         "type": "tool_use",
-        "id": "call_def",
-        "name": "sub",
+        "id": "call_abc",
+        "name": "add",
         "arguments": "{}"
     }]
 }
@@ -152,11 +168,10 @@ Arguments arrive as fragments in `tool_calls[0].function.arguments`.
 | OpenAI Field | Uniform Target | Notes |
 |--------------|----------------|-------|
 | `choices[0].delta.role` | `role` | Only in first event |
-| `choices[0].delta.reasoning` | `reasoning` | Reasoning fragments (no array) |
-| `choices[0].delta.content` | `content` | Text fragments (no array) |
+| `choices[0].delta.reasoning` | `_reasoning` (→ `content[N].type="thinking"` after post-processing) | Reasoning fragments |
+| `choices[0].delta.content` | `content[0].content` | Text fragments |
 | `choices[0].finish_reason` | `stop_reason` | Only in final event |
-| `choices[0].delta.tool_calls[0].index` | `tool_calls[0].index` | Array position preserved |
-| `choices[0].delta.tool_calls[0].type` | `tool_calls[0].type` | Always `"tool_use"` |
-| `choices[0].delta.tool_calls[0].id` | `tool_calls[0].id` | Tool call ID |
-| `choices[0].delta.tool_calls[0].function.name` | `tool_calls[0].name` | Function name |
-| `choices[0].delta.tool_calls[0].function.arguments` | `tool_calls[0].arguments` | JSON argument fragments |
+| `choices[0].delta.tool_calls[0].index` | `content[0].index` | Array position preserved |
+| `choices[0].delta.tool_calls[0].id` | `content[0].id` | Tool call ID |
+| `choices[0].delta.tool_calls[0].function.name` | `content[0].name` | Function name |
+| `choices[0].delta.tool_calls[0].function.arguments` | `content[0].arguments` | JSON argument fragments |

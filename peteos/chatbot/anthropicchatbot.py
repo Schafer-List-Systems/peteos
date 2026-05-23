@@ -347,18 +347,8 @@ class AnthropicChatBotResponse(GenericChatBotResponse):
 
         return response
 
-    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process an Anthropic event, defaulting role to 'assistant' if missing from message_start.
-
-        The Anthropic API includes role in message_start. This fallback handles
-        non-compliant backends that omit the role field entirely.
-        """
-        result = self._translate_event(event)
-
-        # Default role to 'assistant' if message_start is missing it
-        if event.get("type") == "message_start" and "role" not in event.get("message", {}):
-            if "role" not in result:
-                result["role"] = "assistant"
-
-        return result
+    def _accumulate_event(self, event: Dict[str, Any]) -> None:
+        """Accumulate translated event and default role to 'assistant' if missing."""
+        _merge_delta_into_target(self._data, event)
+        if "role" not in self._data and "content" in self._data:
+            self._data["role"] = "assistant"
