@@ -224,6 +224,11 @@ class Session(ActiveClass):
         self._pending_tool_calls: list[ToolCallRecord] = []
         self.tool_failure_policy: str = "continue"
 
+    @property
+    def state(self) -> AgenticState:
+        """Access the session's mutable state store."""
+        return self._state
+
     def subscribe(self, channel: "Channel") -> bool:
         """Subscribe a channel to notifications for this session.
 
