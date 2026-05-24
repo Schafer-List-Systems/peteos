@@ -70,6 +70,100 @@ class ToolApprovalPending(Exception):
         super().__init__("Tool approval pending")
 
 
+class AgenticState:
+    """Mutable key-value store for agents to leave intermediate state.
+
+    Variables store strings. Five distinct methods with clear semantics:
+
+    - get(name): returns the value or None if not found
+    - create(name, value): creates a new variable (raises if exists)
+    - update(name, old_value, new_value): compare-and-swap (both non-None)
+    - delete(name): removes a variable (raises if not found)
+    - list(): returns all variable names
+    """
+
+    def __init__(self) -> None:
+        self._data: Dict[str, str] = {}
+
+    def get(self, name: str) -> Optional[str]:
+        """Get a variable's value.
+
+        Args:
+            name: Variable name.
+
+        Returns:
+            The variable's value, or None if it does not exist.
+        """
+        return self._data.get(name)
+
+    def create(self, name: str, value: str) -> None:
+        """Create a new variable.
+
+        Args:
+            name: Variable name.
+            value: Non-empty string value.
+
+        Raises:
+            ValueError: If variable already exists or value is empty.
+        """
+        if name in self._data:
+            raise ValueError(f"Variable '{name}' already exists in AgenticState")
+        if value is None or value == "":
+            raise ValueError("Value must be a non-empty string")
+        self._data[name] = value
+
+    def update(self, name: str, old_value: str, new_value: str) -> None:
+        """Update a variable with compare-and-swap semantics.
+
+        Both old_value and new_value must be non-None strings.
+
+        Args:
+            name: Variable name.
+            old_value: Expected current value.
+            new_value: New value to set.
+
+        Raises:
+            ValueError: If old_value or new_value is None, or
+                if the variable doesn't exist or the current value
+                doesn't match old_value.
+        """
+        if old_value is None:
+            raise ValueError("old_value must not be None")
+        if new_value is None:
+            raise ValueError("new_value must not be None")
+
+        if name not in self._data:
+            raise KeyError(f"Variable '{name}' does not exist in AgenticState")
+
+        current = self._data[name]
+        if current != old_value:
+            raise ValueError(
+                f"Variable '{name}' has value {current!r}, expected {old_value!r}"
+            )
+        self._data[name] = new_value
+
+    def delete(self, name: str) -> None:
+        """Delete a variable.
+
+        Args:
+            name: Variable name.
+
+        Raises:
+            KeyError: If variable does not exist.
+        """
+        if name not in self._data:
+            raise KeyError(f"Variable '{name}' does not exist in AgenticState")
+        del self._data[name]
+
+    def list(self) -> List[str]:
+        """Return a list of all variable names.
+
+        Returns:
+            List of variable names.
+        """
+        return list(self._data.keys())
+
+
 class Session(ActiveClass):
     """A session with an execution environment.
 
@@ -118,6 +212,7 @@ class Session(ActiveClass):
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
         self.chatbot_manager = chatbot_manager
         self._channels: Set[Channel] = set()
+        self._state = AgenticState()
 
         self.execution_environment = execution_environment if execution_environment is not None else REPLExecutionEnvironment(
             chatbot_manager=chatbot_manager,
