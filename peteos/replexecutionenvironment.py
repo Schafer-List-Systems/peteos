@@ -217,7 +217,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
             tool_call_id = tool_call.get("id", "")
             try:
-                result = tool.execute(**args)
+                result = tool.execute(**args, session=session)
                 self._append_tool_result(session, tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
                 self._call_hooks("after_tool_execution", session, tool_call, str(result), True)
                 _logger.debug("Tool %s returned: %s", tool_name, str(result))

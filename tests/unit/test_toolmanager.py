@@ -12,9 +12,11 @@ def test_tool_creation_from_callable():
 
     assert tool.name == "my_tool"
     assert tool.description == "This is my tool description."
-    assert tool.func == my_tool
+    assert tool.func.__name__ == my_tool.__name__
+    assert tool.func.__doc__ == my_tool.__doc__
     assert "arg1" in tool.parameters
     assert "arg2" in tool.parameters
+    assert "session" not in tool.parameters
 
 
 def test_tool_call():
