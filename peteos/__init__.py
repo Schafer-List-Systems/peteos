@@ -20,7 +20,7 @@ from peteos.executionenvironment import ExecutionEnvironment
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
-from peteos.session import Session, invoke_role, _extract_last_assistant_text
+from peteos.session import Session, invoke_agent, _extract_last_assistant_text
 from peteos.toolmanager import ToolManager
 
 __all__ = [
@@ -39,7 +39,7 @@ __all__ = [
     "HTTPClient",
     "Message",
     "OpenAIChatBot",
-    "invoke_role",
+    "invoke_agent",
     "REPLExecutionEnvironment",
     "Role",
     "RoleManager",

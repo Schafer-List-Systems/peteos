@@ -20,6 +20,7 @@ class LogState:
     last_context_tokens: int = 0
     is_muted: bool = False
     session: "Session | None" = None  # Set after session creation
+    agent: "Agent | None" = None  # Set after session creation
 
 
 _state = LogState()
@@ -58,7 +59,7 @@ def unmute_router() -> str:
     return "Unmuted"
 
 
-def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_line: str = "") -> str:
+async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_line: str = "") -> str:
     """Add a regex pattern to exclude future log messages from further observation.
 
     Lines matching an exclude pattern are dropped. Use this to suppress
@@ -86,20 +87,71 @@ def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_line: str
         return "Error: channel not configured."
 
     # Pattern must start with '^'
-    if not pattern.startswith("^"):
-        return "Pattern not included. Pattern must start with '^' to match the beginning of the line."
+    if not pattern.startswith("^") or not pattern.endswith("$"):
+        return "Pattern not included. Pattern must start with '^' to match the beginning of the line and end with '$' to match the end of the line."
 
     # .* may only appear once, at the very end of the pattern (before optional $)
     stripped = pattern.rstrip("$")
     if ".*" in stripped:
-        prefix, rest = stripped.split(".*", 1)
-        if rest or ".*" in prefix:
-            return "Pattern not included. Avoid matching arbitrary strings (.*) except at the end of the pattern."
+        return "Pattern not included. Avoid matching arbitrary strings (.*)."
 
     # Verify pattern matches the actual triggering log line
     import re
+    import asyncio
     if triggering_log_line and not re.search(pattern, triggering_log_line):
-        return f"Pattern does not match the triggering log line. Test with: re.search({pattern!r}, {triggering_log_line!r})"
+        return f"Pattern does not match the triggering log line. Test with: re.search({pattern}, {triggering_log_line})"
+
+    # --- Invoke pattern_reviewer for approval ---
+    agent = _state.agent
+    if agent is None:
+        return "Error: agent not configured."
+
+    try:
+        from peteos.session import invoke_agent
+
+        existing_patterns = ""
+        if ch is not None:
+            patterns_list = ch.list_exclude_patterns()
+            if patterns_list:
+                existing_patterns = "Current exclude patterns:\n" + "\n".join(
+                    f"  [{i}] p" for i, p in enumerate(patterns_list)
+                ) + "\n\n"
+
+        reviewer_prompt = (
+            f"Review this proposed log exclusion pattern for safety.\n\n"
+            f"Proposed pattern: {pattern}\n"
+            f"Stated reason: {reason}\n"
+            f"Triggering log line: {triggering_log_line!r}\n\n"
+            f"{existing_patterns}"
+            f"Rules:\n"
+            f"- NEVER approve patterns that could hide security issues\n"
+            f"  (unauthorized access, privilege escalation, network anomalies, ...)\n"
+            f"- NEVER approve patterns that could hide hardware failures\n"
+            f"  (disk errors, memory corruption, fan failures, temperature warnings, ...)\n"
+            f"- NEVER approve patterns that have fixed variables, i.e., values unknown at compile-time of the service\n"
+            f"  (e.g. paths, process ids, timestamps, dates, hours, days, ...)\n"
+            f"- ONLY approve pattern with placeholders for compile-time strings of the service\n"
+            f"  (Particular messages that are known at compile time)"
+            f"- Patterns must not be overly broad (avoid .*)\n"
+            f"- After your analysis, call set_approval_result with approved='yes' or 'no'\n"
+            f"  and provide a detailed reason.\n"
+        )
+
+        review_result = await invoke_agent(
+            role_name="pattern_reviewer",
+            prompt=reviewer_prompt,
+            agent=agent,
+            keep_session=True,
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        return "Pattern addition aborted: reviewer did not respond within timeout."
+
+    approved = review_result["session"].state.get("approved") if review_result.get("session") else None
+    reviewer_reason = review_result["session"].state.get("reason") if review_result.get("session") else "Timeout - no result"
+
+    if approved != "yes":
+        return f"Pattern denied: {reviewer_reason}"
 
     index = ch.add_exclude_pattern(pattern)
     if index is not None:
@@ -201,7 +253,7 @@ def register_state_tools(tool_manager: ToolManager) -> None:
     """
     tool_manager.register_tool(func=mute_router)
     tool_manager.register_tool(func=unmute_router)
-    tool_manager.register_tool(func=eval_python)
+    #tool_manager.register_tool(func=eval_python)
 
 
 def register_filter_tools(
@@ -341,6 +393,50 @@ def unfold(message_id: str) -> str:
         folded_idx += 1
 
     return f"Unfolded: restored {len(folded_msg._original_messages)} messages."
+
+
+def set_approval_result(
+    approved: str = "",
+    reason: str = "",
+    session: "Session | None" = None,
+) -> str:
+    """Set the review decision. Call with approved='yes' or 'no' and a reason.
+
+    Writes the decision to the reviewer session's AgenticState so the
+    invoking agent can read it out.
+
+    Args:
+        approved: 'yes' to approve the pattern, 'no' to deny it.
+        reason: Detailed explanation of the decision.
+        session: The reviewer session (injected by the execution environment).
+
+    Returns:
+        Confirmation string.
+    """
+    if session is None:
+        return "Error: session not available."
+
+    if approved not in ("yes", "no"):
+        return "Error: approved must be 'yes' or 'no'."
+    if not reason:
+        return "Error: reason must be non-empty."
+
+    try:
+        session.state.create("approved", approved)
+        session.state.create("reason", reason)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    return f"Approval result set: {approved}"
+
+
+def register_approval_tools(tool_manager: ToolManager) -> None:
+    """Register set_approval_result tool on the given tool manager.
+
+    Args:
+        tool_manager: The ToolManager to register the tool on.
+    """
+    tool_manager.register_tool(func=set_approval_result)
 
 
 def register_fold_tools(tool_manager: ToolManager) -> None:

@@ -93,7 +93,7 @@ class TestMessage:
         )
         assert msg.get_role() == "user"
         assert len(msg.content) == 1
-        assert msg.text == "Hello"
+        assert msg.content[0].text == "Hello"
 
     def test_multi_part_message(self):
         """Test creating a message with multiple content parts."""
@@ -105,18 +105,20 @@ class TestMessage:
             ]
         )
         assert len(msg.content) == 2
-        assert "What's in this image?" in msg.text
+        texts = [p.text for p in msg.content if p.type == "text" and p.text]
+        assert "What's in this image?" in texts[0]
 
-    def test_message_text_property(self):
+    def test_message_text_extraction(self):
         """Test extracting text from message content."""
         msg = Message(
             role="assistant",
             content=[
-                ContentPart(part_type="text", text="Hello "),
+                ContentPart(part_type="text", text="Hello"),
                 ContentPart(part_type="text", text="world")
             ]
         )
-        assert msg.text == "Hello world"
+        texts = " ".join(p.text for p in msg.content if p.type == "text" and p.text)
+        assert texts == "Hello world"
 
     def test_message_to_dict(self):
         """Test converting Message to dictionary."""
@@ -153,7 +155,7 @@ class TestMessage:
         msg = Message.from_dict(d)
         assert len(msg.content) == 1
         assert msg.content[0].type == "text"
-        assert msg.text == "Hello"
+        assert msg.content[0].text == "Hello"
 
     def test_message_with_metadata(self):
         """Test creating Message with metadata."""
@@ -350,7 +352,10 @@ class TestMessageAnchors:
         history.append_message(Message(role="user", content=[ContentPart(part_type="text", text="u")]))
         history.append_message(Message(role="assistant", content=[ContentPart(part_type="text", text="a")]))
         history.append_message(Message(role="tool", content=[ContentPart(part_type="tool", name="t", description="d", parameters={})]), anchor="back")
-        assert [msg.text for msg in history if msg.text] == ["f", "u", "a"]
+        def _msg_text(msg):
+            return " ".join(p.text for p in msg.content if p.type == "text" and p.text)
+
+        assert [_msg_text(msg) for msg in history if _msg_text(msg)] == ["f", "u", "a"]
 
     def test_len_counts_all_messages(self):
         """len() counts front + unanchored + back."""
@@ -413,8 +418,8 @@ class TestMessageAnchors:
         history.append_message(Message(role="t", content=[ContentPart(part_type="tool", name="t", description="d", parameters={})]), anchor="back")
         data = history.to_dict()
         rebuilt = ChatHistory.from_dict(data)
-        assert rebuilt.messages[0].text == "f"
-        assert rebuilt.messages[1].text == "u"
+        assert rebuilt.messages[0].content[0].text == "f"
+        assert rebuilt.messages[1].content[0].text == "u"
 
     def test_from_dict_list_raises(self):
         """Plain list format raises ValueError."""
@@ -533,7 +538,7 @@ class TestRollingWindowDiscard:
         assert removed >= 1
         # "AAAA" and "BBBB" should be gone; "CCCC" remains
         assert len(history._unanchored) == 1
-        assert history._unanchored[0].text == "CCCC"
+        assert history._unanchored[0].content[0].text == "CCCC"
 
     def test_all_unanchored_removed_if_needed(self):
         """If anchored messages alone exceed limit, all unanchored are discarded."""

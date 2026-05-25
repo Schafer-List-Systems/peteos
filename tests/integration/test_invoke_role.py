@@ -1,4 +1,4 @@
-"""Integration tests for invoke_role function."""
+"""Integration tests for invoke_agent function."""
 
 import asyncio
 import json
@@ -15,7 +15,7 @@ from peteos.chatbot import Message, ContentPart, ChatHistory
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
-from peteos.session import invoke_role, _extract_last_assistant_text, ExecStatus, Session
+from peteos.session import invoke_agent, _extract_last_assistant_text, ExecStatus, Session
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -94,16 +94,16 @@ async def mock_agent(mock_server):
     return agent
 
 
-# --- Tests for invoke_role ---
+# --- Tests for invoke_agent ---
 
 
 class TestInvokeRole:
-    """invoke_role integration tests using mock HTTP backend."""
+    """invoke_agent integration tests using mock HTTP backend."""
 
     @pytest.mark.asyncio
-    async def test_invoke_role_returns_answer(self, mock_agent, mock_server):
-        """Basic invoke_role returns answer from chatbot."""
-        result = await invoke_role(
+    async def test_invoke_agent_returns_answer(self, mock_agent, mock_server):
+        """Basic invoke_agent returns answer from chatbot."""
+        result = await invoke_agent(
             role_name="test",
             prompt="Hello world",
             agent=mock_agent,
@@ -118,9 +118,9 @@ class TestInvokeRole:
             await mock_agent.destroy_session(list(mock_agent._sessions.keys())[0])
 
     @pytest.mark.asyncio
-    async def test_invoke_role_keep_session(self, mock_agent, mock_server):
-        """invoke_role with keep_session=True returns running session."""
-        result = await invoke_role(
+    async def test_invoke_agent_keep_session(self, mock_agent, mock_server):
+        """invoke_agent with keep_session=True returns running session."""
+        result = await invoke_agent(
             role_name="test",
             prompt="Hello",
             agent=mock_agent,
@@ -143,11 +143,11 @@ class TestInvokeRole:
             await mock_agent.destroy_session(list(mock_agent._sessions.keys())[0])
 
     @pytest.mark.asyncio
-    async def test_invoke_role_existing_session(self, mock_agent, mock_server):
-        """invoke_role with existing_session for continuation."""
+    async def test_invoke_agent_existing_session(self, mock_agent, mock_server):
+        """invoke_agent with existing_session for continuation."""
         session = await mock_agent.create_session("test")
 
-        result = await invoke_role(
+        result = await invoke_agent(
             role_name="test",
             prompt="Continuation",
             existing_session=session,
@@ -162,8 +162,8 @@ class TestInvokeRole:
         await mock_agent.destroy_session(session.uuid)
 
     @pytest.mark.asyncio
-    async def test_invoke_role_timeout(self, mock_agent):
-        """invoke_role raises TimeoutError when chatbot doesn't respond."""
+    async def test_invoke_agent_timeout(self, mock_agent):
+        """invoke_agent raises TimeoutError when chatbot doesn't respond."""
         # Patch the backend's model discovery so we don't hit the network
         async def noop_models(*args, **kwargs):
             return ["test-model"]
@@ -185,7 +185,7 @@ class TestInvokeRole:
 
         try:
             with pytest.raises(asyncio.TimeoutError):
-                await invoke_role(
+                await invoke_agent(
                     role_name="test",
                     prompt="Hello",
                     agent=agent,
@@ -196,14 +196,14 @@ class TestInvokeRole:
                 await agent.destroy_session(list(agent._sessions.keys())[0])
 
     @pytest.mark.asyncio
-    async def test_invoke_role_no_existing_session_or_agent(self):
-        """invoke_role raises ValueError without agent or existing_session."""
+    async def test_invoke_agent_no_existing_session_or_agent(self):
+        """invoke_agent raises ValueError without agent or existing_session."""
         with pytest.raises(ValueError, match="Either agent or existing_session"):
-            await invoke_role(role_name="test", prompt="Hello", timeout=10.0)
+            await invoke_agent(role_name="test", prompt="Hello", timeout=10.0)
 
     @pytest.mark.asyncio
-    async def test_invoke_role_existing_session_not_running(self):
-        """invoke_role raises RuntimeError for non-running session."""
+    async def test_invoke_agent_existing_session_not_running(self):
+        """invoke_agent raises RuntimeError for non-running session."""
         role_manager = RoleManager()
         role_manager.register_role(
             Role(name="test", description="Test", model="test-model")
@@ -225,7 +225,7 @@ class TestInvokeRole:
         # This session was never started, so is_running() should return False
 
         with pytest.raises(RuntimeError, match="existing_session is not running"):
-            await invoke_role(role_name="test", prompt="Hello", existing_session=session, timeout=10.0)
+            await invoke_agent(role_name="test", prompt="Hello", existing_session=session, timeout=10.0)
 
 
 class TestExtractLastAssistantText:

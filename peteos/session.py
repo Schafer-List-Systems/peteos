@@ -508,11 +508,12 @@ def _extract_last_assistant_text(chat_history: "ChatHistory") -> str:
     """Extract the text of the last assistant message from chat history."""
     for msg in reversed(chat_history.messages):
         if msg.get_role() == "assistant":
-            return msg.text
+            texts = [part.text for part in msg.content if part.type == "text" and part.text]
+            return " ".join(texts).replace("  ", " ")
     return ""
 
 
-async def invoke_role(
+async def invoke_agent(
     role_name: str,
     prompt: str,
     agent: "Agent | None" = None,

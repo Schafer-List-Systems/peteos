@@ -192,7 +192,7 @@ class TestEventDispatch:
 
         session_mock.queue_message.assert_called_once()
         queued_msg = session_mock.queue_message.call_args[0][0]
-        assert queued_msg.text == "Hello bot!"
+        assert queued_msg.content[0].text == "Hello bot!"
 
         # Await the thinking reaction task to prevent RuntimeWarning
         # _send_reaction will fail (no real aiohttp) but we need to drain the task

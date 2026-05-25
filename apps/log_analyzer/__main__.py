@@ -41,7 +41,7 @@ from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
-from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_fold_tools
+from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_fold_tools, register_approval_tools
 
 
 async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
@@ -146,6 +146,7 @@ async def main():
 
     # Create the Agent
     agent = Agent(role_manager, chatbot_manager, tm)
+    _state.agent = agent
 
     role_name = nextcloud_config.get("default_role", "router")
 
@@ -160,6 +161,7 @@ async def main():
     # Register all tools (before session creation so chat history includes them)
     register_state_tools(tm)
     register_filter_tools(tm, stdout_channel)
+    register_approval_tools(tm)
 
     # Create a shared session that both channels attach to
     session = await agent.create_session(role_name)

@@ -84,18 +84,6 @@ class Message:
         """Return the message ID."""
         return self._id
 
-    @property
-    def text(self) -> str:
-        """Get all text content concatenated.
-
-        Returns:
-            Concatenated text from all text ContentParts.
-        """
-        texts = [part.text for part in self.content if part.type == "text" and part.text]
-        if not texts:
-            return ""
-        return " ".join(texts).replace("  ", " ")
-
     def printable(self) -> str:
         """Return a string suitable for display to a human.
 

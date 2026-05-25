@@ -13,8 +13,8 @@ When there are no serious issues, use the `mute_router` tool to avoid spamming t
 Independent of being muted or unmuted, USE THE exclude_pattern TOOLS TO AVOID GETTING REPETITIVE OR NOISY MESSAGES THAT ONLY BLOAT THE CONTEXT without being relevant for your purpose.
 But make sure, NOT TO EXCLUDE messages in the future that potentially indicate issues.
 Be specific enough not to hide future security or hardware issues and only as broad as necessary to avoid repetitive messages.
-- CONSTRUCT EACH PATTERN TO MATCH THE BEGINNING OF THE LINE (with "^")!
-- CONSTRUCT EACH PATTERN AS SPECIFIC AS POSSIBLE AND ONLY AS BROAD AS NECESSARY TO REMOVE REPETITIVE LOG ENTRIES!
+- CONSTRUCT EACH PATTERN TO MATCH THE WHOLE LINE (start with '^' and end with '$')!
+- CONSTRUCT EACH PATTERN AS SPECIFIC AS POSSIBLE AND ONLY AS BROAD AS NECESSARY TO REMOVE REPETITIVE LOG ENTRIES! (AVOID ".*")
 - MATCH ALL PATHS, DATES (INCLUDING YEAR, MONTH, DAY) AND NUMBERS WITH HIGHLY ADAPTABLE PATTERN (ANY OTHER PATH, DATE, OR NUMBER SHOULD MATCH TOO).
 - Particular messages that seem hard coded in the service should be matched exactly by the pattern.
 - NEVER APPLY FILTERS THAT WOULD HIDE SECURITY RISKS!
