@@ -94,6 +94,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             tool_manager=tool_manager,
             role=role,
         )
+        self._role = role
 
     async def step(self, session: "Session") -> tuple[ExecStatus, dict | None]:
         """Execute one loop iteration.
@@ -164,6 +165,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         from peteos.session import ToolApprovalStatus
 
         did_tool_calls = session.has_reviewed_tool_call()
+        yielded = False
         while session.has_reviewed_tool_call():
             record = session.pop_pending_tool_call()
             tool_call = record.tool_call
@@ -233,13 +235,22 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 return (ExecStatus.TOOL_FAILED, None)
 
             _logger.debug("[repl] step(): tool call executed; continue")
+            if tool_name == "yield_back":
+                yielded = True
+                break
+
+        if yielded:
+            _logger.debug("[repl] step(): Agent called yield_back, finishing.")
+            return (ExecStatus.FINISHED, None)
 
         if did_tool_calls and not session.has_pending_tool_call():
             _logger.debug("[repl] step(): Did tool calls. Need to continue, such that the ChatBot can see the result.")
             return (ExecStatus.CONTINUE, None)
 
         if has_text_part and not session.has_pending_tool_call():
-            # No tool calls — check for final answer or reasoning-only response
+            if self._role.behavior_policy == "continuous":
+                _logger.debug("[repl] step(): Continuous agent produced text, keeping loop active.")
+                return (ExecStatus.CONTINUE, None)
             _logger.debug("[repl] step(): Had final answer.")
             return (ExecStatus.FINISHED, None)
 

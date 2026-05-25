@@ -99,7 +99,7 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
     import re
     import asyncio
     if triggering_log_line and not re.search(pattern, triggering_log_line):
-        return f"Pattern does not match the triggering log line.\n- Pattern: '{pattern}'\n- Triggering log line: {triggering_log_line}"
+        return f"Pattern does not match the triggering log line.\n- Pattern: '{pattern!r}'\n- Triggering log line: {triggering_log_line}"
 
     # --- Invoke pattern_reviewer for approval ---
     agent = _state.agent
@@ -139,7 +139,7 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
     reviewer_reason = review_result["session"].state.get("reason") if review_result.get("session") else "Timeout - no result"
 
     if approved != "yes":
-        return f"Pattern denied. Improve your pattern! Reason: {reviewer_reason}"
+        return f"Pattern matches but is denied. Improve your pattern! Reason: {reviewer_reason}"
 
     index = ch.add_exclude_pattern(pattern)
     if index is not None:
@@ -241,7 +241,7 @@ def register_state_tools(tool_manager: ToolManager) -> None:
     """
     tool_manager.register_tool(func=mute_router)
     tool_manager.register_tool(func=unmute_router)
-    #tool_manager.register_tool(func=eval_python)
+    tool_manager.register_tool(func=eval_python)
 
 
 def register_filter_tools(

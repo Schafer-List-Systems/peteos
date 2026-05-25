@@ -16,7 +16,8 @@ class Role:
         execution_environment: str = "REPL",
         model: str = ".*",
         auto_approve_tools: Optional[list[str]] = None,
-        tool_filter: Optional[list[str]] = None
+        tool_filter: Optional[list[str]] = None,
+        behavior_policy: str = "responsive"
     ):
         """
         Initialize Role.
@@ -33,6 +34,8 @@ class Role:
             auto_approve_tools: Optional list of tool names auto-approved for this role.
             tool_filter: Optional list of regex patterns. Only tools whose names match
                 any pattern are visible to this role.
+            behavior_policy: Agent behavior strategy. "responsive" yields on text output,
+                "continuous" keeps looping until yield_back is called.
         """
         self.name = name
         self.description = description
@@ -43,6 +46,7 @@ class Role:
         self.model = model
         self.auto_approve_tools = auto_approve_tools if auto_approve_tools is not None else []
         self.tool_filter = tool_filter if tool_filter is not None else []
+        self.behavior_policy = behavior_policy
 
     def add_system_prompt_hook(self, hook: Callable[[], str]) -> None:
         """Add a hook that returns a dynamic fragment for the system prompt."""
@@ -76,6 +80,7 @@ class Role:
         model = data.get("model", ".*")
         auto_approve_tools = data.get("auto_approve_tools", [])
         tool_filter = data.get("tool_filter", [])
+        behavior_policy = data.get("behavior_policy", "responsive")
         return Role(
             name=name,
             description=description,
@@ -85,6 +90,7 @@ class Role:
             model=model,
             auto_approve_tools=auto_approve_tools,
             tool_filter=tool_filter,
+            behavior_policy=behavior_policy,
         )
 
     @staticmethod
@@ -149,6 +155,7 @@ class Role:
         model = config.get("model", ".*")
         auto_approve_tools = config.get("auto_approve_tools", [])
         tool_filter = config.get("tool_filter", [])
+        behavior_policy = config.get("behavior_policy", "responsive")
 
         return Role(
             name=name,
@@ -159,4 +166,5 @@ class Role:
             model=model,
             auto_approve_tools=auto_approve_tools,
             tool_filter=tool_filter,
+            behavior_policy=behavior_policy,
         )

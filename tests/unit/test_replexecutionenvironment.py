@@ -473,3 +473,126 @@ class TestREPLRunInterrupt:
         await _run_loop(env, mock_session)
 
         assert env._interrupt is True
+
+
+class TestContinuousBehaviorPolicy:
+    """Test continuous behavior_policy changes step() return behavior."""
+
+    @pytest.mark.asyncio
+    async def test_continuous_no_yield_on_text(self, mock_chatbot_manager, mock_chatbot):
+        """Continuous role produces text but no yield_back — returns CONTINUE."""
+        continuous_role = Role(name="continuous", description="Continuous agent", behavior_policy="continuous")
+        chat_history = ChatHistory()
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Hello")]
+        ))
+        tool_manager = ToolManager()
+
+        class MockResponse:
+            @property
+            def data(self):
+                return {"role": "assistant", "content": [{"type": "text", "content": "Hello!"}]}
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        async def mock_send(history, streaming=True):
+            return MockResponse()
+
+        mock_chatbot.send_message = mock_send
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
+
+        mock_session = _make_mock_session(chat_history, tool_manager, has_unfinished=False)
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, continuous_role)
+        status, _ = await env.step(mock_session)
+
+        assert status == ExecStatus.CONTINUE
+
+    @pytest.mark.asyncio
+    async def test_responsive_still_yields_on_text(self, mock_chatbot_manager, mock_chatbot):
+        """Responsive role produces text — returns FINISHED (regression)."""
+        responsive_role = Role(name="responsive", description="Responsive agent", behavior_policy="responsive")
+        chat_history = ChatHistory()
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Hello")]
+        ))
+        tool_manager = ToolManager()
+
+        class MockResponse:
+            @property
+            def data(self):
+                return {"role": "assistant", "content": [{"type": "text", "content": "Hello!"}]}
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        async def mock_send(history, streaming=True):
+            return MockResponse()
+
+        mock_chatbot.send_message = mock_send
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
+
+        mock_session = _make_mock_session(chat_history, tool_manager, has_unfinished=False)
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, responsive_role)
+        status, _ = await env.step(mock_session)
+
+        assert status == ExecStatus.FINISHED
+
+    @pytest.mark.asyncio
+    async def test_continuous_yields_on_yield_back(self, mock_chatbot_manager, mock_chatbot):
+        """Continuous role calls yield_back — returns FINISHED."""
+        continuous_role = Role(name="continuous", description="Continuous agent", behavior_policy="continuous")
+        chat_history = ChatHistory()
+        chat_history.append_message(Message(
+            role="user",
+            content=[ContentPart(part_type="text", text="Hello")]
+        ))
+        tool_manager = ToolManager()
+
+        def _yield_back():
+            pass
+
+        tool_manager.register_tool(func=_yield_back, name="yield_back", description="Signal that you have finished your task and want to yield control back to the user/channel. Call this when you've completed all your work and no longer need to execute tools.")
+
+        class MockResponse:
+            @property
+            def data(self):
+                return {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "y1", "name": "yield_back", "arguments": "{}"}],
+                }
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        async def mock_send(history, streaming=True):
+            return MockResponse()
+
+        mock_chatbot.send_message = mock_send
+        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
+
+        pending_record = MagicMock()
+        pending_record.tool_call = {"name": "yield_back", "id": "y1", "arguments": "{}"}
+        pending_record.approval_status = "approved"
+        mock_session = _make_mock_session(chat_history, tool_manager, has_unfinished=False)
+        mock_session._pending_tool_calls = [pending_record]
+        mock_session.has_reviewed_tool_call.return_value = True
+
+        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, continuous_role)
+        status, _ = await env.step(mock_session)
+
+        assert status == ExecStatus.FINISHED
+        # Chat history should contain user message + assistant tool_use + tool_result
+        assert len(chat_history.messages) == 3
+        assert chat_history.messages[2].get_role() == "tool_result"

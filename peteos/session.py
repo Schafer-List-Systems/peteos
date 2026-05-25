@@ -28,6 +28,11 @@ from peteos.executionenvironment import ExecStatus
 _logger = get_logger(__name__)
 
 
+def _yield_back() -> None:
+    """Signal that the agent has finished its task and wants to yield control."""
+    pass
+
+
 class ToolApprovalStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -209,6 +214,9 @@ class Session(ActiveClass):
         self.role = role
         self.tool_manager = tool_manager
         self.auto_approve_tools: list[str] = list(role.auto_approve_tools)
+        if role.behavior_policy == "continuous":
+            tool_manager.register_tool(func=_yield_back, name="yield_back", description="Signal that you have finished your task and want to yield control back to the user/channel. Call this when you've completed all your work and no longer need to execute tools.")
+            self.auto_approve_tools.append("yield_back")
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
         self.chatbot_manager = chatbot_manager
         self._channels: Set[Channel] = set()

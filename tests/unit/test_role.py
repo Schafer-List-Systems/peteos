@@ -435,3 +435,79 @@ def test_role_load_from_path_default_tool_filter():
         role = Role.load_from_path(str(role_dir))
 
         assert role.tool_filter == []
+
+
+def test_role_init_with_behavior_policy():
+    """Test Role initialization with behavior_policy."""
+    role = Role(
+        name="continuous",
+        description="Continuous agent",
+        behavior_policy="continuous"
+    )
+
+    assert role.name == "continuous"
+    assert role.description == "Continuous agent"
+    assert role.behavior_policy == "continuous"
+
+
+def test_role_init_default_behavior_policy():
+    """Test Role default behavior_policy is 'responsive'."""
+    role = Role(name="simple", description="Simple role")
+
+    assert role.behavior_policy == "responsive"
+
+
+def test_role_load_from_dict_with_behavior_policy():
+    """Test loading Role from dictionary with behavior_policy."""
+    data = {
+        "name": "continuous",
+        "description": "Continuous agent",
+        "behavior_policy": "continuous"
+    }
+
+    role = Role.load_from_dict(data)
+
+    assert role.name == "continuous"
+    assert role.behavior_policy == "continuous"
+
+
+def test_role_load_from_dict_default_behavior_policy():
+    """Test loading Role from dictionary without behavior_policy."""
+    data = {
+        "name": "simple",
+        "description": "Simple role"
+    }
+
+    role = Role.load_from_dict(data)
+
+    assert role.behavior_policy == "responsive"
+
+
+def test_role_load_from_path_with_behavior_policy_config():
+    """Test loading Role from directory with behavior_policy in config.json."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        role_dir = Path(tmpdir) / "continuous"
+        role_dir.mkdir()
+
+        (role_dir / "description.md").write_text("A continuous agent.")
+        (role_dir / "config.json").write_text(
+            '{"behavior_policy": "continuous"}'
+        )
+
+        role = Role.load_from_path(str(role_dir))
+
+        assert role.name == "continuous"
+        assert role.behavior_policy == "continuous"
+
+
+def test_role_load_from_path_default_behavior_policy():
+    """Test loading Role from directory without behavior_policy in config."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        role_dir = Path(tmpdir) / "simple"
+        role_dir.mkdir()
+
+        (role_dir / "description.md").write_text("A simple role.")
+
+        role = Role.load_from_path(str(role_dir))
+
+        assert role.behavior_policy == "responsive"

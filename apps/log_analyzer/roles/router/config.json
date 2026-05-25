@@ -2,5 +2,6 @@
     "required_tools": ["mute_router", "unmute_router", "add_exclude_pattern", "remove_exclude_pattern", "list_exclude_patterns"],
     "model": ".*",
     "auto_approve_tools": ["mute_router", "unmute_router", "fold", "unfold", "add_exclude_pattern", "remove_exclude_pattern", "list_exclude_patterns"],
-    "tool_filter": ["mute_router", "unmute_router", "add_exclude_pattern", "remove_exclude_pattern", "list_exclude_patterns", "fold", "unfold"]
+    "tool_filter": ["mute_router", "unmute_router", "add_exclude_pattern", "remove_exclude_pattern", "list_exclude_patterns", "fold", "unfold"],
+    "behavior_policy": "continuous"
 }

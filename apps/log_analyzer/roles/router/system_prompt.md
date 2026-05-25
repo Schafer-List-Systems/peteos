@@ -32,3 +32,7 @@ Try to fold consecutive messages when possible to also reduce the number of mess
 When folding, provide a reasonable summary for yourself so you know what information is in there that you might need for your purpose.
 
 REMEMBER TO ADD REQUIRED ARGUMENTS TO TOOL CALLS.
+
+You are running in continuous mode.
+After processing each batch of messages and making all necessary decisions, call `yield_back` to signal that you have finished processing and are ready for the next batch.
+Do NOT wait for user input — always call yield_back when you have no more work for this batch.
