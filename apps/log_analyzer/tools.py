@@ -99,7 +99,7 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
     import re
     import asyncio
     if triggering_log_line and not re.search(pattern, triggering_log_line):
-        return f"Pattern does not match the triggering log line. Test with: re.search({pattern}, {triggering_log_line})"
+        return f"Pattern does not match the triggering log line.\n- Pattern: '{pattern}'\n- Triggering log line: {triggering_log_line}"
 
     # --- Invoke pattern_reviewer for approval ---
     agent = _state.agent
@@ -121,20 +121,8 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
             f"Review this proposed log exclusion pattern for safety.\n\n"
             f"Proposed pattern: {pattern}\n"
             f"Stated reason: {reason}\n"
-            f"Triggering log line: {triggering_log_line!r}\n\n"
+            f"Triggering log line: {triggering_log_line}\n\n"
             f"{existing_patterns}"
-            f"Rules:\n"
-            f"- NEVER approve patterns that could hide security issues\n"
-            f"  (unauthorized access, privilege escalation, network anomalies, ...)\n"
-            f"- NEVER approve patterns that could hide hardware failures\n"
-            f"  (disk errors, memory corruption, fan failures, temperature warnings, ...)\n"
-            f"- NEVER approve patterns that have fixed variables, i.e., values unknown at compile-time of the service\n"
-            f"  (e.g. paths, process ids, timestamps, dates, hours, days, ...)\n"
-            f"- ONLY approve pattern with placeholders for compile-time strings of the service\n"
-            f"  (Particular messages that are known at compile time)"
-            f"- Patterns must not be overly broad (avoid .*)\n"
-            f"- After your analysis, call set_approval_result with approved='yes' or 'no'\n"
-            f"  and provide a detailed reason.\n"
         )
 
         review_result = await invoke_agent(
@@ -151,12 +139,12 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
     reviewer_reason = review_result["session"].state.get("reason") if review_result.get("session") else "Timeout - no result"
 
     if approved != "yes":
-        return f"Pattern denied: {reviewer_reason}"
+        return f"Pattern denied. Improve your pattern! Reason: {reviewer_reason}"
 
     index = ch.add_exclude_pattern(pattern)
     if index is not None:
-        return f"Added exclude pattern at index {index}: {pattern!r}"
-    return f"Pattern {pattern!r} already exists"
+        return f"Added exclude pattern at index {index}: {pattern}"
+    return f"Pattern already existed: {pattern}"
 
 
 def remove_exclude_pattern(index: int, pattern: str) -> str:
