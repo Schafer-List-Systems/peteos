@@ -29,6 +29,7 @@ class BackendConfig:
     models_endpoint: Optional[str] = None
     streaming: bool = True
     max_tokens: int = 4096
+    retry_delays: Optional[list[float]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "BackendConfig":
