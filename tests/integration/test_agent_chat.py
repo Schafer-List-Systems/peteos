@@ -72,7 +72,7 @@ class TestAgentChatFlow(AioHTTPTestCase):
         role_manager = RoleManager()
         role_manager.register_role(Role(name="test", description="Test", model=".*"))
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock", f"http://{self.server.host}:{self.server.port}"
         )
@@ -104,7 +104,7 @@ class TestAgentChatFlow(AioHTTPTestCase):
         role_manager = RoleManager()
         role_manager.register_role(Role(name="test", description="Test", model=".*"))
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock", f"http://{self.server.host}:{self.server.port}"
         )
@@ -135,7 +135,7 @@ class TestAgentChatFlow(AioHTTPTestCase):
         role_manager = RoleManager()
         role_manager.register_role(Role(name="test", description="Test", model=".*"))
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock", f"http://{self.server.host}:{self.server.port}"
         )

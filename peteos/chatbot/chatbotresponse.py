@@ -23,12 +23,12 @@ class ChatBotResponse:
             pass
 
         # Access response data as dict
-        text = response.data["text"]
-        reasoning = response.data["reasoning"]
-        tool_calls = response.data["tool_calls"]
+        role = response.data["role"]
+        content = response.data["content"]  # list of {type, content/name/arguments}
+        stop_reason = response.data.get("stop_reason")
 
         # Or with __getitem__
-        text = response["text"]
+        role = response["role"]
         if "images" in response:
             images = response["images"]
     """
@@ -68,9 +68,9 @@ class GenericChatBotResponse(ChatBotResponse):
 
     Example:
         response = GenericChatBotResponse(stream, {
-            "choices[*].delta.content": "text",
-            "choices[*].delta.reasoning": "reasoning",
-            "choices[*].delta.tool_calls": "tool_calls"
+            "choices[*].delta.content": "content[0].content",
+            "choices[*].delta.reasoning": "content[0].reasoning",
+            "choices[*].delta.tool_calls[0].id": "content[0].id"
         })
     """
 

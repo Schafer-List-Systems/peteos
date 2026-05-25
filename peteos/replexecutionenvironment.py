@@ -1,5 +1,6 @@
 import json
 
+import asyncio
 import inspect
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
@@ -16,44 +17,42 @@ _logger = get_logger(__name__)
 
 
 def _cast_args_to_types(func: Callable, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Type-cast the arguments the LLM actually provided.
+
+    Only casts values for parameters the LLM included in its call.
+    Does not inject defaults or hallucinate missing arguments.
+    """
     signature = inspect.signature(func)
     casted_args: Dict[str, Any] = {}
 
-    for param_name, param in signature.parameters.items():
-        if param_name not in args:
-            if param.default != inspect.Parameter.empty:
-                casted_args[param_name] = param.default
-            continue
-
-        value = args[param_name]
-        annotation = param.annotation
-
-        if annotation == inspect.Parameter.empty or annotation == Any:
-            if param.default != inspect.Parameter.empty:
-                target_type = type(param.default)
-                if type(value) != target_type:
-                    value = _try_cast_value(value, target_type)
+    for param_name, value in args.items():
+        if param_name not in signature.parameters:
             casted_args[param_name] = value
             continue
 
-        target_type = annotation
-        if target_type == int and isinstance(value, str):
+        param = signature.parameters[param_name]
+        annotation = param.annotation
+
+        if annotation == inspect.Parameter.empty or annotation == Any:
+            casted_args[param_name] = value
+            continue
+
+        if annotation == int and isinstance(value, str):
             try:
                 value = int(value)
             except ValueError:
                 pass
-        elif target_type == float and isinstance(value, str):
+        elif annotation == float and isinstance(value, str):
             try:
                 value = float(value)
             except ValueError:
                 pass
-        elif target_type == bool and isinstance(value, str):
+        elif annotation == bool and isinstance(value, str):
             value = value.lower() in ("true", "1", "yes")
-        elif target_type == str:
-            if not isinstance(value, str):
-                value = str(value)
+        elif annotation == str and not isinstance(value, str):
+            value = str(value)
         else:
-            value = _try_cast_value(value, target_type)
+            value = _try_cast_value(value, annotation)
 
         casted_args[param_name] = value
 
@@ -217,7 +216,9 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
             tool_call_id = tool_call.get("id", "")
             try:
-                result = tool.execute(**args)
+                result = tool.execute(**args, session=session)
+                if asyncio.iscoroutine(result):
+                    result = await result
                 self._append_tool_result(session, tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
                 self._call_hooks("after_tool_execution", session, tool_call, str(result), True)
                 _logger.debug("Tool %s returned: %s", tool_name, str(result))

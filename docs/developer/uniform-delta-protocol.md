@@ -178,21 +178,19 @@ Example:
 ```python
 # Delta during merge
 {
-    "content": {
+    "content": [{
         "index": 0,      # Control: merge at content[0]
         "type": "text",
-        "text": "Hello"
-    }
+        "content": "Hello"
+    }]
 }
 
 # After merge, result does NOT include index
 {
-    "content": [
-        {
-            "type": "text",    # index removed - data only
-            "text": "Hello"
-        }
-    ]
+    "content": [{
+        "type": "text",    # index removed - data only
+        "content": "Hello"
+    }]
 }
 ```
 
@@ -232,11 +230,11 @@ Strings are accumulated by concatenation:
 
 ```python
 # Before
-target = {"text": "Hello"}
-delta = {"text": " World"}
+target = {"message": "Hello"}
+delta = {"message": " World"}
 
 # After merge
-target = {"text": "Hello World"}
+target = {"message": "Hello World"}
 ```
 
 #### Arrays with Index
@@ -293,18 +291,17 @@ After processing all delta events, the target structure contains the complete ac
 
 ```python
 result = {
-    "id": "chatcmpl-xxx",
+    "role": "assistant",
     "content": [
         {
-            "index": 0,
             "type": "thinking",
-            "text": "Let me think about this..."
+            "content": "Let me think about this..."
         },
         {
-            "index": 1,
             "type": "tool_use",
+            "id": "toolu_xxx",
             "name": "calculate",
-            "input": {"expression": "2+2"}
+            "arguments": '{"expression": "2+2"}'
         }
     ],
     "stop_reason": "tool_use"
@@ -361,10 +358,11 @@ event = {
 
 # Translation converts this to uniform format
 uniform_delta = {
-    "content": {
+    "content": [{
         "index": 0,  # Now inside the array item
-        "text": "Hello"
-    }
+        "type": "thinking",
+        "content": "Hello"
+    }]
 }
 ```
 
@@ -446,6 +444,7 @@ def merge_delta_into_target(target: dict, delta: any, path: str = "") -> None:
   "choices": [{
     "delta": {
       "reasoning": "The",
+      "content": "Hello",
       "tool_calls": [{
         "index": 0,
         "function": {"name": "calc"}
@@ -458,10 +457,18 @@ def merge_delta_into_target(target: dict, delta: any, path: str = "") -> None:
 **Translation to Uniform:**
 ```python
 {
-    "reasoning": "The",
-    "tool_calls": [{
+    "content": [{
         "index": 0,
-        "function": {"name": "calc"}
+        "type": "thinking",
+        "content": "The"
+    }, {
+        "index": 1,
+        "type": "text",
+        "content": "Hello"
+    }, {
+        "index": 2,
+        "type": "tool_use",
+        "name": "calc"
     }]
 }
 ```
@@ -469,13 +476,16 @@ def merge_delta_into_target(target: dict, delta: any, path: str = "") -> None:
 **After Accumulation:**
 ```python
 {
-    "reasoning": "The user wants me to calculate...",
-    "tool_calls": [{
-        "index": 0,
-        "function": {
-            "name": "calc",
-            "arguments": '{"expr": "2+2"}'
-        }
+    "content": [{
+        "type": "thinking",
+        "content": "The user wants me to calculate..."
+    }, {
+        "type": "text",
+        "content": "Hello"
+    }, {
+        "type": "tool_use",
+        "name": "calc",
+        "arguments": '{"expr": "2+2"}'
     }]
 }
 ```
@@ -494,11 +504,11 @@ def merge_delta_into_target(target: dict, delta: any, path: str = "") -> None:
 **Translation to Uniform:**
 ```python
 {
-    "content": {
+    "content": [{
         "index": 0,
         "type": "thinking",
-        "text": "Hello"
-    }
+        "content": "Hello"
+    }]
 }
 ```
 
@@ -506,9 +516,8 @@ def merge_delta_into_target(target: dict, delta: any, path: str = "") -> None:
 ```python
 {
     "content": [{
-        "index": 0,
         "type": "thinking",
-        "text": "Hello world..."
+        "content": "Hello world..."
     }]
 }
 ```

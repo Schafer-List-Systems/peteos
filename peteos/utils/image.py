@@ -131,11 +131,12 @@ def file_to_base64(filepath: str) -> str:
         return base64.b64encode(f.read()).decode("ascii")
 
 
-async def url_to_base64(url: str) -> str:
+async def url_to_base64(url: str, timeout: float) -> str:
     """Fetch an image from a URL and return its base64-encoded representation.
 
     Args:
         url: HTTP/HTTPS URL to the image.
+        timeout: Request timeout in seconds. Must be provided explicitly.
 
     Returns:
         Base64-encoded string of the image contents.
@@ -146,7 +147,7 @@ async def url_to_base64(url: str) -> str:
     import aiohttp
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"Failed to fetch image from {url}: HTTP {resp.status}")
             data = await resp.read()
@@ -215,17 +216,19 @@ def create_image_content_part(
 
 async def create_image_content_part_async(
     src: str,
+    timeout: float,
 ) -> ContentPart:
     """Async version of create_image_content_part for URL fetching.
 
     Args:
         src: Local file path or HTTP(S) URL to the image.
+        timeout: Request timeout in seconds.
 
     Returns:
         ContentPart with type="image" and source containing base64 data.
     """
     if src.startswith(("http://", "https://")):
-        return await _create_image_content_part_url_async(src)
+        return await _create_image_content_part_url_async(src, timeout)
     return _create_image_content_part_file(src)
 
 
@@ -243,12 +246,12 @@ def _create_image_content_part_file(filepath: str) -> ContentPart:
     )
 
 
-async def _create_image_content_part_url_async(url: str) -> ContentPart:
+async def _create_image_content_part_url_async(url: str, timeout: float) -> ContentPart:
     """Async: Create a ContentPart from a URL by fetching and encoding."""
     import aiohttp
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"Failed to fetch image from {url}: HTTP {resp.status}")
             data_bytes = await resp.read()
@@ -314,17 +317,18 @@ def create_content_part(src: str) -> ContentPart:
     return _create_content_part_file(src)
 
 
-async def create_content_part_async(src: str) -> ContentPart:
+async def create_content_part_async(src: str, timeout: float) -> ContentPart:
     """Async version of create_content_part for URL fetching.
 
     Args:
         src: Local file path or HTTP(S) URL to the file.
+        timeout: Request timeout in seconds.
 
     Returns:
         ContentPart with the appropriate uniform type and source.
     """
     if src.startswith(("http://", "https://")):
-        return await _create_content_part_url_async(src)
+        return await _create_content_part_url_async(src, timeout)
     return _create_content_part_file(src)
 
 
@@ -347,12 +351,12 @@ def _create_content_part_file(filepath: str) -> ContentPart:
     )
 
 
-async def _create_content_part_url_async(url: str) -> ContentPart:
+async def _create_content_part_url_async(url: str, timeout: float) -> ContentPart:
     """Async: Create a ContentPart from a URL by fetching and encoding."""
     import aiohttp
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"Failed to fetch file from {url}: HTTP {resp.status}")
             data_bytes = await resp.read()

@@ -54,7 +54,14 @@ class MockExecutionEnvironment:
         self.run_count = 0
         self.simulate_running = simulate_running
         self.wait_on_interrupt = wait_on_interrupt
-        self._hooks: dict[str, list] = {}
+        self._hooks: dict[str, list] = {
+            "before_tool_execution": [],
+            "after_tool_execution": [],
+            "before_notification_publish": [],
+            "before_send_to_chatbot": [],
+            "after_message_append": [],
+            "after_step": [],
+        }
 
     @property
     def is_running(self) -> bool:
@@ -110,7 +117,7 @@ async def test_queue_message_adds_to_queue():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=5.0)
 
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
@@ -140,7 +147,7 @@ async def test_queue_message_non_running():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=5.0)
 
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
@@ -166,7 +173,7 @@ async def test_queue_message_drains_all_to_history():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=5.0)
 
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
@@ -194,7 +201,7 @@ async def test_queue_message_preserves_order():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=5.0)
 
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
@@ -222,7 +229,7 @@ async def test_push_event_non_blocking():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=5.0)
 
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
@@ -248,7 +255,7 @@ async def test_concurrent_push_no_race_condition():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=5.0)
 
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
@@ -274,7 +281,7 @@ async def test_concurrent_push_no_race_condition():
 @pytest.mark.asyncio
 async def test_session_start_stop_lifecycle():
     """Test that session start/stop works correctly."""
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=5.0)
     tool_manager = ToolManager()
     chat_history = ChatHistory()
 
@@ -307,7 +314,7 @@ async def test_approval_event_handling():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager()
+    chatbot_manager = ChatBotManager(timeout=5.0)
 
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(

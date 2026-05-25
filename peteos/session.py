@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from enum import Enum
-from typing import TYPE_CHECKING, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 import uuid
 
@@ -70,6 +70,100 @@ class ToolApprovalPending(Exception):
         super().__init__("Tool approval pending")
 
 
+class AgenticState:
+    """Mutable key-value store for agents to leave intermediate state.
+
+    Variables store strings. Five distinct methods with clear semantics:
+
+    - get(name): returns the value or None if not found
+    - create(name, value): creates a new variable (raises if exists)
+    - update(name, old_value, new_value): compare-and-swap (both non-None)
+    - delete(name): removes a variable (raises if not found)
+    - list(): returns all variable names
+    """
+
+    def __init__(self) -> None:
+        self._data: Dict[str, str] = {}
+
+    def get(self, name: str) -> Optional[str]:
+        """Get a variable's value.
+
+        Args:
+            name: Variable name.
+
+        Returns:
+            The variable's value, or None if it does not exist.
+        """
+        return self._data.get(name)
+
+    def create(self, name: str, value: str) -> None:
+        """Create a new variable.
+
+        Args:
+            name: Variable name.
+            value: Non-empty string value.
+
+        Raises:
+            ValueError: If variable already exists or value is empty.
+        """
+        if name in self._data:
+            raise ValueError(f"Variable '{name}' already exists in AgenticState")
+        if value is None or value == "":
+            raise ValueError("Value must be a non-empty string")
+        self._data[name] = value
+
+    def update(self, name: str, old_value: str, new_value: str) -> None:
+        """Update a variable with compare-and-swap semantics.
+
+        Both old_value and new_value must be non-None strings.
+
+        Args:
+            name: Variable name.
+            old_value: Expected current value.
+            new_value: New value to set.
+
+        Raises:
+            ValueError: If old_value or new_value is None, or
+                if the variable doesn't exist or the current value
+                doesn't match old_value.
+        """
+        if old_value is None:
+            raise ValueError("old_value must not be None")
+        if new_value is None:
+            raise ValueError("new_value must not be None")
+
+        if name not in self._data:
+            raise KeyError(f"Variable '{name}' does not exist in AgenticState")
+
+        current = self._data[name]
+        if current != old_value:
+            raise ValueError(
+                f"Variable '{name}' has value {current!r}, expected {old_value!r}"
+            )
+        self._data[name] = new_value
+
+    def delete(self, name: str) -> None:
+        """Delete a variable.
+
+        Args:
+            name: Variable name.
+
+        Raises:
+            KeyError: If variable does not exist.
+        """
+        if name not in self._data:
+            raise KeyError(f"Variable '{name}' does not exist in AgenticState")
+        del self._data[name]
+
+    def list(self) -> List[str]:
+        """Return a list of all variable names.
+
+        Returns:
+            List of variable names.
+        """
+        return list(self._data.keys())
+
+
 class Session(ActiveClass):
     """A session with an execution environment.
 
@@ -118,6 +212,7 @@ class Session(ActiveClass):
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
         self.chatbot_manager = chatbot_manager
         self._channels: Set[Channel] = set()
+        self._state = AgenticState()
 
         self.execution_environment = execution_environment if execution_environment is not None else REPLExecutionEnvironment(
             chatbot_manager=chatbot_manager,
@@ -128,6 +223,11 @@ class Session(ActiveClass):
 
         self._pending_tool_calls: list[ToolCallRecord] = []
         self.tool_failure_policy: str = "continue"
+
+    @property
+    def state(self) -> AgenticState:
+        """Access the session's mutable state store."""
+        return self._state
 
     def subscribe(self, channel: "Channel") -> bool:
         """Subscribe a channel to notifications for this session.
@@ -202,6 +302,7 @@ class Session(ActiveClass):
             need_reentry = False
 
             status, _ = await self.execution_environment.step(self)
+            self.execution_environment._call_hooks("after_step", status)
 
             if status == ExecStatus.INTERRUPTED:
                 _logger.debug("[session] run(): Execution interrupted, exiting loop.")
@@ -401,3 +502,120 @@ class Session(ActiveClass):
             role_manager,
             tool_manager,
         )
+
+
+def _extract_last_assistant_text(chat_history: "ChatHistory") -> str:
+    """Extract the text of the last assistant message from chat history."""
+    for msg in reversed(chat_history.messages):
+        if msg.get_role() == "assistant":
+            texts = [part.text for part in msg.content if part.type == "text" and part.text]
+            return " ".join(texts).replace("  ", " ")
+    return ""
+
+
+async def invoke_agent(
+    role_name: str,
+    prompt: str,
+    agent: "Agent | None" = None,
+    *,
+    existing_session: Optional["Session"] = None,
+    keep_session: bool = False,
+    timeout: float,
+) -> Dict[str, Any]:
+    """Invoke an agent role and return its final answer.
+
+    Creates a Session (or uses an existing one), queues a user message,
+    waits for processing to complete, and returns the assistant's answer.
+
+    Args:
+        role_name: Name of the role to invoke.
+        prompt: The user message / prompt to send to the agent.
+        agent: Optional Agent with registered role_manager, chatbot_manager,
+               and tool_manager. If provided, creates a new session via
+               agent.create_session() with full hook support.
+        existing_session: Optional pre-existing Session to reuse for
+            continuation. Must already be started.
+        keep_session: If False (default), stop the session before returning.
+            If True, the returned dict includes the running session so
+            the caller can queue more messages.
+        timeout: Maximum seconds to wait for a response (user-configured, no default).
+
+    Returns:
+        dict with keys:
+            - answer (str): The last assistant message text.
+            - session (Session|None): The session (None if keep_session=False).
+            - history (list[Message]): Full chat history for inspection.
+
+    Raises:
+        ValueError: If role_name not found or neither agent nor existing_session provided.
+        asyncio.TimeoutError: If timeout expires before response.
+        RuntimeError: If existing_session is not running.
+    """
+    from peteos.agent import Agent as AgentType
+    from peteos.rolemanager import RoleManager as RM
+
+    # --- Session setup ---
+    if existing_session is not None:
+        session = existing_session
+        if not session.is_running():
+            raise RuntimeError(
+                "existing_session is not running; pass keep_session=True "
+                "or call session.start()"
+            )
+    elif agent is not None:
+        session = await agent.create_session(role_name)
+    else:
+        raise ValueError(
+            "Either agent or existing_session must be provided."
+        )
+
+    env = session.execution_environment
+
+    # --- Register temporary hook to signal completion ---
+    done: asyncio.Event = asyncio.Event()
+
+    def on_finished(session: "Session", status: ExecStatus) -> None:
+        if status == ExecStatus.FINISHED:
+            done.set()
+
+    env.register_hook("after_step", on_finished, session)
+
+    try:
+        # --- Queue message ---
+        user_message = Message(
+            role="user",
+            content=[ContentPart(part_type="text", text=prompt)],
+        )
+        await session.queue_message(user_message)
+
+        # --- Wait for processing to complete ---
+        await asyncio.wait_for(done.wait(), timeout=timeout)
+
+        # --- Extract answer ---
+        answer = _extract_last_assistant_text(session.chat_history)
+
+    finally:
+        # --- Always deregister the temporary hook ---
+        env.deregister_hook("after_step", on_finished)
+
+    # --- Cleanup ---
+    if keep_session:
+        kept_session: Optional[Session] = session
+    else:
+        kept_session = None
+        try:
+            await session.stop()
+        except Exception:
+            pass
+
+        if agent is not None and existing_session is None:
+            try:
+                await agent.destroy_session(session.uuid)
+            except Exception:
+                pass
+
+    return {
+        "answer": answer,
+        "session": kept_session,
+        "history": list(session.chat_history.messages),
+    }

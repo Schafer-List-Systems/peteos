@@ -82,7 +82,7 @@ class TestAgentE2E(AioHTTPTestCase):
             Role(name="test", description="Test", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
@@ -133,7 +133,7 @@ class TestAgentE2E(AioHTTPTestCase):
             Role(name="test", description="Test", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
@@ -180,7 +180,7 @@ class TestAgentE2E(AioHTTPTestCase):
             Role(name="test", description="Test", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
@@ -221,7 +221,7 @@ class TestAgentE2E(AioHTTPTestCase):
             Role(name="test", description="Test", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager()
+        chatbot_manager = ChatBotManager(timeout=None)
         await chatbot_manager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"

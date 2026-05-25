@@ -3,10 +3,11 @@
 import pytest
 from peteos.chatbot import (
     ChatBotResponse,
-    GenericChatBotResponse,
     AnthropicChatBotResponse,
+    GenericChatBotResponse,
 )
 from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
+from peteos.chatbot.openaichatbot import OpenAIChatBotResponse
 
 
 class TestGenericChatBotResponseOpenAI:
@@ -16,73 +17,62 @@ class TestGenericChatBotResponseOpenAI:
     async def test_openai_streaming_response(self):
         """Test streaming OpenAI response with incremental content."""
         async def mock_stream():
-            yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
+            yield 'data: {"choices": [{"delta": {"role": "assistant", "content": "Hello"}}]}'
             yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
-        accumulated = []
-        async for chunk in response:
-            accumulated.append(chunk)
+        response = OpenAIChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
+        async for _ in response:
+            pass
 
-        assert len(accumulated) == 2
-        assert accumulated[0] == ("text", "Hello")
-        assert accumulated[1] == ("text", " World")
-
-        assert response.data["text"] == "Hello World"
-        assert response.data.get("reasoning", "") == ""
+        assert response.data["role"] == "assistant"
+        assert "content" in response.data
+        assert response.data["content"][0]["type"] == "text"
+        assert response.data["content"][0]["content"] == "Hello World"
+        assert "reasoning" not in response.data
 
     @pytest.mark.asyncio
     async def test_openai_with_thinking_content(self):
-        """Test OpenAI response with thinking/reasoning content."""
+        """Test OpenAI response with reasoning/thinking content."""
         async def mock_stream():
-            # Reasoning first (separate event from content per API behavior)
             yield 'data: {"choices": [{"delta": {"reasoning": "Let me think..."}}]}'
-            yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
+            yield 'data: {"choices": [{"delta": {"role": "assistant", "content": "Hello"}}]}'
             yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
-        accumulated = []
-        async for chunk in response:
-            accumulated.append(chunk)
+        response = OpenAIChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
+        async for _ in response:
+            pass
 
-        # Each SSE yields (key, delta_chunk) - delta not accumulated
-        assert len(accumulated) == 3
-        assert accumulated[0] == ("reasoning", "Let me think...")
-        assert accumulated[1] == ("text", "Hello")
-        assert accumulated[2] == ("text", " World")
-
-        # Verify both fields extracted
-        assert response.data["reasoning"] == "Let me think..."
-        assert response.data["text"] == "Hello World"
+        # Verify reasoning → thinking block in content array
+        assert "content" in response.data
+        content = response.data["content"]
+        assert content[0]["type"] == "thinking"
+        assert content[0]["content"] == "Let me think..."
+        assert content[1]["type"] == "text"
+        assert content[1]["content"] == "Hello World"
 
     @pytest.mark.asyncio
     async def test_openai_with_reasoning(self):
-        """Test OpenAI response with reasoning (Qwen-style)."""
+        """Test OpenAI response with incremental reasoning (Qwen-style)."""
         async def mock_stream():
-            # Reasoning streamed incrementally (one field per event)
             yield 'data: {"choices": [{"delta": {"reasoning": "Thinking"}}]}'
             yield 'data: {"choices": [{"delta": {"reasoning": " step by step"}}]}'
             yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
             yield 'data: {"choices": [{"delta": {"content": " World"}}]}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
-        accumulated = []
-        async for chunk in response:
-            accumulated.append(chunk)
+        response = OpenAIChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
+        async for _ in response:
+            pass
 
-        # Each SSE yields (key, delta_chunk) - delta not accumulated
-        assert len(accumulated) == 4
-        assert accumulated[0] == ("reasoning", "Thinking")
-        assert accumulated[1] == ("reasoning", " step by step")
-        assert accumulated[2] == ("text", "Hello")
-        assert accumulated[3] == ("text", " World")
-
-        # Verify both reasoning and text content extracted
-        assert response.data["reasoning"] == "Thinking step by step"
-        assert response.data["text"] == "Hello World"
+        # Verify reasoning accumulated as thinking block
+        assert "content" in response.data
+        content = response.data["content"]
+        assert content[0]["type"] == "thinking"
+        assert content[0]["content"] == "Thinking step by step"
+        assert content[1]["type"] == "text"
+        assert content[1]["content"] == "Hello World"
 
     @pytest.mark.asyncio
     async def test_openai_non_streaming(self):
@@ -91,16 +81,13 @@ class TestGenericChatBotResponseOpenAI:
             yield 'data: {"choices": [{"delta": {"content": "Complete response"}}]}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
-        # Collect all chunks
-        accumulated = []
-        async for chunk in response:
-            accumulated.append(chunk)
+        response = OpenAIChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
+        async for _ in response:
+            pass
 
-        # Non-streaming yields all content at once
-        assert len(accumulated) == 1
-        assert accumulated[0] == ("text", "Complete response")
-        assert response.data["text"] == "Complete response"
+        assert "content" in response.data
+        assert response.data["content"][0]["type"] == "text"
+        assert response.data["content"][0]["content"] == "Complete response"
 
 
 class TestGenericChatBotResponseAnthropic:
@@ -262,33 +249,37 @@ class TestChatBotResponseProperties:
             yield 'data: {"choices": [{"delta": {"content": "Text"}}]}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
-        accumulated = []
-        async for chunk in response:
-            accumulated.append(chunk)
+        response = OpenAIChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
+        async for _ in response:
+            pass
 
-        assert response.data["reasoning"] == "Reasoning"
-        assert response.data["text"] == "Text"
-        assert "Reasoning" not in response.data["text"]
-        assert "Text" not in response.data["reasoning"]
+        assert "content" in response.data
+        content = response.data["content"]
+        # Reasoning should be a thinking block, not mixed with text
+        assert content[0]["type"] == "thinking"
+        assert content[0]["content"] == "Reasoning"
+        assert content[1]["type"] == "text"
+        assert content[1]["content"] == "Text"
 
     @pytest.mark.asyncio
     async def test_response_data_access(self):
         """Test dict-like access to response data."""
         async def mock_stream():
-            yield 'data: {"choices": [{"delta": {"content": "Hello"}}]}'
+            yield 'data: {"choices": [{"delta": {"role": "assistant", "content": "Hello"}}]}'
             yield "[DONE]"
 
-        response = GenericChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
+        response = OpenAIChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)
         async for _ in response:
             pass
 
         # Test __getitem__
-        assert response["text"] == "Hello"
+        assert response["role"] == "assistant"
 
         # Test __contains__
-        assert "text" in response
-        assert "reasoning" not in response
+        assert "role" in response
+        assert "text" not in response
 
         # Test data property
-        assert response.data["text"] == "Hello"
+        assert "content" in response.data
+        assert response.data["content"][0]["type"] == "text"
+        assert response.data["content"][0]["content"] == "Hello"

@@ -84,18 +84,6 @@ class Message:
         """Return the message ID."""
         return self._id
 
-    @property
-    def text(self) -> str:
-        """Get all text content concatenated.
-
-        Returns:
-            Concatenated text from all text ContentParts.
-        """
-        texts = [part.text for part in self.content if part.type == "text" and part.text]
-        if not texts:
-            return ""
-        return " ".join(texts).replace("  ", " ")
-
     def printable(self) -> str:
         """Return a string suitable for display to a human.
 
@@ -359,7 +347,7 @@ class FoldedMessage(Message):
         self,
         summary: str,
         original_messages: List["Message"],
-        role: str = "system",
+        role: str = "assistant",
         message_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         creation_timestamp: Optional[datetime] = None,

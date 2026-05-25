@@ -49,6 +49,7 @@ class ExecutionEnvironment(ABC):
             "before_notification_publish": [],
             "before_send_to_chatbot": [],
             "after_message_append": [],
+            "after_step": [],
         }
 
     @property
@@ -108,8 +109,8 @@ class ExecutionEnvironment(ABC):
 
         Args:
             hook_point: "before_tool_execution", "after_tool_execution",
-                "before_notification_publish", "before_send_to_chatbot", or
-                "after_message_append".
+                "before_notification_publish", "before_send_to_chatbot",
+                "after_message_append", or "after_step".
             callback: The hook function to register. Can be sync or async.
             *args: Additional arguments to pass to the callback when called.
                 These will be prepended to any arguments passed at call time.
@@ -127,8 +128,8 @@ class ExecutionEnvironment(ABC):
 
         Args:
             hook_point: "before_tool_execution", "after_tool_execution",
-                "before_notification_publish", "before_send_to_chatbot", or
-                "after_message_append".
+                "before_notification_publish", "before_send_to_chatbot",
+                "after_message_append", or "after_step".
             callback: The hook function to remove.
 
         Raises:
@@ -153,8 +154,8 @@ class ExecutionEnvironment(ABC):
 
         Args:
             hook_point: "before_tool_execution", "after_tool_execution",
-                "before_notification_publish", "before_send_to_chatbot", or
-                "after_message_append".
+                "before_notification_publish", "before_send_to_chatbot",
+                "after_message_append", or "after_step".
 
         Raises:
             ValueError: If hook_point is not a valid hook point.

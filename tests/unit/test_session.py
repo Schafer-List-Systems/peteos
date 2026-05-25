@@ -124,7 +124,7 @@ def test_session_load_from_json():
     assert session.role.name == "test"
     assert len(session.chat_history.messages) == 2
     assert session.chat_history.messages[0].get_role() == "user"
-    assert session.chat_history.messages[1].text == "Hi!"
+    assert session.chat_history.messages[1].content[0].text == "Hi!"
 
 
 def test_session_load_from_json_without_uuid():

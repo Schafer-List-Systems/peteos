@@ -43,8 +43,21 @@ class TestOpenAIChatBotIntegration:
                 accumulated.append(chunk)
 
             assert len(accumulated) > 0
-            assert "Mock response from test server" in accumulated[-1]
-            assert "This is mock reasoning" in response.data["reasoning"]
+            # Streaming chunks are tuples - verify last chunk contains the response text
+            last_chunk = accumulated[-1]
+            if isinstance(last_chunk, tuple) and len(last_chunk) == 2:
+                assert "Mock response from test server" in str(last_chunk[1])
+            else:
+                assert "Mock response from test server" in last_chunk
+            # Reasoning should be a thinking block in content array
+            assert "content" in response.data
+            full_text = ""
+            for block in response.data["content"]:
+                if block.get("type") == "thinking":
+                    assert "This is mock reasoning" in block.get("content", "")
+                else:
+                    full_text += block.get("content", "")
+            assert "Mock response from test server" in full_text
         finally:
             await server.stop()
 
@@ -69,7 +82,11 @@ class TestOpenAIChatBotIntegration:
 
             # Non-streaming: data is already populated via from_json
             assert response.data["role"] == "assistant"
-            assert "Complete non-streaming response" in response.data["text"]
+            assert "content" in response.data
+            full_text = ""
+            for block in response.data["content"]:
+                full_text += block.get("content", "")
+            assert "Complete non-streaming response" in full_text
         finally:
             await server.stop()
 
@@ -133,14 +150,10 @@ class TestAnthropicChatBotIntegration:
             response = await chatbot.send_message(history, streaming=False)
 
             # Non-streaming: data is already populated via from_json
-            if "text" in response.data:
-                assert "Complete non-streaming response" in response.data["text"]
-            elif "content" in response.data:
-                full_text = ""
-                for block in response.data["content"]:
-                    full_text += block.get("content", "")
-                assert "Complete non-streaming response" in full_text
-            else:
-                assert False, f"Unexpected response.data format: {response.data.keys()}"
+            assert "content" in response.data
+            full_text = ""
+            for block in response.data["content"]:
+                full_text += block.get("content", "")
+            assert "Complete non-streaming response" in full_text
         finally:
             await server.stop()

@@ -92,8 +92,8 @@ class GenericChatBot(ChatBot):
             chat_endpoint="/v1/chat/completions",
             models_endpoint="/v1/models",
             response_translations={
-                "choices[*].delta.content": "text",
-                "choices[*].delta.reasoning": "reasoning"
+                "choices[*].delta.content": "content[0].content",
+                "choices[*].delta.reasoning": "content[0].reasoning"
             },
             max_tokens=4096
         )

@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import asdict
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Dict, Any, List, Optional, AsyncGenerator, AsyncIterator
 
 from peteos.logger import get_logger
 from .chatbot import GenericChatBot
@@ -26,25 +26,16 @@ class OpenAIChatBot(GenericChatBot):
     # Translates OpenAI SSE events to uniform delta format
     # All index fields are preserved for merge_delta_into_target to use
     #
-    # Default translation configuration for OpenAI API
-    # Translates OpenAI SSE events to uniform delta format
-    # All index fields are preserved for merge_delta_into_target to use
-    #
-    # Key difference from Anthropic: OpenAI content is plain text, not interleaved blocks
-    # OpenAI returns text directly in 'content' field (not in an array with type)
-    # Tool calls use the content array format with index fields
+    # Unified content array format (same as Anthropic).
+    # Reasoning maps to a temp key, converted to a "thinking" block in content array at stream end.
     RESPONSE_TRANSLATIONS = {
         # Streaming mode (delta events)
         "choices[*].delta.role": "role",
-        "choices[*].delta.reasoning": "reasoning",
-        # OpenAI content is plain text - map to 'text' for backwards compatibility
-        "choices[*].delta.content": "text",
+        "choices[*].delta.reasoning": "_reasoning",
+        "choices[*].delta.content": "content[0].content",
         "choices[*].delta.finish_reason": "stop_reason",
         # Tool calls: translate to uniform content array format
-        # OpenAI returns one tool call per event, use [0] for extraction
         "choices[*].delta.tool_calls[0].index": "content[0].index",
-        # OpenAI tool_calls doesn't have a type field - we set it in _process_event
-        # Just extract the fields that exist: id, function.name, function.arguments
         "choices[*].delta.tool_calls[0].id": "content[0].id",
         "choices[*].delta.tool_calls[0].function.name": "content[0].name",
         "choices[*].delta.tool_calls[0].function.arguments": "content[0].arguments",
@@ -252,11 +243,8 @@ class OpenAIChatBot(GenericChatBot):
                         else:
                             content_parts.append(item)
                     elif item.get("type") == "reasoning":
-                        # Translate reasoning to content for OpenAI
-                        content_parts.append({
-                            "type": "text",
-                            "content": item.get("reasoning", "")
-                        })
+                        # Translate reasoning to OpenAI reasoning field
+                        msg_dict["reasoning"] = item.get("reasoning", "")
                     else:
                         # Text or other content part - apply key translation
                         translated = {}
@@ -334,32 +322,37 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
             content = message.get("content", "")
             if isinstance(content, str) and content:
                 response._data["content"] = [{"index": 0, "type": "text", "content": content}]
-                response._data["text"] = content
             elif isinstance(content, list):
-                response._data["content"] = content
-                text_parts = [
-                    item.get("content", "")
-                    for item in content
-                    if isinstance(item, dict) and item.get("type") == "text"
-                ]
-                if text_parts:
-                    response._data["text"] = "".join(text_parts)
-            # Extract tool_calls
+                response._data["content"] = []
+                for item in content:
+                    if isinstance(item, dict):
+                        transformed = {"index": len(response._data["content"])}
+                        # Convert OpenAI fields to unified format
+                        for k, v in item.items():
+                            if k == "text":
+                                transformed["content"] = v
+                            elif k == "type":
+                                transformed["type"] = v
+                            else:
+                                transformed[k] = v
+                        response._data["content"].append(transformed)
+            # Extract tool_calls → content array with tool_use items
             if "tool_calls" in message and message["tool_calls"]:
-                tool_calls = []
                 for tc in message["tool_calls"]:
                     if isinstance(tc, dict):
-                        tool_calls.append({
+                        response._data.setdefault("content", []).append({
+                            "index": len(response._data.get("content", [])),
                             "type": "tool_use",
                             "id": tc.get("id"),
                             "name": tc.get("function", {}).get("name"),
                             "arguments": tc.get("function", {}).get("arguments", ""),
                         })
-                if tool_calls:
-                    response._data["tool_calls"] = tool_calls
-            # Extract reasoning
+            # Extract reasoning (as thinking content block)
             if "reasoning" in message and message["reasoning"]:
-                response._data["reasoning"] = message["reasoning"]
+                reasoning = message["reasoning"]
+                response._data.setdefault("content", []).insert(
+                    0, {"index": 0, "type": "thinking", "content": reasoning}
+                )
 
         # Extract stop_reason from choices[0].finish_reason
         if choices and isinstance(choices, list) and choices:
@@ -376,27 +369,36 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
 
         OpenAI tool_calls don't have a type field (unlike Anthropic).
         The Uniform Delta Protocol expects type="tool_use" for all content array items.
-
-        This is a static method so tests can call it directly on translated events.
         """
         if "content" in translated and isinstance(translated["content"], list):
             for item in translated["content"]:
                 if isinstance(item, dict):
-                    # Tool call items have either name+arguments (streaming) or name+id (initial event)
-                    # or just name (minimal case)
                     if ("name" in item and ("arguments" in item or "id" in item or len(item) == 1)) or \
                        ("name" in item and "function" in item):
-                        # This is a tool call item - set type to tool_use
                         item["type"] = "tool_use"
 
-    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process an OpenAI event, setting type="tool_use" for tool call items.
+    @staticmethod
+    def _set_text_types(translated: Dict[str, Any]) -> None:
+        """Set type="text" on content items without a type field."""
+        if "content" in translated and isinstance(translated["content"], list):
+            for item in translated["content"]:
+                if isinstance(item, dict) and "type" not in item:
+                    item["type"] = "text"
 
-        OpenAI tool_calls don't have a type field (unlike Anthropic).
-        The Uniform Delta Protocol expects type="tool_use" for all content array items.
-        This override sets type="tool_use" after translation.
-        """
+    @staticmethod
+    def _finalize_reasoning(data: Dict[str, Any]) -> None:
+        """Convert accumulated _reasoning to a thinking block in content array."""
+        if "_reasoning" not in data:
+            return
+        reasoning_text = data.pop("_reasoning")
+        if not reasoning_text:
+            return
+        content = data.get("content", [])
+        # Insert thinking block at the front (reasoning always comes first)
+        content.insert(0, {"type": "thinking", "content": reasoning_text})
+
+    def _process_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Process an OpenAI event, injecting type discriminators for text/tool_use."""
         translated = self._translate_event(event)
         self._set_tool_call_types(translated)
         return translated
@@ -404,5 +406,22 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
     def _accumulate_event(self, event: Dict[str, Any]) -> None:
         """
         Accumulate translated event into response dict using delta merge.
+        Type discriminators are applied after merge to avoid string concatenation.
         """
         merge_delta_into_target(self._data, event)
+        # Set type="text" on content items that still lack a type (text blocks)
+        if "content" in self._data and isinstance(self._data["content"], list):
+            for item in self._data["content"]:
+                if isinstance(item, dict) and "type" not in item:
+                    item["type"] = "text"
+
+    def _event_generator(self) -> AsyncIterator[tuple[str, Any]]:
+        """Yield streamed chunks, then finalize _reasoning → thinking block."""
+        gen = super()._event_generator()
+
+        async def _stream_generator():
+            async for item in gen:
+                yield item
+            self._finalize_reasoning(self._data)
+
+        return _stream_generator().__aiter__()

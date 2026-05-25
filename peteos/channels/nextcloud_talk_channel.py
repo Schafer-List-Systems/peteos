@@ -79,7 +79,7 @@ class NextcloudTalkChannel(Channel):
         config.setdefault("show_tool_calls", True)
         config.setdefault("show_tool_results", True)
         config.setdefault("prefix_actor_names", False)
-        required = ["nextcloud_url", "bot_id", "bot_secret"]
+        required = ["nextcloud_url", "bot_id", "bot_secret", "nextcloud_api_timeout"]
         missing = [k for k in required if k not in config]
         if missing:
             raise KeyError(f"Missing required config fields: {', '.join(missing)}")
@@ -571,7 +571,7 @@ class NextcloudTalkChannel(Channel):
                         "X-Nextcloud-Talk-Bot-Random": random_nonce,
                         "X-Nextcloud-Talk-Bot-Signature": signature,
                     },
-                    timeout=aiohttp.ClientTimeout(total=10),
+                    timeout=aiohttp.ClientTimeout(total=self._config["nextcloud_api_timeout"]),
                 ) as resp:
                     if resp.status == 201:
                         await resp.json()
@@ -634,7 +634,7 @@ class NextcloudTalkChannel(Channel):
                         "X-Nextcloud-Talk-Bot-Random": random_nonce,
                         "X-Nextcloud-Talk-Bot-Signature": signature,
                     },
-                    timeout=aiohttp.ClientTimeout(total=10),
+                    timeout=aiohttp.ClientTimeout(total=self._config["nextcloud_api_timeout"]),
                 ) as resp:
                     if resp.status in (200, 201):
                         logger.debug(

@@ -20,7 +20,7 @@ class TestOpenAIChatBotResponse:
     @pytest.mark.asyncio
     async def test_openai_response_has_role_field(self):
         """Test that OpenAIChatBot adds role to response.data."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -44,12 +44,15 @@ class TestOpenAIChatBotResponse:
             # Verify role is present in response data
             assert "role" in response.data, f"OpenAIChatBot response missing 'role' field: {response.data.keys()}"
             assert response.data["role"] == "assistant"
-            assert response.data["text"] == "Hello World"
+            # Contract: content array with text item
+            assert "content" in response.data
+            assert response.data["content"][0]["type"] == "text"
+            assert response.data["content"][0]["content"] == "Hello World"
 
     @pytest.mark.asyncio
     async def test_openai_response_non_streaming_has_role(self):
         """Test that non-streaming OpenAI response also has role."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -68,8 +71,12 @@ class TestOpenAIChatBotResponse:
             async for _ in response:
                 pass
 
-            # Role should be translated from the message object
-            assert "role" in response.data or "text" in response.data
+            # Role and content should be present per the unified contract
+            assert "role" in response.data
+            assert response.data["role"] == "assistant"
+            assert "content" in response.data
+            assert response.data["content"][0]["type"] == "text"
+            assert response.data["content"][0]["content"] == "Test response"
 
 
 class TestAnthropicChatBotResponse:
@@ -78,15 +85,16 @@ class TestAnthropicChatBotResponse:
     @pytest.mark.asyncio
     async def test_anthropic_response_has_role_field(self):
         """Test that AnthropicChatBot adds role to response.data."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = AnthropicChatBot(http_client, config)
         chat_history = ChatHistory()
 
-        # Mock SSE response for Anthropic format
+        # Mock SSE response for Anthropic format (includes content_block_start to set type)
         mock_sse_data = [
             'data: {"type": "message_start", "message": {"role": "assistant"}}\n',
-            'data: {"type": "content_block_delta", "delta": {"text": "Hello"}}\n',
+            'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}\n',
+            'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hello"}}\n',
             'data: [DONE]\n'
         ]
 
@@ -99,18 +107,52 @@ class TestAnthropicChatBotResponse:
             async for _ in response:
                 pass
 
-            # Verify role is present
+            # Verify role and content per unified contract
             assert "role" in response.data
             assert response.data["role"] == "assistant"
+            assert "content" in response.data
+            assert response.data["content"][0]["type"] == "text"
+            assert response.data["content"][0]["content"] == "Hello"
+
+    @pytest.mark.asyncio
+    async def test_anthropic_response_has_role_field_2(self):
+        """Test Anthropic with simple content_block_delta (no index)."""
+        http_client = HTTPClient(timeout=5.0)
+        config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
+        chatbot = AnthropicChatBot(http_client, config)
+        chat_history = ChatHistory()
+
+        mock_sse_data = [
+            'data: {"type": "message_start", "message": {"role": "assistant"}}\n',
+            'data: {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}\n',
+            'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "World"}}\n',
+            'data: [DONE]\n'
+        ]
+
+        async def mock_stream():
+            for line in mock_sse_data:
+                yield line
+
+        with patch.object(http_client, 'stream_post', return_value=mock_stream()):
+            response = await chatbot.send_message(chat_history=chat_history, streaming=True)
+            async for _ in response:
+                pass
+
+            # Verify role and content per unified contract
+            assert "role" in response.data
+            assert response.data["role"] == "assistant"
+            assert "content" in response.data
+            assert response.data["content"][0]["type"] == "text"
+            assert response.data["content"][0]["content"] == "World"
 
 
 class TestGenericChatBotResponse:
     """Tests for GenericChatBotResponse structure."""
 
     @pytest.mark.asyncio
-    async def test_response_data_structure(self):
-        """Test that response.data has correct structure."""
-        http_client = HTTPClient()
+    async def test_response_data_structure_unified_format(self):
+        """Test that response.data has correct unified format with content array."""
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(
             name="test",
             url="http://test:8000",
@@ -118,7 +160,7 @@ class TestGenericChatBotResponse:
             chat_endpoint="/v1/chat/completions",
             models_endpoint="/v1/models",
             response_translations={
-                "choices[*].delta.content": "text",
+                "choices[*].delta.content": "content[0].content",
                 "choices[*].delta.role": "role"
             }
         )
@@ -139,11 +181,11 @@ class TestGenericChatBotResponse:
             async for _ in response:
                 pass
 
-            # Verify structure
+            # Verify unified format: content array, no flat text
             assert "role" in response.data
-            assert "text" in response.data
             assert response.data["role"] == "assistant"
-            assert response.data["text"] == "Test"
+            assert "content" in response.data
+            assert response.data["content"][0]["content"] == "Test"
 
 
 class TestChatBotResponseIntegration:
@@ -152,7 +194,7 @@ class TestChatBotResponseIntegration:
     @pytest.mark.asyncio
     async def test_response_valid_for_execution_environment(self):
         """Test that response format satisfies ExecutionEnvironment requirements."""
-        http_client = HTTPClient()
+        http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
         chat_history = ChatHistory()
@@ -172,11 +214,12 @@ class TestChatBotResponseIntegration:
             async for _ in response:
                 pass
 
-            # This is what ExecutionEnvironment expects
-            # role MUST be present
+            # Unified contract: both role and content must be present
             assert "role" in response.data, \
                 f"ExecutionEnvironment requires 'role' in response.data, but got: {response.data.keys()}"
-
-            # This assertion should never fail for a valid ChatBot
             assert response.data["role"] in ("assistant", "user", "system"), \
                 f"Invalid role value: {response.data['role']}"
+            assert "content" in response.data, \
+                f"ExecutionEnvironment requires 'content' array in response.data"
+            assert response.data["content"][0]["type"] == "text"
+            assert response.data["content"][0]["content"] == "Hello"
