@@ -269,6 +269,8 @@ class ToolDefinitionsMessage(Message):
         tool_manager: The ToolManager whose current tool list is queried
             each time ``content`` is accessed or ``serialize_content()``
             is called.
+        tool_filter: Optional list of regex patterns. Only tools whose names
+            match any pattern are included in the output.
     """
 
     def __init__(
@@ -277,6 +279,7 @@ class ToolDefinitionsMessage(Message):
         metadata: Optional[Dict[str, Any]] = None,
         creation_timestamp: Optional[datetime] = None,
         message_id: Optional[str] = None,
+        tool_filter: Optional[List[str]] = None,
     ) -> None:
         # Set _content directly to bypass the property in the parent __init__
         object.__setattr__(self, "_content", [])
@@ -288,6 +291,7 @@ class ToolDefinitionsMessage(Message):
             message_id=message_id,
         )
         self._tool_manager = tool_manager
+        self._tool_filter = tool_filter
 
     def get_role(self) -> str:
         """Always returns 'tool'."""
@@ -295,9 +299,10 @@ class ToolDefinitionsMessage(Message):
 
     @property
     def content(self) -> List[ContentPart]:
-        """Return ContentParts for every tool currently registered."""
+        """Return ContentParts for tools currently registered, filtered by tool_filter."""
         parts: List[ContentPart] = []
-        for tool in self._tool_manager.get_tool_list():
+        tools = self._tool_manager.get_tool_list(filter_patterns=self._tool_filter)
+        for tool in tools:
             parts.append(ContentPart(
                 part_type="tool",
                 name=tool.name,

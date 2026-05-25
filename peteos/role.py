@@ -15,7 +15,8 @@ class Role:
         required_tools: Optional[list[str]] = None,
         execution_environment: str = "REPL",
         model: str = ".*",
-        auto_approve_tools: Optional[list[str]] = None
+        auto_approve_tools: Optional[list[str]] = None,
+        tool_filter: Optional[list[str]] = None
     ):
         """
         Initialize Role.
@@ -30,6 +31,8 @@ class Role:
             execution_environment: Name of the execution environment (default: "REPL").
             model: Regex pattern to match model IDs (default: ".*" matches any model).
             auto_approve_tools: Optional list of tool names auto-approved for this role.
+            tool_filter: Optional list of regex patterns. Only tools whose names match
+                any pattern are visible to this role.
         """
         self.name = name
         self.description = description
@@ -39,6 +42,7 @@ class Role:
         self.execution_environment = execution_environment
         self.model = model
         self.auto_approve_tools = auto_approve_tools if auto_approve_tools is not None else []
+        self.tool_filter = tool_filter if tool_filter is not None else []
 
     def add_system_prompt_hook(self, hook: Callable[[], str]) -> None:
         """Add a hook that returns a dynamic fragment for the system prompt."""
@@ -71,6 +75,7 @@ class Role:
         execution_environment = data.get("execution_environment", "REPL")
         model = data.get("model", ".*")
         auto_approve_tools = data.get("auto_approve_tools", [])
+        tool_filter = data.get("tool_filter", [])
         return Role(
             name=name,
             description=description,
@@ -78,7 +83,8 @@ class Role:
             required_tools=required_tools,
             execution_environment=execution_environment,
             model=model,
-            auto_approve_tools=auto_approve_tools
+            auto_approve_tools=auto_approve_tools,
+            tool_filter=tool_filter,
         )
 
     @staticmethod
@@ -142,6 +148,7 @@ class Role:
         execution_environment = config.get("execution_environment", "REPL")
         model = config.get("model", ".*")
         auto_approve_tools = config.get("auto_approve_tools", [])
+        tool_filter = config.get("tool_filter", [])
 
         return Role(
             name=name,
@@ -150,5 +157,6 @@ class Role:
             required_tools=required_tools,
             execution_environment=execution_environment,
             model=model,
-            auto_approve_tools=auto_approve_tools
+            auto_approve_tools=auto_approve_tools,
+            tool_filter=tool_filter,
         )

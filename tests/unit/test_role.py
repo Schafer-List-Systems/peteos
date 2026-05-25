@@ -359,3 +359,79 @@ def test_role_load_from_path_default_auto_approve_tools():
         role = Role.load_from_path(str(role_dir))
 
         assert role.auto_approve_tools == []
+
+
+def test_role_init_with_tool_filter():
+    """Test Role initialization with tool_filter."""
+    role = Role(
+        name="reviewer",
+        description="Reviews patterns",
+        tool_filter=["set_approval_result"]
+    )
+
+    assert role.name == "reviewer"
+    assert role.description == "Reviews patterns"
+    assert role.tool_filter == ["set_approval_result"]
+
+
+def test_role_init_default_tool_filter():
+    """Test Role default tool_filter is empty list."""
+    role = Role(name="simple", description="Simple role")
+
+    assert role.tool_filter == []
+
+
+def test_role_load_from_dict_with_tool_filter():
+    """Test loading Role from dictionary with tool_filter."""
+    data = {
+        "name": "reviewer",
+        "description": "Reviews patterns",
+        "tool_filter": ["set_approval_result"]
+    }
+
+    role = Role.load_from_dict(data)
+
+    assert role.name == "reviewer"
+    assert role.tool_filter == ["set_approval_result"]
+
+
+def test_role_load_from_dict_default_tool_filter():
+    """Test loading Role from dictionary without tool_filter."""
+    data = {
+        "name": "simple",
+        "description": "Simple role"
+    }
+
+    role = Role.load_from_dict(data)
+
+    assert role.tool_filter == []
+
+
+def test_role_load_from_path_with_tool_filter_config():
+    """Test loading Role from directory with tool_filter in config.json."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        role_dir = Path(tmpdir) / "reviewer"
+        role_dir.mkdir()
+
+        (role_dir / "description.md").write_text("Reviews patterns.")
+        (role_dir / "config.json").write_text(
+            '{"tool_filter": ["set_approval_result"]}'
+        )
+
+        role = Role.load_from_path(str(role_dir))
+
+        assert role.name == "reviewer"
+        assert role.tool_filter == ["set_approval_result"]
+
+
+def test_role_load_from_path_default_tool_filter():
+    """Test loading Role from directory without tool_filter in config."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        role_dir = Path(tmpdir) / "simple"
+        role_dir.mkdir()
+
+        (role_dir / "description.md").write_text("A simple role.")
+
+        role = Role.load_from_path(str(role_dir))
+
+        assert role.tool_filter == []

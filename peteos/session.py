@@ -189,7 +189,7 @@ class Session(ActiveClass):
 
         # Tool definitions anchored at back (persist, appear after conversation)
         chat_history.append_message(
-            ToolDefinitionsMessage(tool_manager=tool_manager),
+            ToolDefinitionsMessage(tool_manager=tool_manager, tool_filter=role.tool_filter),
             anchor="front"
         )
 

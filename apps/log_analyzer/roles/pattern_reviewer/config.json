@@ -1,0 +1,6 @@
+{
+    "required_tools": ["set_approval_result"],
+    "model": ".*",
+    "auto_approve_tools": ["set_approval_result"],
+    "tool_filter": ["set_approval_result"]
+}
