@@ -353,6 +353,21 @@ class Session(ActiveClass):
             if record.tool_call_id == tc_id:
                 raise ValueError(f"Duplicate tool call id: {tc_id}")
         tool_name = tool_call.get("name", "")
+
+        # Validate tool exists
+        if not self.tool_manager.get_tool(tool_name):
+            tool_call["denied_reason"] = f"Tool '{tool_name}' is not available for this agent"
+            self._pending_tool_calls.append(
+                ToolCallRecord(
+                    tool_call_id=tc_id,
+                    tool_call=tool_call,
+                    approval_status=ToolApprovalStatus.DENIED,
+                    execution_status=ToolExecutionStatus.DENIED,
+                )
+            )
+            _logger.warning("[session] Tool call '%s' denied: tool not found", tool_name)
+            return
+
         if tool_name in self.auto_approve_tools:
             self._pending_tool_calls.append(
                 ToolCallRecord(
