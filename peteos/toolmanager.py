@@ -1,4 +1,5 @@
 import inspect
+import re
 from functools import wraps
 from typing import Any, Callable, Optional
 
@@ -158,11 +159,23 @@ class ToolManager:
         """
         return self._tools.get(name)
 
-    def get_tool_list(self) -> list[Tool]:
+    def get_tool_list(self, filter_patterns: Optional[list[str]] = None) -> list[Tool]:
         """
-        Get list of all registered tools.
+        Get list of all registered tools, optionally filtered by regex patterns.
+
+        Args:
+            filter_patterns: Optional list of regex patterns. Only tools whose
+                names match any pattern are included.
 
         Returns:
             List of Tool instances.
         """
-        return list(self._tools.values())
+        if not filter_patterns:
+            return list(self._tools.values())
+        filtered = []
+        for tool in self._tools.values():
+            for pattern in filter_patterns:
+                if re.fullmatch(pattern, tool.name):
+                    filtered.append(tool)
+                    break
+        return filtered

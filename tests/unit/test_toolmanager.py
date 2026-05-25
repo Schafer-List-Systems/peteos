@@ -90,3 +90,52 @@ def test_tool_manager_get_nonexistent_tool():
     tool = manager.get_tool("nonexistent")
 
     assert tool is None
+
+
+def test_tool_manager_get_tool_list_no_filter():
+    """Test get_tool_list without filter returns all tools."""
+
+    manager = ToolManager()
+    manager.register_tool(Tool(name="alpha", description="a", func=lambda: None))
+    manager.register_tool(Tool(name="beta", description="b", func=lambda: None))
+    manager.register_tool(Tool(name="gamma", description="c", func=lambda: None))
+
+    tools = manager.get_tool_list()
+    assert len(tools) == 3
+
+
+def test_tool_manager_get_tool_list_filter_patterns():
+    """Test get_tool_list filters by regex patterns."""
+
+    manager = ToolManager()
+    manager.register_tool(Tool(name="mute_router", description="a", func=lambda: None))
+    manager.register_tool(Tool(name="unmute_router", description="b", func=lambda: None))
+    manager.register_tool(Tool(name="add_exclude_pattern", description="c", func=lambda: None))
+    manager.register_tool(Tool(name="set_approval_result", description="d", func=lambda: None))
+
+    tools = manager.get_tool_list(filter_patterns=["mute_router", "unmute_router"])
+    assert len(tools) == 2
+    assert {t.name for t in tools} == {"mute_router", "unmute_router"}
+
+
+def test_tool_manager_get_tool_list_filter_patterns_regex():
+    """Test get_tool_list filter supports regex patterns."""
+
+    manager = ToolManager()
+    manager.register_tool(Tool(name="mute_router", description="a", func=lambda: None))
+    manager.register_tool(Tool(name="unmute_router", description="b", func=lambda: None))
+    manager.register_tool(Tool(name="set_approval_result", description="c", func=lambda: None))
+
+    tools = manager.get_tool_list(filter_patterns=[".*_router"])
+    assert len(tools) == 2
+    assert {t.name for t in tools} == {"mute_router", "unmute_router"}
+
+
+def test_tool_manager_get_tool_list_filter_patterns_no_match():
+    """Test get_tool_list returns empty when no patterns match."""
+
+    manager = ToolManager()
+    manager.register_tool(Tool(name="alpha", description="a", func=lambda: None))
+
+    tools = manager.get_tool_list(filter_patterns=[".*nonexistent.*"])
+    assert len(tools) == 0

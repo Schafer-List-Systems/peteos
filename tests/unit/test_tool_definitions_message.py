@@ -110,3 +110,48 @@ class TestToolDefinitionsMessage:
         tm.register_tool(Tool.from_callable(_fn("big_tool", "some description")))
         count2 = msg.count_tokens()
         assert count2 > count  # More tokens with a tool definition
+
+    def test_tool_filter_restricts_tools(self):
+        tm = ToolManager()
+        tm.register_tool(Tool.from_callable(_fn("mute_router", "desc1")))
+        tm.register_tool(Tool.from_callable(_fn("unmute_router", "desc2")))
+        tm.register_tool(Tool.from_callable(_fn("set_approval_result", "desc3")))
+        msg = ToolDefinitionsMessage(tool_manager=tm, tool_filter=["set_approval_result"])
+
+        assert len(msg.content) == 1
+        assert msg.content[0].data["name"] == "set_approval_result"
+
+    def test_tool_filter_regex(self):
+        tm = ToolManager()
+        tm.register_tool(Tool.from_callable(_fn("mute_router", "d1")))
+        tm.register_tool(Tool.from_callable(_fn("unmute_router", "d2")))
+        tm.register_tool(Tool.from_callable(_fn("set_approval_result", "d3")))
+        msg = ToolDefinitionsMessage(tool_manager=tm, tool_filter=[".*_router"])
+
+        assert len(msg.content) == 2
+        assert {p.data["name"] for p in msg.content} == {"mute_router", "unmute_router"}
+
+    def test_tool_filter_empty_no_match(self):
+        tm = ToolManager()
+        tm.register_tool(Tool.from_callable(_fn("foo", "d1")))
+        msg = ToolDefinitionsMessage(tool_manager=tm, tool_filter=["bar"])
+
+        assert len(msg.content) == 0
+
+    def test_tool_filter_none_all_tools(self):
+        tm = ToolManager()
+        tm.register_tool(Tool.from_callable(_fn("alpha", "d1")))
+        tm.register_tool(Tool.from_callable(_fn("beta", "d2")))
+        msg = ToolDefinitionsMessage(tool_manager=tm, tool_filter=None)
+
+        assert len(msg.content) == 2
+
+    def test_tool_filter_serialize(self):
+        tm = ToolManager()
+        tm.register_tool(Tool.from_callable(_fn("tool_a", "d1")))
+        tm.register_tool(Tool.from_callable(_fn("tool_b", "d2")))
+        msg = ToolDefinitionsMessage(tool_manager=tm, tool_filter=["tool_a"])
+
+        serialized = msg.serialize_content()
+        assert len(serialized) == 1
+        assert serialized[0]["name"] == "tool_a"
