@@ -165,7 +165,7 @@ def remove_exclude_pattern(index: int, pattern: str) -> str:
         if index < 0 or index >= len(patterns):
             return f"Invalid index: {index}"
         if patterns[index] != pattern:
-            return f"Mismatch: pattern at index {index} is {patterns[index]!r}, not {pattern!r}. Check list_exclude_patterns() and try again."
+            return f"Mismatch: pattern at index {index} is {patterns[index]}, not {pattern!r}. Check list_exclude_patterns() and try again."
     except Exception:
         return f"Invalid index: {index}"
     ch.remove_exclude_pattern(index)

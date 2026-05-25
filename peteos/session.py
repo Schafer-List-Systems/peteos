@@ -192,11 +192,24 @@ class Session(ActiveClass):
                 anchor="front"
             )
 
-        # Tool definitions anchored at back (persist, appear after conversation)
+        # Tool definitions anchored at front (persist, appear after conversation)
         chat_history.append_message(
             ToolDefinitionsMessage(tool_manager=tool_manager, tool_filter=role.tool_filter),
             anchor="front"
         )
+
+        # Continuous roles get a persistent yield_back reminder from the assistant's perspective
+        if role.behavior_policy == "continuous":
+            chat_history.append_message(
+                Message(
+                    role="assistant",
+                    content=[ContentPart(
+                        part_type="text",
+                        text="I need to use the yield_back() tool when I don't need to think any further or call any tools.",
+                    )],
+                ),
+                anchor="back"
+            )
 
         return chat_history
 
