@@ -205,7 +205,7 @@ class Session(ActiveClass):
                     role="assistant",
                     content=[ContentPart(
                         part_type="text",
-                        text="I need to use the yield_back() tool when I don't need to think any further or call any tools.",
+                        text="I need to use the yield_back() tool when I need to wait for further input (e.g. on more data or an answer from the user)",
                     )],
                 ),
                 anchor="back"
@@ -230,6 +230,10 @@ class Session(ActiveClass):
         if role.behavior_policy == "continuous":
             tool_manager.register_tool(func=_yield_back, name="yield_back", description="Signal that you have finished your task and want to yield control back to the user/channel. Call this when you've completed all your work and no longer need to execute tools.")
             self.auto_approve_tools.append("yield_back")
+            if role.tool_filter is None:
+                role.tool_filter = []
+            if "yield_back" not in role.tool_filter:
+                role.tool_filter.append("yield_back")
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
         self.chatbot_manager = chatbot_manager
         self._channels: Set[Channel] = set()
