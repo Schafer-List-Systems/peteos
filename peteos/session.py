@@ -619,6 +619,7 @@ async def invoke_agent(
             done.set()
 
     env.register_hook("after_step", on_finished, session)
+    session_created = agent is not None and existing_session is None
 
     try:
         # --- Queue message ---
@@ -633,6 +634,7 @@ async def invoke_agent(
 
         # --- Extract answer ---
         answer = _extract_last_assistant_text(session.chat_history)
+        success = True
 
     except Exception:
         raise
@@ -641,8 +643,17 @@ async def invoke_agent(
 
     return_state = dict(session.state._data)
 
-    # --- Cleanup ---
-    if keep_session:
+    if not success and keep_session:
+        try:
+            await session.stop()
+        except Exception:
+            pass
+        if session_created:
+            try:
+                await agent.destroy_session(session.uuid)
+            except Exception:
+                pass
+    elif keep_session:
         kept_session: Optional[Session] = session
     else:
         kept_session = None
@@ -650,8 +661,7 @@ async def invoke_agent(
             await session.stop()
         except Exception:
             pass
-
-        if agent is not None and existing_session is None:
+        if session_created:
             try:
                 await agent.destroy_session(session.uuid)
             except Exception:
