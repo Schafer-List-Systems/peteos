@@ -129,14 +129,14 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
             role_name="pattern_reviewer",
             prompt=reviewer_prompt,
             agent=agent,
-            keep_session=True,
             timeout=120,
         )
     except asyncio.TimeoutError:
         return "Pattern addition aborted: reviewer did not respond within timeout."
 
-    approved = review_result["session"].state.get("approved") if review_result.get("session") else None
-    reviewer_reason = review_result["session"].state.get("reason") if review_result.get("session") else "Timeout - no result"
+    state = review_result.get("state", {})
+    approved = state.get("approved") if state else None
+    reviewer_reason = state.get("reason") if state else "Timeout - no result"
 
     if approved != "yes":
         return f"Pattern matches but is denied. Improve your pattern! Reason: {reviewer_reason}"

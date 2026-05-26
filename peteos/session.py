@@ -634,9 +634,12 @@ async def invoke_agent(
         # --- Extract answer ---
         answer = _extract_last_assistant_text(session.chat_history)
 
+    except Exception:
+        raise
     finally:
-        # --- Always deregister the temporary hook ---
         env.deregister_hook("after_step", on_finished)
+
+    return_state = dict(session.state._data)
 
     # --- Cleanup ---
     if keep_session:
@@ -658,4 +661,5 @@ async def invoke_agent(
         "answer": answer,
         "session": kept_session,
         "history": list(session.chat_history.messages),
+        "state": return_state,
     }
