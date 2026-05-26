@@ -434,6 +434,16 @@ def register_state_tools(tool_manager: ToolManager) -> None:
     tool_manager.register_tool(func=update_topic)
     tool_manager.register_tool(func=fold_topic)
     tool_manager.register_tool(func=unfold_topic)
+    tool_manager.register_tool(func=proceed)
+
+
+def proceed() -> None:
+    """Call this tool (it takes no arguments and returns nothing) when you have more work to do and need the execution loop to continue processing.
+
+    If you forget to call this tool when you still have reasoning or messages to produce, you will simply stop and waste context.
+    Use it whenever you need another turn.
+    """
+    pass
 
 
 def register_filter_tools(
