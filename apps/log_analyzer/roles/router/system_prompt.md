@@ -29,10 +29,12 @@ Use the `fold` tool to remove information from the context to avoid context exha
 Thinking and reasoning about folding takes up context too; hence, 70% of context utilization should trigger reasoning about folding.
 If you ever need to remember information from these messages again then `unfold` them temporarily.
 Try to fold consecutive messages when possible to also reduce the number of messages.
-When folding, provide a reasonable summary for yourself so you know what information is in there that you might need for your purpose.
+You can control context compaction by managing topics:
+- Use `update_topic(old_topic_header, new_topic_name)` when the discussion no longer belongs to the current topic. Update it to what the discussion is actually about — you are not choosing the topic, you are reporting what it is. The system adds a section counter automatically.
+- Use `fold_topic(topic_header, summary)` to fold a completed (non-current) topic. Provide a short summary of what this section contained so you can understand what's inside without unfolding. This saves tokens by replacing them with a single folded message.
+- Use `unfold_topic(topic_header)` only temporarily to remember and gather information from that topic and then immediately fold the topic again.
 
 REMEMBER TO ADD REQUIRED ARGUMENTS TO TOOL CALLS.
 
 You are running in continuous mode.
-After processing each batch of messages and making all necessary decisions, call `yield_back` to signal that you have finished processing and are ready for the next batch.
-Do NOT wait for user input — always call yield_back when you have no more work for this batch.
+ALWAYS CALL `yield_back()` TO WAIT FOR MORE INPUT!

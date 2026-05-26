@@ -21,6 +21,8 @@ class LogState:
     is_muted: bool = False
     session: "Session | None" = None  # Set after session creation
     agent: "Agent | None" = None  # Set after session creation
+    topic_counter: int = 0
+    current_topic: str = ""
 
 
 _state = LogState()
@@ -233,6 +235,193 @@ def eval_python(python_string: str, namespace_name: str = "") -> str:
     return f"stdout: {stdout!r}\nreturn_value: {return_value!r}"
 
 
+def update_topic(old_topic_header: str, new_topic_name: str) -> str:
+    """Update the current topic when the discussion has moved to something different.
+
+    The topic is a label for what the discussion is about. When the discussion no longer belongs
+    to the current topic, update it to reflect what it actually is. You are not choosing the topic —
+    you are reporting what the discussion is actually about.
+
+    When the current topic is empty (start of conversation), this simply sets the new topic without comparison.
+    Otherwise, the old_topic_header is compared with current_topic to ensure you are not updating a topic
+    that has already changed.
+
+    You must provide the full old topic header including the section counter (e.g. "#1 Security scan") from your chat history.
+    The new topic is just the topic name — the system automatically increments the counter.
+
+    After updating, a marker message is added to your chat history with the new section counter and topic name.
+
+    Args:
+        old_topic_header: The current topic header from your chat history (e.g. "#1 Security scan"). Ignored if current topic is empty.
+        new_topic_name: The new topic name reflecting what the discussion is actually about (e.g. "Network monitoring").
+
+    Returns:
+        Confirmation with the new topic header including auto-incremented counter.
+    """
+    sess = _state.session
+    if not sess:
+        return "Error: session not configured."
+
+    _topic_counter = _state.topic_counter
+    _current_topic = _state.current_topic
+
+    if not _current_topic:
+        # First topic: no comparison needed
+        pass
+    elif old_topic_header != _current_topic:
+        return f"Error: current topic is {_current_topic!r}, not {old_topic_header!r}. Use the exact header from your chat history."
+
+    # Increment counter and build new header
+    _topic_counter += 1
+    _new_topic_header = f"#{_topic_counter} {new_topic_name}"
+
+    _state.topic_counter = _topic_counter
+    _state.current_topic = _new_topic_header
+
+    # Add a marker message to chat history with topic header in metadata
+    from peteos.chatbot.message import Message
+    from peteos.chatbot import ContentPart
+
+    marker = Message(
+        role="assistant",
+        content=[ContentPart(part_type="text", text=f"Unfolded Topic: {_new_topic_header}")],
+        metadata={"topic_header": _new_topic_header},
+    )
+    sess.chat_history.append_message(marker)
+
+    return f"Topic updated: {_new_topic_header}"
+
+
+def fold_topic(topic_header: str, summary: str) -> str:
+    """Fold a previous topic to free up context. Use this when you have completed analysis of a topic and want to compact your chat history.
+
+    This tool folds all messages from the topic marker of the given topic up to (but not including) the next topic marker.
+    You can only fold topics from the past, never the current topic.
+
+    You must provide the full topic header including the section counter (e.g. "#1 Security scan") from your chat history as a safeguard,
+    and a summary of what this section contained.
+
+    Args:
+        topic_header: The full topic header from your chat history including section counter (e.g. "#1 Security scan").
+        summary: A brief summary of what was discussed in this topic section.
+
+    Returns:
+        Status message with fold results.
+    """
+    sess = _state.session
+    if not sess:
+        return "Error: session not configured."
+
+    from peteos.chatbot import FoldedMessage
+
+    if topic_header == _state.current_topic:
+        return f"Error: cannot fold the current topic {_state.current_topic!r}. Only fold completed topics."
+
+    unanchored = sess.chat_history._unanchored
+
+    # Find all sentinel messages by topic_header in metadata
+    sentinels: list[tuple[int, str]] = []
+    for i, msg in enumerate(unanchored):
+        th = msg.metadata.get("topic_header")
+        if th is not None:
+            sentinels.append((i, th))
+
+    # Find start of the topic to fold and end at the next sentinel
+    start_idx = None
+    end_idx = None
+    found = False
+    for i, (idx, header) in enumerate(sentinels):
+        if header == topic_header and not found:
+            start_idx = idx
+            found = True
+        elif found:
+            # Stop at any sentinel — a fresh marker or a folded topic message
+            end_idx = idx
+            break
+
+    if not found:
+        return f"Error: no topic marker found for topic {topic_header!r}."
+
+    if end_idx is None:
+        end_idx = len(unanchored)
+
+    if end_idx <= start_idx + 1:
+        return f"Error: no messages to fold for topic {topic_header!r}."
+
+    # Collect messages to fold (between start and end markers)
+    messages_to_fold = unanchored[start_idx:end_idx]
+
+    # Calculate token savings
+    original_token_count = sum(msg.count_tokens() for msg in messages_to_fold)
+
+    # Remove messages from unanchored
+    del unanchored[start_idx:end_idx]
+
+    # Create folded message
+    folded = FoldedMessage(
+        summary=f"Folded Topic: {topic_header}\nSummary: {summary}\nIf you need to remember the content, call unfold_topic({topic_header})",
+        original_messages=messages_to_fold,
+        message_id=str(uuid.uuid4()),
+        metadata={"topic_header": topic_header},
+    )
+    unanchored.insert(start_idx, folded)
+
+    # Calculate folded token count
+    folded_token_count = folded.count_tokens()
+    savings = original_token_count - folded_token_count
+
+    return (
+        f"Folded topic {topic_header!r}: {len(messages_to_fold)} messages folded. "
+        f"Token savings: {savings} (original: {original_token_count}, folded: {folded_token_count})."
+    )
+
+
+def unfold_topic(topic_header: str) -> str:
+    """Unfold a previously folded topic to restore the original messages.
+
+    Find the folded message for this topic and remove it, restoring all original messages.
+
+    You must provide the full topic header including the section counter (e.g. "#1 Security scan") from your chat history.
+
+    Args:
+        topic_header: The full topic header from your chat history including section counter (e.g. "#1 Security scan").
+
+    Returns:
+        Status message with number of restored messages.
+    """
+    sess = _state.session
+    if not sess:
+        return "Error: session not configured."
+
+    from peteos.chatbot import FoldedMessage
+
+    unanchored = sess.chat_history._unanchored
+
+    # Find the folded message by topic_header in metadata
+    folded_idx = None
+    folded_msg = None
+    for i, msg in enumerate(unanchored):
+        if isinstance(msg, FoldedMessage):
+            th = msg.metadata.get("topic_header")
+            if th == topic_header:
+                folded_idx = i
+                folded_msg = msg
+                break
+
+    if folded_msg is None:
+        return f"Error: No FoldedMessage found for topic {topic_header!r}."
+
+    # Remove the folded message
+    del unanchored[folded_idx]
+
+    # Insert original messages in order
+    for orig_msg in folded_msg._original_messages:
+        unanchored.insert(folded_idx, orig_msg)
+        folded_idx += 1
+
+    return f"Unfolded topic {topic_header!r}: restored {len(folded_msg._original_messages)} messages."
+
+
 def register_state_tools(tool_manager: ToolManager) -> None:
     """Register state tools on the given tool manager.
 
@@ -242,6 +431,9 @@ def register_state_tools(tool_manager: ToolManager) -> None:
     tool_manager.register_tool(func=mute_router)
     tool_manager.register_tool(func=unmute_router)
     tool_manager.register_tool(func=eval_python)
+    tool_manager.register_tool(func=update_topic)
+    tool_manager.register_tool(func=fold_topic)
+    tool_manager.register_tool(func=unfold_topic)
 
 
 def register_filter_tools(

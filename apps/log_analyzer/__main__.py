@@ -25,6 +25,8 @@ Usage:
       --stdout-config /path/to/stdout_config.json
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
@@ -41,7 +43,7 @@ from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
-from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_fold_tools, register_approval_tools
+from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_approval_tools
 
 
 async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
@@ -166,9 +168,8 @@ async def main():
     # Create a shared session that both channels attach to
     session = await agent.create_session(role_name)
 
-    # Register fold/unfold tools and set session reference
+    # Set session reference for tools
     _state.session = session
-    register_fold_tools(tm)
 
     # Register rolling window discard hook
     try:
@@ -197,7 +198,7 @@ async def main():
         for part in message.content:
             if part.type == "text" and part.text:
                 token_count = message.count_tokens()
-                part.data["text"] = f"[msg:{message.get_id()} ({token_count} tokens)]\n{part.text}"
+                #part.data["text"] = f"[msg:{message.get_id()} ({token_count} tokens)]\n{part.text}"
                 break
 
     session.execution_environment.register_hook("after_message_append", _on_after_message_append)
@@ -214,6 +215,21 @@ async def main():
         if isinstance(msg, SystemPromptMessage):
             msg.add_hook(lambda: f"Context: {_state.last_context_tokens} of {max_tokens} tokens used.\n")
             break
+
+    # Add a persistent back-anchor reminder about updating topics for continuous roles
+    from peteos.chatbot import ContentPart
+    role_obj = role_manager.get_role(role_name)
+    if role_obj and role_obj.behavior_policy == "continuous":
+        session.chat_history.append_message(
+            Message(
+                role="assistant",
+                content=[ContentPart(
+                    part_type="text",
+                    text="I need to use the update_topic() tool when the discussion no longer belongs to the current topic. I should update it to what the discussion is actually about. I should also use fold_topic() to fold completed topics to save context.",
+                )],
+            ),
+            anchor="back"
+        )
 
     # Register rooms with the session (app owns session lifecycle)
     auto_join_rooms = nextcloud_config.get("auto_join_rooms", [])

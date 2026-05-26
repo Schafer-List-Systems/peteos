@@ -199,17 +199,17 @@ class Session(ActiveClass):
         )
 
         # Continuous roles get a persistent yield_back reminder from the assistant's perspective
-        if role.behavior_policy == "continuous":
-            chat_history.append_message(
-                Message(
-                    role="assistant",
-                    content=[ContentPart(
-                        part_type="text",
-                        text="I need to use the yield_back() tool when I need to wait for further input (e.g. on more data or an answer from the user)",
-                    )],
-                ),
-                anchor="back"
-            )
+        #if role.behavior_policy == "continuous":
+        #    chat_history.append_message(
+        #        Message(
+        #            role="assistant",
+        #            content=[ContentPart(
+        #                part_type="thinking",
+        #                text="I must call the `yield_back()` tool when I want to yield back control to the user.",
+        #            )],
+        #        ),
+        #        anchor="back"
+        #    )
 
         return chat_history
 
@@ -228,7 +228,7 @@ class Session(ActiveClass):
         self.tool_manager = tool_manager
         self.auto_approve_tools: list[str] = list(role.auto_approve_tools)
         if role.behavior_policy == "continuous":
-            tool_manager.register_tool(func=_yield_back, name="yield_back", description="Signal that you have finished your task and want to yield control back to the user/channel. Call this when you've completed all your work and no longer need to execute tools.")
+            tool_manager.register_tool(func=_yield_back, name="yield_back", description="Hand back control to the user to wait for further input. Not calling yield_back forces you to create more output!")
             self.auto_approve_tools.append("yield_back")
             if role.tool_filter is None:
                 role.tool_filter = []
