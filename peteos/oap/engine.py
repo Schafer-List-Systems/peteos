@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_TIMEOUT = 60.0
+DEFAULT_TIMEOUT = 180.0
 
 
 async def invoke(
@@ -162,13 +162,16 @@ def _discover_tools(oap_object: "AgenticObjectBase") -> ToolManager:
         tool_name = attr._tool_name  # type: ignore[attr-defined]
         tool_desc = attr._tool_description or ""  # type: ignore[attr-defined]
 
+        # Bind the method to this instance so self is supplied automatically
+        bound_func = getattr(oap_object, attr_name)
+
         # Extract parameter info from the method signature
         parameters = _extract_method_params(attr)
 
         tool = Tool(
             name=tool_name,
             description=tool_desc,
-            func=attr,
+            func=bound_func,
             parameters=parameters,
         )
         tm.register_tool(tool=tool)
@@ -208,6 +211,62 @@ def _extract_method_params(method: Any) -> dict:
     return parameters
 
 
+def _extract_data_state(oap_object: "AgenticObjectBase") -> str:
+    """Extract a snapshot of the object's data for the LLM's context.
+
+    Iterates over all @tool methods returning a non-callable value
+    (getter-like methods) and formats them as key-value lines.
+    """
+    cls = oap_object.__class__
+    lines: list[str] = []
+    for attr_name in dir(cls):
+        attr = getattr(cls, attr_name)
+        if not callable(attr) or not hasattr(attr, "_tool_name"):
+            continue
+        # Skip methods that take arguments (they're setters, not getters)
+        try:
+            sig = inspect.signature(attr)
+        except (ValueError, TypeError):
+            continue
+        params = [p for p in sig.parameters.keys() if p != "self"]
+        if not params:
+            try:
+                value = attr(oap_object)
+            except Exception:
+                value = "<error reading value>"
+            lines.append(f"  {attr._tool_name}: {value!r}")
+    return "\n".join(lines)
+
+
+def _build_tool_descriptions(oap_object: "AgenticObjectBase") -> list[str]:
+    """Build a list of tool descriptions from decorated methods."""
+    cls = oap_object.__class__
+    result: list[str] = []
+    for attr_name in dir(cls):
+        attr = getattr(cls, attr_name)
+        if not callable(attr) or not hasattr(attr, "_tool_name"):
+            continue
+        desc = getattr(attr, "_tool_description", "") or ""
+        tool_name = attr._tool_name
+        try:
+            sig = inspect.signature(attr)
+        except (ValueError, TypeError):
+            result.append(f"  - `{tool_name}`: {desc}")
+            continue
+        params = []
+        for pname, param in sig.parameters.items():
+            if pname == "self":
+                continue
+            ptype = ""
+            if param.annotation != inspect.Parameter.empty:
+                ptype = str(param.annotation)
+            params.append(f"  - `{pname}` ({ptype})")
+        param_str = "\n".join(params) if params else "  (no parameters)"
+        desc_str = f": {desc}" if desc else ""
+        result.append(f"  - `{tool_name}`{desc_str}\n{param_str}")
+    return result
+
+
 def _generate_system_prompt(
     oap_object: "AgenticObjectBase",
     output_schema: type | None,
@@ -221,8 +280,15 @@ def _generate_system_prompt(
         lines.append(docstring.strip())
         lines.append("")
 
-    # Capabilities
+    # Current data state
     config = getattr(oap_object.__class__, "_oap_config", {})
+    state = _extract_data_state(oap_object)
+    if state:
+        lines.append("Current data state:")
+        lines.append(state)
+        lines.append("")
+
+    # Capabilities
     capabilities = []
 
     if config.get("allow_code_execution", False):
@@ -244,12 +310,11 @@ def _generate_system_prompt(
         lines.append("")
 
     # Tool descriptions
-    lines.append("Available tools:")
-    lines.append(
-        "Each tool has a name, description, and parameters. "
-        "Call tools by providing the tool name and arguments."
-    )
-    lines.append("")
+    tool_lines = _build_tool_descriptions(oap_object)
+    if tool_lines:
+        lines.append("Available tools:")
+        lines.extend(tool_lines)
+        lines.append("")
 
     # Output schema instructions
     schema_info = extract_schema_info(output_schema)
@@ -257,6 +322,8 @@ def _generate_system_prompt(
     if schema_prompt:
         lines.append(schema_prompt)
         lines.append("")
+
+    lines.append("Terminate when you have produced the requested output.")
 
     return "\n".join(lines)
 

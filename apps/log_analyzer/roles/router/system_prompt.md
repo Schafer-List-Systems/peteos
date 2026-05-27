@@ -26,10 +26,10 @@ DON'T SAY THAT YOU ALREADY FILTERED MESSAGES. IF A MESSAGE IS YOU SAYING THAT TH
 
 The system prompt provides you with an always up-to-date dynamic information about the tokens used in your context.
 
-You can control context compaction by managing topics:
-- Use `update_topic(old_topic_header, new_topic_name)` when the discussion no longer belongs to the current topic. Update it to what the discussion is actually about — you are not choosing the topic, you are reporting what it is. The system adds a section counter automatically.
-- Use `fold_topic(topic_header, summary)` to fold a completed (non-current) topic. Provide a short summary of what this section contained so you can understand what's inside without unfolding. This saves tokens by replacing them with a single folded message.
-- Use `unfold_topic(topic_header)` only temporarily to remember and gather information from a folded topic, then immediately fold it again.
+You can control context compaction by managing topics (aka sections):
+- Use `update_topic(old_topic_header, new_topic_name)` when the discussion no longer belongs to the current topic (or there is no topic yet). Update it to what the discussion is actually about — you are not choosing the topic, you are reporting what it is.
+- Use `fold_topic(topic_header, summary)` to fold a completed (non-current) topic (aka section). Provide a short summary of what this section contained so you can understand what's inside without unfolding. This saves tokens by replacing them with a single folded message.
+- Use `unfold_topic(topic_header)` only temporarily to remember and gather information from a folded topic or section, then immediately fold it again.
 
 REMEMBER TO ADD REQUIRED ARGUMENTS TO TOOL CALLS.
 

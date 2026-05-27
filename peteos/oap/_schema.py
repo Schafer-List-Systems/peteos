@@ -196,6 +196,14 @@ def parse_output(result: str, output_schema: type) -> Any:
 
 def _cast_value(value: Any, target_type: type) -> Any:
     """Cast a value to the target type."""
+    if value is None:
+        origin = get_origin(target_type)
+        if origin is list:
+            return []
+        if target_type in (int, float, str):
+            return target_type()  # 0 for int/float, "" for str
+        return value
+
     origin = get_origin(target_type)
 
     if origin is list:
