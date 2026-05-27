@@ -26,6 +26,8 @@ from peteos.oap import (
 
 # --- Mock HTTP Backend ---
 
+_chat_call_count = 0
+
 async def mock_models(request: web.Request) -> web.Response:
     return web.json_response({
         "data": [
@@ -34,36 +36,88 @@ async def mock_models(request: web.Request) -> web.Response:
     })
 
 
+async def mock_root(request: web.Request) -> web.Response:
+    return web.json_response({"status": "ok"})
+
+
 async def mock_chat(request: web.Request) -> web.Response:
+    global _chat_call_count
+    _chat_call_count += 1
+
     body = await request.json()
     messages = body.get("messages", [])
 
-    # Echo back with structured output for dataclass schemas
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
+    # Check if produce_output is in the system prompt or messages
+    has_produce_output = False
+    system_text = body.get("system", "")
+    if isinstance(system_text, str) and "produce_output" in system_text:
+        has_produce_output = True
+    elif isinstance(system_text, list):
+        for item in system_text:
+            if isinstance(item, dict) and "text" in item:
+                if "produce_output" in str(item["text"]):
+                    has_produce_output = True
+                    break
+
+    if not has_produce_output:
+        for msg in messages:
             content = msg.get("content", "")
-            text = json.dumps({"name": "test", "count": 42})
-            break
+            if isinstance(content, str) and "produce_output" in content:
+                has_produce_output = True
+            elif isinstance(content, list):
+                for part in content:
+                    part_text = part.get("text", "") if isinstance(part, dict) else str(part)
+                    if "produce_output" in str(part_text):
+                        has_produce_output = True
+                        break
+
+    if has_produce_output and _chat_call_count == 1:
+        # First call only: return produce_output tool_use
+        async def event_generator():
+            event = json.dumps({
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": body.get("model", "test-model"),
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call-1",
+                            "type": "tool_use",
+                            "function": {
+                                "name": "produce_output",
+                                "arguments": json.dumps({
+                                    "name": "test",
+                                    "count": 42,
+                                }),
+                            },
+                        }],
+                    },
+                }],
+                "usage": None,
+            })
+            yield f'data: {event}\n'
+            yield 'data: [DONE]\n'
     else:
-        text = "{}"
-
-    # Properly escape text for JSON string value in SSE response
-    escaped_text = text.replace("\\", "\\\\").replace('"', '\\"')
-
-    async def event_generator():
-        event = json.dumps({
-            "id": "chatcmpl-test",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": body.get("model", "test-model"),
-            "choices": [{
-                "index": 0,
-                "delta": {"role": "assistant", "content": text}
-            }],
-            "usage": None,
-        })
-        yield f'data: {event}\n'
-        yield 'data: [DONE]\n'
+        # Text response for all other cases
+        text = "Hello!"
+        async def event_generator():
+            event = json.dumps({
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": body.get("model", "test-model"),
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": text}
+                }],
+                "usage": None,
+            })
+            yield f'data: {event}\n'
+            yield 'data: [DONE]\n'
 
     response = web.StreamResponse(status=200)
     response.headers['Content-Type'] = 'text/event-stream'
@@ -73,10 +127,6 @@ async def mock_chat(request: web.Request) -> web.Response:
         await response.write(chunk.encode())
     await response.write_eof()
     return response
-
-
-async def mock_root(request: web.Request) -> web.Response:
-    return web.json_response({"status": "ok"})
 
 
 def mock_app():
@@ -115,6 +165,8 @@ class TestOAPIntegration:
     @pytest.mark.asyncio
     async def test_invoke_non_persistent(self, mock_agent):
         """Basic non-persistent OAP invocation."""
+        global _chat_call_count
+        _chat_call_count = 0
 
         @agentic_object()
         class Greeter(AgenticObjectBase):
@@ -135,6 +187,9 @@ class TestOAPIntegration:
     @pytest.mark.asyncio
     async def test_invoke_with_output_schema(self, mock_agent):
         """OAP invocation with structured output schema."""
+        global _chat_call_count
+        _chat_call_count = 0
+
         from dataclasses import dataclass
 
         @agentic_object()
@@ -176,6 +231,8 @@ class TestOAPIntegration:
     @pytest.mark.asyncio
     async def test_invoke_persistent_thread(self, mock_agent):
         """Persistent thread carries state across invocations."""
+        global _chat_call_count
+        _chat_call_count = 0
 
         @agentic_object()
         class Counter(AgenticObjectBase):
@@ -225,12 +282,7 @@ class TestOAPIntegration:
         parent.agent = mock_agent
         child = Child()
 
-        # This will raise because child has no agent, but the gatekeeper
-        # should pass. We verify the gatekeeper doesn't block by checking
-        # it doesn't return an Error.
-        # Note: the actual invoke needs the child's agent too.
         result = parent.invoke(child, "prompt")
-        # Should raise ValueError (no agent), not return Error (gatekeeper)
         assert not isinstance(result, Error)
 
     @pytest.mark.asyncio

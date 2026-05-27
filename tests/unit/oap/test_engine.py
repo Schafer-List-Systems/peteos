@@ -1,15 +1,14 @@
 """Tests for OAP engine utilities."""
 
 from peteos.oap.engine import (
-    _detect_task_failure,
-    _discover_tools,
-    _generate_system_prompt,
+    _discover_bound_tools,
+    _extract_method_params,
 )
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import agentic_object, tool
 
 
-class TestDiscoverTools:
+class TestDiscoverBoundTools:
     def test_discovers_decorated_methods(self):
         @agentic_object()
         class MyObj(AgenticObjectBase):
@@ -21,8 +20,7 @@ class TestDiscoverTools:
             def not_a_tool(self):
                 pass
 
-        tm = _discover_tools(MyObj())
-        tools = tm.get_tool_list()
+        tools = _discover_bound_tools(MyObj())
         assert len(tools) == 1
         assert tools[0].name == "hello"
         assert "Say hello" in tools[0].description
@@ -32,48 +30,59 @@ class TestDiscoverTools:
         class MyObj(AgenticObjectBase):
             pass
 
-        tm = _discover_tools(MyObj())
-        assert len(tm.get_tool_list()) == 0
+        tools = _discover_bound_tools(MyObj())
+        assert len(tools) == 0
 
-
-class TestGenerateSystemPrompt:
-    def test_includes_docstring(self):
+    def test_tools_are_bound(self):
         @agentic_object()
-        class Greeter(AgenticObjectBase):
-            """A greeter object."""
+        class MyObj(AgenticObjectBase):
+            def __init__(self):
+                self.value = "test"
 
-        prompt = _generate_system_prompt(Greeter(), None)
-        assert "greeter" in prompt.lower() or "Greeter" in prompt
+            @tool()
+            def get_value(self) -> str:
+                """Get the value."""
+                return self.value
 
-    def test_includes_code_execution_capability(self):
-        @agentic_object(allow_code_execution=True)
-        class CodeObj(AgenticObjectBase):
-            pass
-
-        prompt = _generate_system_prompt(CodeObj(), None)
-        assert "code execution" in prompt.lower()
-
-    def test_includes_sub_agent_capability(self):
-        @agentic_object(invoke_sub_agents=True)
-        class ParentObj(AgenticObjectBase):
-            pass
-
-        prompt = _generate_system_prompt(ParentObj(), None)
-        assert "sub-agent" in prompt.lower() or "sub agent" in prompt.lower()
+        tools = _discover_bound_tools(MyObj())
+        assert len(tools) == 1
+        # Tool function should be bound to the instance
+        result = tools[0].func()
+        assert result == "test"
 
 
-class TestDetectTaskFailure:
-    def test_detects_error_prefix(self):
-        assert _detect_task_failure("Error: something failed") is True
+class TestExtractMethodParams:
+    def test_extracts_string_param(self):
+        def greet(name: str) -> str:
+            return f"Hello, {name}"
 
-    def test_detects_i_cannot(self):
-        assert _detect_task_failure("I cannot process this request") is True
+        params = _extract_method_params(greet)
+        assert params["name"]["type"] == "str"
+        assert params["name"]["required"] is True
 
-    def test_detects_unable_to(self):
-        assert _detect_task_failure("Unable to complete the task") is True
+    def test_extracts_optional_param(self):
+        def greet(name: str = "World") -> str:
+            return f"Hello, {name}"
 
-    def test_no_failure_on_normal_response(self):
-        assert _detect_task_failure("The answer is 42") is False
+        params = _extract_method_params(greet)
+        assert params["name"]["type"] == "str"
+        assert params["name"]["required"] is False
+        assert params["name"]["default"] == "World"
 
-    def test_no_failure_on_json(self):
-        assert _detect_task_failure('{"result": "success"}') is False
+    def test_extracts_multiple_params(self):
+        def add(a: int, b: float) -> float:
+            return a + b
+
+        params = _extract_method_params(add)
+        assert params["a"]["type"] == "int"
+        assert params["b"]["type"] == "float"
+
+    def test_skips_self(self):
+        class MyObj(AgenticObjectBase):
+            @tool()
+            def method(self, x: int) -> int:
+                return x
+
+        params = _extract_method_params(MyObj().method)
+        assert "self" not in params
+        assert "x" in params
