@@ -16,7 +16,7 @@ from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 
 from peteos.agent import Agent
-from peteos.chatbot.manager import ChatBotManager
+from peteos.chatbot import ChatBotManager
 from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -82,15 +82,15 @@ class TestAgentE2E(AioHTTPTestCase):
             Role(name="test", description="Test", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
         )
 
         tool_manager = ToolManager()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         try:
             # Create session (now async, auto-starts session event loop)
@@ -133,15 +133,15 @@ class TestAgentE2E(AioHTTPTestCase):
             Role(name="test", description="Test", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
         )
 
         tool_manager = ToolManager()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         try:
             session = await agent.create_session("test")
@@ -180,8 +180,8 @@ class TestAgentE2E(AioHTTPTestCase):
             Role(name="test", description="Test", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
         )
@@ -194,7 +194,7 @@ class TestAgentE2E(AioHTTPTestCase):
 
         tool_manager.register_tool(func=get_weather)
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         try:
             session = await agent.create_session("test")
@@ -221,8 +221,8 @@ class TestAgentE2E(AioHTTPTestCase):
             Role(name="test", description="Test", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
         )
@@ -235,7 +235,7 @@ class TestAgentE2E(AioHTTPTestCase):
 
         tool_manager.register_tool(func=get_weather)
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         try:
             session = await agent.create_session("test")

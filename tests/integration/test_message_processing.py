@@ -10,7 +10,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer, TestClient
 
 from peteos.agent import Agent
-from peteos.chatbot.manager import ChatBotManager
+from peteos.chatbot import ChatBotManager
 from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -77,13 +77,13 @@ async def test_message_processed_during_execution_env_run():
             Role(name="test", description="Test role", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock", f"http://{server.host}:{server.port}"
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         session = await agent.create_session("test")
 
@@ -120,13 +120,13 @@ async def test_multiple_messages_processed_in_sequence():
             Role(name="test", description="Test role", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock", f"http://{server.host}:{server.port}"
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         session = await agent.create_session("test")
 
@@ -166,13 +166,13 @@ async def test_messages_not_lost_when_queue_polling():
             Role(name="test", description="Test role", model="test-model")
         )
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock", f"http://{server.host}:{server.port}"
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         session = await agent.create_session("test")
 

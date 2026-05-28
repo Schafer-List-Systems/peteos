@@ -11,6 +11,15 @@ from peteos.agent import Agent
 from peteos.channels import InteractiveShellChannel
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
+from peteos.chatbot import ChatBotManager
+
+
+@pytest.fixture(autouse=True)
+def _setup_mock_chatbot():
+    """Set up a mock ChatBot in the class-level ChatBotManager for tests."""
+    ChatBotManager._backends = {"test-backend": MagicMock(models={"test_model": MagicMock()})}
+    yield
+    ChatBotManager._backends.clear()
 
 
 def _cleanup_channels():
@@ -34,10 +43,9 @@ class TestShellChannelInit:
     async def test_shell_channel_creation(self):
         """Test creating a shell channel."""
         role_manager = RoleManager()
-        chatbot_manager = MagicMock()
         tool_manager = MagicMock()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
         shell_channel = InteractiveShellChannel("shell", agent)
 
         assert shell_channel.name == "shell"
@@ -50,10 +58,9 @@ class TestShellChannelInit:
     def test_shell_channel_registered_with_agent(self):
         """Test shell channel is registered with agent."""
         role_manager = RoleManager()
-        chatbot_manager = MagicMock()
         tool_manager = MagicMock()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
         channel = InteractiveShellChannel("shell", agent)
 
         assert agent.get_channel("shell") == channel
@@ -70,10 +77,9 @@ class TestShellChannelCommands:
         self.role_manager.register_role(Role(name="test", description="Test role"))
         self.role_manager.register_role(Role(name="assistant", description="Assistant role"))
 
-        self.chatbot_manager = MagicMock()
         self.tool_manager = MagicMock()
 
-        self.agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
+        self.agent = Agent(self.role_manager, self.tool_manager)
 
     def teardown_method(self):
         """Clean up."""
@@ -215,9 +221,8 @@ class TestShellChannelRun:
 
         self.role_manager = RoleManager()
         self.role_manager.register_role(Role(name="test", description="Test"))
-        self.chatbot_manager = MagicMock()
         self.tool_manager = MagicMock()
-        self.agent = Agent(self.role_manager, self.chatbot_manager, self.tool_manager)
+        self.agent = Agent(self.role_manager, self.tool_manager)
 
     def teardown_method(self):
         """Clean up."""

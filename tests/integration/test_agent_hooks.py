@@ -24,10 +24,9 @@ class TestAgentHooksMessageFormat:
                     auto_approve_tools=["safe_tool"])
         role_manager = RoleManager()
         role_manager.register_role(role)
-        chatbot_manager = MagicMock()
         tool_manager = ToolManager()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         session = await agent.create_session("test")
 
@@ -52,10 +51,9 @@ class TestAgentHooksMessageFormat:
         role_manager.register_role(
             Role(name="test", description="Test role", model="test-model")
         )
-        chatbot_manager = MagicMock()
         tool_manager = ToolManager()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         session = await agent.create_session("test")
 
@@ -76,10 +74,9 @@ class TestAgentHooksMessageFormat:
         role_manager.register_role(
             Role(name="test", description="Test role", model="test-model")
         )
-        chatbot_manager = MagicMock()
         tool_manager = ToolManager()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         session = await agent.create_session("test")
 
@@ -100,10 +97,9 @@ class TestAgentHooksMessageFormat:
         role_manager.register_role(
             Role(name="test", description="Test role", model="test-model")
         )
-        chatbot_manager = MagicMock()
         tool_manager = ToolManager()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role_manager, tool_manager)
 
         session = await agent.create_session("test")
 

@@ -46,7 +46,6 @@ def clean_registry():
 def agent():
     role_manager = RoleManager()
     role_manager.register_role(Role(name="test", description="Test"))
-    chatbot_manager = MagicMock()
     tool_manager = MagicMock()
     agent_mock = MagicMock(
         role_manager=role_manager,

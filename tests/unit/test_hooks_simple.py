@@ -1,10 +1,8 @@
 """Simple unit tests for ExecutionEnvironment hooks."""
 
-import asyncio
-
 import pytest
 
-from peteos.chatbot import ChatHistory, Message, ContentPart
+from peteos.chatbot import ChatHistory, ChatBotManager
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
@@ -19,18 +17,24 @@ def mock_session():
 
 
 @pytest.fixture
-def mock_role():
-    """Create a mock Role."""
-    return Role(name="test", description="Test role")
+def mock_chatbot():
+    """Create a mock ChatBot."""
+    return MagicMock()
+
+
+@pytest.fixture(autouse=True)
+def _setup_mock_chatbot():
+    """Set up a mock ChatBot in the class-level ChatBotManager for tests."""
+    mock = MagicMock()
+    ChatBotManager._backends = {"test-backend": MagicMock(models={"test_model": mock})}
+    yield
+    ChatBotManager._backends.clear()
 
 
 @pytest.fixture
-def mock_chatbot_manager():
-    """Create a mock ChatBotManager."""
-    manager = MagicMock()
-    mock_chatbot = MagicMock()
-    manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
-    return manager
+def mock_role():
+    """Create a mock Role."""
+    return Role(name="test", description="Test role")
 
 
 @pytest.fixture
@@ -42,17 +46,15 @@ def mock_chatbot():
 class TestHookRegistration:
     """Test hook registration and deregistration."""
 
-    def test_register_hook_valid_point(self, mock_role, mock_chatbot_manager, mock_chatbot, mock_session):
+    def test_register_hook_valid_point(self, mock_role, mock_session):
         """Test registering a hook for a valid hook point."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
-
         def test_hook():
             pass
 
-        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
         env.register_hook("before_tool_execution", test_hook)
 
         # Check that the hook is registered
@@ -60,43 +62,37 @@ class TestHookRegistration:
         assert len(hooks) == 1
         assert hooks[0].func == test_hook
 
-    def test_register_hook_invalid_point(self, mock_role, mock_chatbot_manager, mock_chatbot, mock_session):
+    def test_register_hook_invalid_point(self, mock_role, mock_session):
         """Test registering a hook for an invalid hook point raises ValueError."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
-
         def test_hook():
             pass
 
-        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
 
         with pytest.raises(ValueError, match="Unknown hook point"):
             env.register_hook("invalid_hook", test_hook)
 
-    def test_deregister_hook_valid(self, mock_role, mock_chatbot_manager, mock_chatbot, mock_session):
+    def test_deregister_hook_valid(self, mock_role, mock_session):
         """Test deregistering a valid hook."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
-
         def test_hook():
             pass
 
-        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
         env.register_hook("before_tool_execution", test_hook)
         env.deregister_hook("before_tool_execution", test_hook)
 
         assert test_hook not in env._hooks["before_tool_execution"]
 
-    def test_deregister_all_hooks(self, mock_role, mock_chatbot_manager, mock_chatbot, mock_session):
+    def test_deregister_all_hooks(self, mock_role, mock_session):
         """Test deregistering all hooks for a point."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
-
-        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
         def hook1():
             pass
@@ -104,21 +100,19 @@ class TestHookRegistration:
         def hook2():
             pass
 
-        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
         env.register_hook("before_tool_execution", hook1)
         env.register_hook("before_tool_execution", hook2)
         env.deregister_all_hooks("before_tool_execution")
 
         assert len(env._hooks["before_tool_execution"]) == 0
 
-    def test_all_hook_points_exist(self, mock_role, mock_chatbot_manager, mock_chatbot, mock_session):
+    def test_all_hook_points_exist(self, mock_role, mock_session):
         """Test that all current hook points are registered."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
-
-        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
 
         assert "before_tool_execution" in env._hooks
         assert "after_tool_execution" in env._hooks
@@ -130,19 +124,17 @@ class TestHookCalling:
     """Test hook calling directly."""
 
     @pytest.mark.asyncio
-    async def test_sync_hook_is_called(self, mock_role, mock_chatbot_manager, mock_chatbot, mock_session):
+    async def test_sync_hook_is_called(self, mock_role, mock_session):
         """Test that a sync hook is called when _call_hooks is invoked."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
-
-        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
         hook_called = [False]
 
         def test_hook(data):
             hook_called[0] = True
 
-        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
         env.register_hook("before_tool_execution", test_hook)
 
         # Manually call hooks
@@ -151,14 +143,12 @@ class TestHookCalling:
         assert hook_called[0]
 
     @pytest.mark.asyncio
-    async def test_hook_return_value_is_used(self, mock_role, mock_chatbot_manager, mock_chatbot, mock_session):
+    async def test_hook_return_value_is_used(self, mock_role, mock_session):
         """Test that return value from sync hook is returned."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
-        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
-
-        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
 
         def blocking_hook(data):
             return (False, "Blocked!")
@@ -170,12 +160,10 @@ class TestHookCalling:
         assert result == (False, "Blocked!")
 
     @pytest.mark.asyncio
-    async def test_multiple_hooks_only_first_result_used(self, mock_role, mock_chatbot_manager, mock_chatbot, mock_session):
+    async def test_multiple_hooks_only_first_result_used(self, mock_role, mock_session):
         """Test that first hook returning a value stops hook chain."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
-
-        mock_chatbot_manager.list_chatbots.return_value = [("mock_model", mock_chatbot)]
 
         call_order = []
 
@@ -187,7 +175,7 @@ class TestHookCalling:
             call_order.append(2)
             return (True, "Second")
 
-        env = REPLExecutionEnvironment(mock_chatbot_manager, chat_history, tool_manager, mock_role)
+        env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
         env.register_hook("before_tool_execution", hook1)
         env.register_hook("before_tool_execution", hook2)
 
