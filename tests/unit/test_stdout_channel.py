@@ -11,6 +11,15 @@ from peteos.agent import Agent
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
+from peteos.chatbot import ChatBotManager
+
+
+@pytest.fixture(autouse=True)
+def _setup_mock_chatbot():
+    """Set up a mock ChatBot in the class-level ChatBotManager for tests."""
+    ChatBotManager._backends = {"test-backend": MagicMock(models={"test_model": MagicMock()})}
+    yield
+    ChatBotManager._backends.clear()
 
 
 def _cleanup_channels():
@@ -22,7 +31,7 @@ def _make_agent():
     _cleanup_channels()
     rm = RoleManager()
     rm.register_role(Role(name="test", description="Test role"))
-    return Agent(rm, MagicMock(), ToolManager())
+    return Agent(rm, ToolManager())
 
 
 class TestReadStdoutChannelInit:

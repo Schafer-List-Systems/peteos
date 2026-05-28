@@ -4,7 +4,7 @@ import asyncio
 import inspect
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
-from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart
+from peteos.chatbot import ChatHistory, Message, ContentPart
 from peteos.executionenvironment import ExecutionEnvironment, ExecStatus
 from peteos.logger import get_logger
 from peteos.role import Role
@@ -83,13 +83,11 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
     def __init__(
         self,
-        chatbot_manager: ChatBotManager,
         chat_history: ChatHistory,
         tool_manager: ToolManager,
         role: Role,
     ):
         super().__init__(
-            chatbot_manager=chatbot_manager,
             chat_history=chat_history,
             tool_manager=tool_manager,
             role=role,

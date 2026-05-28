@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from peteos.channels.channel import Channel
 
 from peteos.activeclass import ActiveClass
-from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
+from peteos.chatbot import ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
 from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -217,7 +217,6 @@ class Session(ActiveClass):
         self,
         role: Role,
         tool_manager: ToolManager,
-        chatbot_manager: ChatBotManager,
         chat_history: Optional[ChatHistory] = None,
         session_uuid: Optional[uuid.UUID] = None,
         execution_environment: Optional[REPLExecutionEnvironment] = None
@@ -235,12 +234,10 @@ class Session(ActiveClass):
             if "yield_back" not in role.tool_filter:
                 role.tool_filter.append("yield_back")
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
-        self.chatbot_manager = chatbot_manager
         self._channels: Set[Channel] = set()
         self._state = AgenticState()
 
         self.execution_environment = execution_environment if execution_environment is not None else REPLExecutionEnvironment(
-            chatbot_manager=chatbot_manager,
             chat_history=self.chat_history,
             tool_manager=tool_manager,
             role=role,
@@ -497,7 +494,6 @@ class Session(ActiveClass):
     @staticmethod
     def load_from_json(
         json_data: dict,
-        chatbot_manager: ChatBotManager,
         role_manager: RoleManager,
         tool_manager: ToolManager
     ) -> "Session":
@@ -522,7 +518,6 @@ class Session(ActiveClass):
         return Session(
             role=role,
             tool_manager=tool_manager,
-            chatbot_manager=chatbot_manager,
             chat_history=chat_history,
             session_uuid=session_uuid,
         )
@@ -530,7 +525,6 @@ class Session(ActiveClass):
     @staticmethod
     def load_from_file(
         file_path: str,
-        chatbot_manager: ChatBotManager,
         role_manager: RoleManager,
         tool_manager: ToolManager
     ) -> "Session":
@@ -538,7 +532,6 @@ class Session(ActiveClass):
             json_data = json.load(f)
         return Session.load_from_json(
             json_data,
-            chatbot_manager,
             role_manager,
             tool_manager,
         )
@@ -570,8 +563,8 @@ async def invoke_agent(
     Args:
         role_name: Name of the role to invoke.
         prompt: The user message / prompt to send to the agent.
-        agent: Optional Agent with registered role_manager, chatbot_manager,
-               and tool_manager. If provided, creates a new session via
+        agent: Optional Agent with registered role_manager and tool_manager.
+               If provided, creates a new session via
                agent.create_session() with full hook support.
         existing_session: Optional pre-existing Session to reuse for
             continuation. Must already be started.

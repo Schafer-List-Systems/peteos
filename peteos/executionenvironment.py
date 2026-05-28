@@ -25,21 +25,19 @@ class ExecutionEnvironment(ABC):
 
     def __init__(
         self,
-        chatbot_manager: ChatBotManager,
         chat_history: ChatHistory,
         tool_manager: ToolManager,
-        role: Role
+        role: Role,
     ):
         """
         Initialize ExecutionEnvironment.
 
         Args:
-            chatbot_manager: The ChatBotManager instance to use.
             chat_history: The ChatHistory instance to use.
             tool_manager: The ToolManager instance to use.
             role: The Role instance to use (for model selection).
         """
-        self._chatbot: ChatBot = ExecutionEnvironment._select_chatbot(chatbot_manager, role)
+        self._chatbot: ChatBot = ExecutionEnvironment._select_chatbot(role)
         self._interrupt = False
         self._completion_signal: asyncio.Event = asyncio.Event()
         self._completion_signal.set()  # Start as signaled (not running)
@@ -58,9 +56,9 @@ class ExecutionEnvironment(ABC):
         return self._chatbot
 
     @staticmethod
-    def _select_chatbot(chatbot_manager: ChatBotManager, role: Role) -> ChatBot:
-        """Select a ChatBot from the manager based on role.model."""
-        chatbots = chatbot_manager.list_chatbots(role.model)
+    def _select_chatbot(role: Role) -> ChatBot:
+        """Select a ChatBot from the class-level manager based on role.model."""
+        chatbots = ChatBotManager.list_chatbots(role.model)
         if not chatbots:
             raise ValueError(
                 f"No ChatBot found matching model pattern '{role.model}' "

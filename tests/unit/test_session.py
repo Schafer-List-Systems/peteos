@@ -13,24 +13,27 @@ from peteos.rolemanager import RoleManager
 from peteos.session import Session
 from peteos.toolmanager import ToolManager, Tool
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
+from peteos.chatbot import ChatBotManager
+
+
+@pytest.fixture(autouse=True)
+def _setup_mock_chatbot():
+    """Set up a mock ChatBot in the class-level ChatBotManager for tests."""
+    ChatBotManager._backends = {"test-backend": MagicMock(models={"test_model": MagicMock()})}
+    yield
+    ChatBotManager._backends.clear()
 
 
 def test_session_init():
     """Test Session initialization."""
-    chatbot_manager = MagicMock()
     tool_manager = ToolManager()
     role = Role(name="test", description="A test role")
 
-    session = Session(
-        role=role,
-        tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager
-    )
+    session = Session(role=role, tool_manager=tool_manager)
 
     assert session.uuid is not None
     assert session.role == role
     assert session.chat_history is not None
-    assert session.chatbot_manager == chatbot_manager
     assert isinstance(session.execution_environment, REPLExecutionEnvironment)
     assert session.event_queue is not None
     assert session._event_trigger is not None
@@ -39,7 +42,6 @@ def test_session_init():
 def test_session_init_with_custom_uuid():
     """Test Session initialization with custom UUID."""
     import uuid
-    chatbot_manager = MagicMock()
     tool_manager = ToolManager()
     role = Role(name="test", description="A test role")
     custom_uuid = uuid.uuid4()
@@ -47,7 +49,6 @@ def test_session_init_with_custom_uuid():
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         session_uuid=custom_uuid
     )
 
@@ -56,7 +57,6 @@ def test_session_init_with_custom_uuid():
 
 def test_session_init_with_custom_chat_history():
     """Test Session initialization with custom ChatHistory."""
-    chatbot_manager = MagicMock()
     tool_manager = ToolManager()
     role = Role(name="test", description="A test role")
     chat_history = ChatHistory()
@@ -65,7 +65,6 @@ def test_session_init_with_custom_chat_history():
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history
     )
 
@@ -75,7 +74,6 @@ def test_session_init_with_custom_chat_history():
 
 def test_session_load_from_json():
     """Test loading Session from JSON dict."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -115,7 +113,6 @@ def test_session_load_from_json():
 
     session = Session.load_from_json(
         session_data,
-        chatbot_manager,
         role_manager,
         tool_manager
     )
@@ -129,7 +126,6 @@ def test_session_load_from_json():
 
 def test_session_load_from_json_without_uuid():
     """Test loading Session from JSON without UUID."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -143,7 +139,6 @@ def test_session_load_from_json_without_uuid():
 
     session = Session.load_from_json(
         session_data,
-        chatbot_manager,
         role_manager,
         tool_manager
     )
@@ -153,7 +148,6 @@ def test_session_load_from_json_without_uuid():
 
 def test_session_load_from_json_missing_role():
     """Test loading Session fails when role not found."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -166,7 +160,6 @@ def test_session_load_from_json_missing_role():
     with pytest.raises(ValueError, match="not found in RoleManager"):
         Session.load_from_json(
             session_data,
-            chatbot_manager,
             role_manager,
             tool_manager
         )
@@ -174,7 +167,6 @@ def test_session_load_from_json_missing_role():
 
 def test_session_load_from_json_missing_required_tool():
     """Test loading Session fails when required tool is missing."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -194,7 +186,6 @@ def test_session_load_from_json_missing_required_tool():
     with pytest.raises(ValueError, match="requires tool"):
         Session.load_from_json(
             session_data,
-            chatbot_manager,
             role_manager,
             tool_manager
         )
@@ -202,7 +193,6 @@ def test_session_load_from_json_missing_required_tool():
 
 def test_session_load_from_json_without_chat_history():
     """Test loading Session without chat_history in JSON."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -216,7 +206,6 @@ def test_session_load_from_json_without_chat_history():
 
     session = Session.load_from_json(
         session_data,
-        chatbot_manager,
         role_manager,
         tool_manager
     )
@@ -227,7 +216,6 @@ def test_session_load_from_json_without_chat_history():
 
 def test_session_load_from_file():
     """Test loading Session from JSON file."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -262,7 +250,6 @@ def test_session_load_from_file():
 
         session = Session.load_from_file(
             str(session_file),
-            chatbot_manager,
             role_manager,
             tool_manager
         )
@@ -275,7 +262,6 @@ def test_session_load_from_file():
 
 def test_session_load_from_file_without_timestamps():
     """Test loading Session from file without timestamps."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -303,7 +289,6 @@ def test_session_load_from_file_without_timestamps():
 
         session = Session.load_from_file(
             str(session_file),
-            chatbot_manager,
             role_manager,
             tool_manager
         )
@@ -315,7 +300,6 @@ def test_session_load_from_file_without_timestamps():
 
 def test_session_load_from_file_no_uuid():
     """Test loading Session from file without UUID."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -333,7 +317,6 @@ def test_session_load_from_file_no_uuid():
 
         session = Session.load_from_file(
             str(session_file),
-            chatbot_manager,
             role_manager,
             tool_manager
         )
@@ -343,7 +326,6 @@ def test_session_load_from_file_no_uuid():
 
 def test_session_load_from_json_empty_chat_history():
     """Test loading Session with empty chat_history list."""
-    chatbot_manager = MagicMock()
     role_manager = RoleManager()
     tool_manager = ToolManager()
 
@@ -358,7 +340,6 @@ def test_session_load_from_json_empty_chat_history():
 
     session = Session.load_from_json(
         session_data,
-        chatbot_manager,
         role_manager,
         tool_manager
     )

@@ -8,8 +8,8 @@ with an Agent using the queue-based architecture.
 Usage:
     PYTHONPATH=/home/frygge/projects/private/peteos python examples/shell_example.py
 
-Configure the ChatBotManager in setup_components() by adding your backend(s):
-    await chatbot_manager.add_backend("name", "http://your-backend:port")
+Configure the ChatBotManager by adding your backend(s):
+    await ChatBotManager.add_backend("name", "http://your-backend:port")
 """
 
 from peteos.agent import Agent
@@ -27,25 +27,16 @@ async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json")
     Args:
         config_file: Path to JSON configuration file with backend definitions.
 
-    Returns:
-        Configured ChatBotManager with all backends loaded.
-
     Raises:
         FileNotFoundError: If configuration file doesn't exist.
         RuntimeError: If backend connection fails.
     """
-    chatbot_manager = ChatBotManager()
-
+    ChatBotManager.reset()
     try:
-        await chatbot_manager.load_from_file(config_file)
+        await ChatBotManager.load_from_file(config_file)
         print(f"Loaded backend configuration from {config_file}")
     except FileNotFoundError:
         print(f"Note: Config file {config_file} not found. Starting without backends.")
-    except RuntimeError as e:
-        print(f"Error: Backend connection failed: {e}")
-        raise
-
-    return chatbot_manager
 
 
 def setup_role_manager():
@@ -149,11 +140,11 @@ async def main():
 
     # Setup components
     role_manager = setup_role_manager()
-    chatbot_manager = await setup_chatbot_manager()
+    await setup_chatbot_manager()
     tool_manager = setup_tool_manager()
 
     # Create the Agent
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    agent = Agent(role_manager, tool_manager)
 
     # Create the shell channel
     shell = InteractiveShellChannel("shell", agent)

@@ -9,7 +9,6 @@ from peteos.chatbot import Message, ChatHistory, ContentPart
 from peteos.chatbot.chatbotresponse import ChatBotResponse
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
-from peteos.chatbot import ChatBotManager
 from peteos.executionenvironment import ExecStatus
 
 
@@ -117,13 +116,10 @@ async def test_queue_message_adds_to_queue():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager(timeout=5.0)
-
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history,
         execution_environment=env,
     )
@@ -147,13 +143,10 @@ async def test_queue_message_non_running():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager(timeout=5.0)
-
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history,
         execution_environment=env,
     )
@@ -173,13 +166,10 @@ async def test_queue_message_drains_all_to_history():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager(timeout=5.0)
-
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history,
         execution_environment=env,
     )
@@ -201,13 +191,10 @@ async def test_queue_message_preserves_order():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager(timeout=5.0)
-
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history,
         execution_environment=env,
     )
@@ -229,13 +216,10 @@ async def test_push_event_non_blocking():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager(timeout=5.0)
-
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history,
         execution_environment=env,
     )
@@ -255,13 +239,10 @@ async def test_concurrent_push_no_race_condition():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager(timeout=5.0)
-
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history,
         execution_environment=env,
     )
@@ -281,7 +262,6 @@ async def test_concurrent_push_no_race_condition():
 @pytest.mark.asyncio
 async def test_session_start_stop_lifecycle():
     """Test that session start/stop works correctly."""
-    chatbot_manager = ChatBotManager(timeout=5.0)
     tool_manager = ToolManager()
     chat_history = ChatHistory()
 
@@ -291,7 +271,6 @@ async def test_session_start_stop_lifecycle():
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history,
         execution_environment=env,
     )
@@ -314,13 +293,10 @@ async def test_approval_event_handling():
     chat_history = ChatHistory()
     role = Role(name="test", description="Test role")
     tool_manager = ToolManager()
-    chatbot_manager = ChatBotManager(timeout=5.0)
-
     env = MockExecutionEnvironment(simulate_running=False)
     session = Session(
         role=role,
         tool_manager=tool_manager,
-        chatbot_manager=chatbot_manager,
         chat_history=chat_history,
         execution_environment=env,
     )

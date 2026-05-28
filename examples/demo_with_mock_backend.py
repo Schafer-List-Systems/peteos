@@ -79,8 +79,8 @@ async def setup_components():
     role_manager.register_role(Role(name="demo", description="Demo role", model="demo-model"))
 
     # Setup chatbot manager with mock backend
-    chatbot_manager = ChatBotManager()
-    await chatbot_manager.add_backend("mock", "http://localhost:18888")
+    ChatBotManager.reset()
+    await ChatBotManager.add_backend("mock", "http://localhost:18888")
 
     # Setup tool manager with example tools
     tool_manager = ToolManager()
@@ -103,7 +103,7 @@ async def setup_components():
     tool_manager.register_tool(func=get_weather)
     tool_manager.register_tool(func=calculate)
 
-    return runner, role_manager, chatbot_manager, tool_manager
+    return runner, role_manager, tool_manager
 
 
 async def main():
@@ -117,12 +117,12 @@ async def main():
     print()
 
     # Setup components
-    runner, role_manager, chatbot_manager, tool_manager = await setup_components()
+    runner, role_manager, tool_manager = await setup_components()
     print("Components ready!")
     print()
 
     # Create the Agent
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    agent = Agent(role_manager, tool_manager)
     await agent.start()
     print("Agent started")
     print()

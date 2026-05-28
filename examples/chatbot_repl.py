@@ -50,12 +50,12 @@ async def main():
         Role(name="test", description="Test role", model=model)
     )
 
-    # Create chatbot manager
-    chatbot_manager = ChatBotManager()
-    await chatbot_manager.add_backend(chat_protocol, base_url)
+    # Setup ChatBotManager with backend
+    ChatBotManager.reset()
+    await ChatBotManager.add_backend(chat_protocol, base_url)
 
     tool_manager = ToolManager()
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    agent = Agent(role_manager, tool_manager)
 
     session = await agent.create_session("test")
 

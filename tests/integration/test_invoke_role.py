@@ -10,7 +10,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from peteos.agent import Agent
-from peteos.chatbot.manager import ChatBotManager
+from peteos.chatbot import ChatBotManager
 from peteos.chatbot import Message, ContentPart, ChatHistory
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -83,14 +83,14 @@ async def mock_agent(mock_server):
         Role(name="test", description="Test", model="test-model")
     )
 
-    chatbot_manager = ChatBotManager(timeout=None)
-    await chatbot_manager.add_backend(
+    ChatBotManager.reset()
+    await ChatBotManager.add_backend(
         "mock",
         f"http://{mock_server.host}:{mock_server.port}"
     )
 
     tool_manager = ToolManager()
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    agent = Agent(role_manager, tool_manager)
     return agent
 
 
@@ -168,20 +168,21 @@ class TestInvokeRole:
         async def noop_models(*args, **kwargs):
             return ["test-model"]
 
-        # Create a mock agent with a broken backend
-        chatbot_manager = ChatBotManager(timeout=1.0)
+        # Create a mock agent with a broken backend using class-level ChatBotManager
+        ChatBotManager.reset()
+        ChatBotManager._timeout = 1.0
         with patch.object(
-            chatbot_manager,
+            ChatBotManager,
             "_list_models_for_api_type",
             noop_models,
         ):
-            await chatbot_manager.add_backend(
+            await ChatBotManager.add_backend(
                 "mock",
                 "http://localhost:19999",  # No server listening
                 api_type="openai",
             )
 
-        agent = Agent(mock_agent._role_manager, chatbot_manager, mock_agent._tool_manager)
+        agent = Agent(mock_agent._role_manager, mock_agent._tool_manager)
 
         try:
             with pytest.raises(asyncio.TimeoutError):
@@ -208,7 +209,6 @@ class TestInvokeRole:
         role_manager.register_role(
             Role(name="test", description="Test", model="test-model")
         )
-        chatbot_manager = ChatBotManager(timeout=None)
         role = role_manager.get_role("test")
         tool_manager = ToolManager()
         mock_env = MagicMock()
@@ -218,7 +218,6 @@ class TestInvokeRole:
         session = Session(
             role=role,
             tool_manager=tool_manager,
-            chatbot_manager=chatbot_manager,
             execution_environment=mock_env,
         )
         # Session must be started to be "running"

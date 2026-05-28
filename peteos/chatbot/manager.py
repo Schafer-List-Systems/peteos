@@ -24,23 +24,36 @@ class BackendInfo:
 class ChatBotManager:
     """Manager for multiple LLM backend providers.
 
-    Manages backends, detects their supported APIs, discovers models,
-    and provides filtered access to ChatBot instances.
+    Uses class-level state so backends are globally accessible without
+    passing an instance around.
     """
 
-    def __init__(self, timeout: Optional[float] = 300.0):
-        """Initialize empty manager.
+    # Class-level state
+    _backends: Dict[str, BackendInfo] = {}
+    _clients: Dict[str, HTTPClient] = {}
+    _timeout: Optional[float] = None
+
+    def __init__(self, timeout: Optional[float] = None) -> None:
+        """Update the default timeout for backward compatibility.
 
         Args:
             timeout: HTTP request timeout in seconds. Pass None for no timeout.
-                Must be provided explicitly from user configuration — no defaults.
         """
-        self._backends: Dict[str, BackendInfo] = {}
-        self._clients: Dict[str, HTTPClient] = {}
-        self._timeout = timeout
+        if timeout is not None:
+            ChatBotManager._timeout = timeout
 
+    @classmethod
+    def reset(cls) -> None:
+        """Clear all backends and clients.
+
+        Use in tests or when reloading configuration.
+        """
+        cls._backends.clear()
+        cls._clients.clear()
+
+    @classmethod
     async def add_backend(
-        self,
+        cls,
         name: str,
         url: str,
         api_type: Optional[str] = None,
@@ -54,7 +67,6 @@ class ChatBotManager:
             api_type: Optional API type override ("openai" or "anthropic").
                      If not provided, API type is auto-detected.
             **kwargs: Configuration options (streaming, max_tokens, etc.).
-                     Defaults are applied by BackendConfig.from_dict.
 
         Returns:
             BackendInfo with detected API type and discovered models.
@@ -63,7 +75,7 @@ class ChatBotManager:
             ValueError: If backend with same name already exists.
             RuntimeError: If API detection fails.
         """
-        if name in self._backends:
+        if name in cls._backends:
             raise ValueError(f"Backend '{name}' already exists")
 
         if api_type is not None and api_type not in ("openai", "anthropic"):
@@ -75,13 +87,13 @@ class ChatBotManager:
             **{"api_type": api_type},
             **kwargs,
         })
-        self._clients[name] = HTTPClient(
-            timeout=self._timeout,
+        cls._clients[name] = HTTPClient(
+            timeout=cls._timeout,
             retry_delays=config.retry_delays,
         )
 
         # Add placeholder before detection so _detect methods can look up url
-        self._backends[name] = BackendInfo(
+        cls._backends[name] = BackendInfo(
             name=config.name,
             url=config.url,
             api_type=config.api_type,
@@ -90,21 +102,22 @@ class ChatBotManager:
 
         # Auto-detect api_type if not provided
         if config.api_type is None:
-            config.api_type, models = await self._detect_api_and_list_models(name)
+            config.api_type, models = await cls._detect_api_and_list_models(name)
         else:
-            models = await self._list_models_for_api_type(name, config.api_type)
+            models = await cls._list_models_for_api_type(name, config.api_type)
 
         # Create ChatBot instances
         chatbots: Dict[str, Any] = {}
         for model_id in models:
-            chatbot = self._create_chatbot(config, model_id)
+            chatbot = cls._create_chatbot(config, model_id)
             chatbots[model_id] = chatbot
 
-        self._backends[name].api_type = config.api_type
-        self._backends[name].models = chatbots
-        return self._backends[name]
+        cls._backends[name].api_type = config.api_type
+        cls._backends[name].models = chatbots
+        return cls._backends[name]
 
-    def remove_backend(self, name: str) -> bool:
+    @classmethod
+    def remove_backend(cls, name: str) -> bool:
         """Remove a backend and all its ChatBot instances.
 
         Args:
@@ -113,13 +126,14 @@ class ChatBotManager:
         Returns:
             True if backend was removed, False if not found.
         """
-        if name in self._backends:
-            del self._backends[name]
-            del self._clients[name]
+        if name in cls._backends:
+            del cls._backends[name]
+            del cls._clients[name]
             return True
         return False
 
-    async def _detect_api_and_list_models(self, backend_name: str) -> Tuple[str, List[str]]:
+    @staticmethod
+    async def _detect_api_and_list_models(backend_name: str) -> Tuple[str, List[str]]:
         """Detect API type and list available models.
 
         Probes /v1/models endpoint and detects API based on response structure.
@@ -133,8 +147,8 @@ class ChatBotManager:
         Raises:
             RuntimeError: If API detection fails.
         """
-        models_url = f"{self._backends[backend_name].url}/v1/models"
-        client = self._clients[backend_name]
+        models_url = f"{ChatBotManager._backends[backend_name].url}/v1/models"
+        client = ChatBotManager._clients[backend_name]
 
         try:
             response = await client.get(models_url)
@@ -160,7 +174,8 @@ class ChatBotManager:
 
         return api_type, model_ids
 
-    async def _list_models_for_api_type(self, backend_name: str, api_type: str) -> List[str]:
+    @staticmethod
+    async def _list_models_for_api_type(backend_name: str, api_type: str) -> List[str]:
         """List models for a specific API type without auto-detection.
 
         Args:
@@ -173,8 +188,8 @@ class ChatBotManager:
         Raises:
             RuntimeError: If model listing fails.
         """
-        models_url = f"{self._backends[backend_name].url}/v1/models"
-        client = self._clients[backend_name]
+        models_url = f"{ChatBotManager._backends[backend_name].url}/v1/models"
+        client = ChatBotManager._clients[backend_name]
 
         try:
             response = await client.get(models_url)
@@ -196,7 +211,8 @@ class ChatBotManager:
 
         return model_ids
 
-    def _create_chatbot(self, config: BackendConfig, model_id: str) -> Any:
+    @staticmethod
+    def _create_chatbot(config: BackendConfig, model_id: str) -> Any:
         """Create appropriate ChatBot instance for model.
 
         Args:
@@ -210,7 +226,7 @@ class ChatBotManager:
             **vars(config),
             "model": model_id,
         })
-        client = self._clients[config.name]
+        client = ChatBotManager._clients[config.name]
         if config.api_type == "openai":
             return OpenAIChatBot(client, chatbot_config)
         elif config.api_type == "anthropic":
@@ -218,7 +234,8 @@ class ChatBotManager:
         else:
             raise ValueError(f"Unknown API type: {config.api_type}")
 
-    def list_chatbots(self, model_regex: str) -> List[Tuple[str, Any]]:
+    @classmethod
+    def list_chatbots(cls, model_regex: str) -> List[Tuple[str, Any]]:
         """List all ChatBot instances matching a regex pattern.
 
         Args:
@@ -230,14 +247,15 @@ class ChatBotManager:
         pattern = re.compile(model_regex)
         results = []
 
-        for backend in self._backends.values():
+        for backend in cls._backends.values():
             for model_id, chatbot in backend.models.items():
                 if pattern.search(model_id):
                     results.append((model_id, chatbot))
 
         return sorted(results, key=lambda x: x[0])
 
-    async def load_from_json(self, json_obj: dict) -> None:
+    @classmethod
+    async def load_from_json(cls, json_obj: dict) -> None:
         """Load backend configuration from JSON object.
 
         Clears current state and recreates all backends from the JSON.
@@ -257,11 +275,9 @@ class ChatBotManager:
 
         Args:
             json_obj: Dict with "backends" key containing list of backend configs.
-                     Each backend has "name" and "url", optionally "api_type" and
-                     other config options.
         """
-        self._backends.clear()
-        self._clients.clear()
+        cls._backends.clear()
+        cls._clients.clear()
 
         for backend_config in json_obj.get("backends", []):
             config = BackendConfig.from_dict(backend_config)
@@ -269,8 +285,8 @@ class ChatBotManager:
             if config.api_type is not None and config.api_type not in ("openai", "anthropic"):
                 raise ValueError(f"Invalid api_type in config: {config.api_type}")
 
-            self._clients[config.name] = HTTPClient(
-                timeout=self._timeout,
+            cls._clients[config.name] = HTTPClient(
+                timeout=cls._timeout,
                 retry_delays=config.retry_delays,
             )
             backend_info = BackendInfo(
@@ -279,23 +295,24 @@ class ChatBotManager:
                 api_type=config.api_type,
                 models={},
             )
-            self._backends[config.name] = backend_info
+            cls._backends[config.name] = backend_info
 
             if config.api_type is None:
-                config.api_type, models = await self._detect_api_and_list_models(config.name)
+                config.api_type, models = await cls._detect_api_and_list_models(config.name)
             else:
-                models = await self._list_models_for_api_type(config.name, config.api_type)
+                models = await cls._list_models_for_api_type(config.name, config.api_type)
 
             # Create ChatBot instances
             chatbots: Dict[str, Any] = {}
             for model_id in models:
-                chatbot = self._create_chatbot(config, model_id)
+                chatbot = cls._create_chatbot(config, model_id)
                 chatbots[model_id] = chatbot
 
-            self._backends[config.name].api_type = config.api_type
-            self._backends[config.name].models = chatbots
+            cls._backends[config.name].api_type = config.api_type
+            cls._backends[config.name].models = chatbots
 
-    async def load_from_file(self, filepath: str) -> None:
+    @classmethod
+    async def load_from_file(cls, filepath: str) -> None:
         """Load backend configuration from JSON file.
 
         Args:
@@ -303,4 +320,4 @@ class ChatBotManager:
         """
         with open(filepath, "r") as f:
             json_obj = json.load(f)
-        await self.load_from_json(json_obj)
+        await cls.load_from_json(json_obj)

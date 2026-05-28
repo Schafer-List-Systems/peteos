@@ -20,9 +20,8 @@ def agent():
     role_manager.register_role(
         Role(name="test", description="Test role", model=".*")
     )
-    chatbot_manager = MagicMock()
     tool_manager = ToolManager()
-    return Agent(role_manager, chatbot_manager, tool_manager)
+    return Agent(role_manager, tool_manager)
 
 
 @pytest.fixture
@@ -35,9 +34,8 @@ def agent_with_sessions():
     role_manager.register_role(
         Role(name="assistant", description="Assistant role", model=".*")
     )
-    chatbot_manager = MagicMock()
     tool_manager = ToolManager()
-    ag = Agent(role_manager, chatbot_manager, tool_manager)
+    ag = Agent(role_manager, tool_manager)
     yield ag
     # Cleanup: stop all sessions
     for session_uuid in list(ag._sessions.keys()):
@@ -61,9 +59,8 @@ def agent_with_auto_approve():
             auto_approve_tools=["web_fetch"]
         )
     )
-    chatbot_manager = MagicMock()
     tool_manager = ToolManager()
-    ag = Agent(role_manager, chatbot_manager, tool_manager)
+    ag = Agent(role_manager, tool_manager)
     yield ag
     for session_uuid in list(ag._sessions.keys()):
         session = ag.get_session(session_uuid)
