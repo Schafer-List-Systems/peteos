@@ -48,18 +48,16 @@ from apps.log_analyzer.tools import _state, register_filter_tools, register_stat
 
 async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
     """Setup ChatBotManager from configuration file."""
-    chatbot_manager = ChatBotManager(timeout=None)
-
+    ChatBotManager(timeout=None)  # Set timeout
+    ChatBotManager.reset()
     try:
-        await chatbot_manager.load_from_file(config_file)
+        await ChatBotManager.load_from_file(config_file)
         print(f"Loaded backend configuration from {config_file}")
     except FileNotFoundError:
         print(f"Note: Config file {config_file} not found. Starting without backends.")
     except RuntimeError as e:
         print(f"Error: Backend connection failed: {e}")
         raise
-
-    return chatbot_manager
 
 
 def setup_role_manager() -> RoleManager:
@@ -143,11 +141,11 @@ async def main():
 
     # Setup components
     role_manager = setup_role_manager()
-    chatbot_manager = await setup_chatbot_manager(args.chatbot_config)
+    await setup_chatbot_manager(args.chatbot_config)
     tm = ToolManager()
 
     # Create the Agent
-    agent = Agent(role_manager, chatbot_manager, tm)
+    agent = Agent(role_manager, tm)
     _state.agent = agent
 
     role_name = nextcloud_config.get("default_role", "router")

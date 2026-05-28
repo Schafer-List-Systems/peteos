@@ -41,26 +41,16 @@ from peteos.toolmanager import ToolManager
 
 
 async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json"):
-    """Setup ChatBotManager from configuration file.
-
-    Args:
-        config_file: Path to JSON configuration file with backend definitions.
-
-    Returns:
-        Configured ChatBotManager with all backends loaded.
-    """
-    chatbot_manager = ChatBotManager()
-
+    """Setup ChatBotManager from configuration file."""
+    ChatBotManager.reset()
     try:
-        await chatbot_manager.load_from_file(config_file)
+        await ChatBotManager.load_from_file(config_file)
         print(f"Loaded backend configuration from {config_file}")
     except FileNotFoundError:
         print(f"Note: Config file {config_file} not found. Starting without backends.")
     except RuntimeError as e:
         print(f"Error: Backend connection failed: {e}")
         raise
-
-    return chatbot_manager
 
 
 def setup_role_manager():
@@ -191,11 +181,11 @@ async def main():
 
     # Setup components
     role_manager = setup_role_manager()
-    chatbot_manager = await setup_chatbot_manager(args.chatbot_config)
+    await setup_chatbot_manager(args.chatbot_config)
     tool_manager = setup_tool_manager()
 
     # Create the Agent
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    agent = Agent(role_manager, tool_manager)
 
     # Load Nextcloud configuration
     try:

@@ -26,7 +26,7 @@ class InteractiveShellChannel(Channel):
     so blocking input() doesn't block session processing.
 
     Example:
-        >>> agent = Agent(role_manager, chatbot_manager, tool_manager)
+        >>> agent = Agent(role_manager, tool_manager)
         >>> await agent.start()
         >>> shell = InteractiveShellChannel("shell", agent)
         >>> await shell.start()

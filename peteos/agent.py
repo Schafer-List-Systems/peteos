@@ -5,7 +5,7 @@ import uuid
 from typing import Dict, Optional, Set
 
 from peteos.channels.channel import Channel
-from peteos.chatbot import ChatBotManager, Message, ContentPart
+from peteos.chatbot import Message, ContentPart
 from peteos.logger import get_logger
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -30,11 +30,9 @@ class Agent:
     def __init__(
         self,
         role_manager: RoleManager,
-        chatbot_manager: ChatBotManager,
         tool_manager: ToolManager
     ):
         self._role_manager = role_manager
-        self._chatbot_manager = chatbot_manager
         self._tool_manager = tool_manager
 
         # Session management
@@ -84,7 +82,6 @@ class Agent:
         session = Session(
             role=role,
             tool_manager=self._tool_manager,
-            chatbot_manager=self._chatbot_manager
         )
         self._sessions[session.uuid] = session
 
