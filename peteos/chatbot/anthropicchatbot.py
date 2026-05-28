@@ -161,6 +161,10 @@ class AnthropicChatBot(GenericChatBot):
         body = self._build_body(chat_history, streaming)
         body.update(kwargs)
 
+        _logger.warning("=== REQUEST BODY (Anthropic) ===")
+        _logger.warning("%s", json.dumps(body, indent=2, default=str)[:5000])
+        _logger.warning("=== END ===")
+
         if streaming_mode:
             stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body)
             return AnthropicChatBotResponse(stream, self._config.response_translations or {})

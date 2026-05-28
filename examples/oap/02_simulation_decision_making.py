@@ -135,7 +135,7 @@ async def main():
     tool_manager = ToolManager()
 
     # Configure your LLM backend here:
-    # await chatbot_manager.add_backend("name", "http://your-backend:port")
+    await chatbot_manager.add_backend("local", "http://localhost:PORT")
 
     # --- Create Agent and attach it to the OAP object ---
     agent = Agent(role_manager, chatbot_manager, tool_manager)
