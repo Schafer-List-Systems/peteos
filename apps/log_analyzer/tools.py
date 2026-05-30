@@ -21,6 +21,7 @@ class LogState:
     is_muted: bool = False
     session: "Session | None" = None  # Set after session creation
     agent: "Agent | None" = None  # Set after session creation
+    reviewer_agent: "Agent | None" = None  # Sub-agent for pattern_reviewer
     topic_counter: int = 0
     current_topic: str = ""
 
@@ -104,9 +105,9 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
         return f"Pattern does not match the triggering log line.\n- Pattern: '{pattern!r}'\n- Triggering log line: {triggering_log_line}"
 
     # --- Invoke pattern_reviewer for approval ---
-    agent = _state.agent
-    if agent is None:
-        return "Error: agent not configured."
+    reviewer = _state.reviewer_agent
+    if reviewer is None:
+        return "Error: pattern_reviewer agent not configured."
 
     try:
         from peteos.session import invoke_agent
@@ -128,9 +129,8 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
         )
 
         review_result = await invoke_agent(
-            role_name="pattern_reviewer",
             prompt=reviewer_prompt,
-            agent=agent,
+            agent=reviewer,
             timeout=120,
         )
     except asyncio.TimeoutError:
