@@ -144,11 +144,19 @@ async def main():
     await setup_chatbot_manager(args.chatbot_config)
     tm = ToolManager()
 
-    # Create the Agent
-    agent = Agent(role_manager, tm)
+    # Create the router agent
+    router_role = role_manager.get_role("router")
+    agent = Agent(router_role, tm)
     _state.agent = agent
 
-    role_name = nextcloud_config.get("default_role", "router")
+    # Create the pattern_reviewer sub-agent
+    reviewer_role = role_manager.get_role("pattern_reviewer")
+    if reviewer_role is not None:
+        reviewer_agent = Agent(reviewer_role, tm)
+        _state.reviewer_agent = reviewer_agent
+        print(f"Created pattern_reviewer agent with role: {reviewer_role.name}")
+    else:
+        print("Warning: pattern_reviewer role not found. Sub-agent approval calls will be disabled.")
 
     # Create the stdout channel first so its methods are available for tool registration
     # (tools access the channel via _state.channel, not the tool manager)
@@ -164,7 +172,7 @@ async def main():
     register_approval_tools(tm)
 
     # Create a shared session that both channels attach to
-    session = await agent.create_session(role_name)
+    session = await agent.create_session()
 
     # Set session reference for tools
     _state.session = session
@@ -216,8 +224,7 @@ async def main():
 
     # Add a persistent back-anchor reminder about updating topics for continuous roles
     from peteos.chatbot import ContentPart
-    role_obj = role_manager.get_role(role_name)
-    if role_obj and role_obj.behavior_policy == "continuous":
+    if agent.role.behavior_policy == "continuous":
         session.chat_history.append_message(
             Message(
                 role="assistant",
@@ -237,7 +244,7 @@ async def main():
 
     # Callback for dynamic room joins
     async def on_room_joined(room_token: str):
-        new_session = await agent.create_session(role_name)
+        new_session = await agent.create_session()
         await nextcloud.register_room(new_session.uuid, room_token)
         print(f"Registered new room {room_token} with session {new_session.uuid}")
 
