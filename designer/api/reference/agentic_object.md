@@ -103,3 +103,36 @@ The agent can use sandboxed code to:
 - Agent cannot enumerate sandbox globals or discover modules it wasn't given
 - `__builtins__` is set to an empty dict in the sandbox
 - `__import__` and `importlib` are not available in any form
+
+## Members
+
+### `acquire(timeout: float | None = None) -> None`
+
+Acquires the `threading.Lock` that serializes invocations on this object. Only one invocation can hold the lock at a time — both `invoke_agent()` and `AgenticObjectBase.invoke()` call `acquire()` before creating a session and `release()` when done.
+
+This prevents race conditions caused by interleaved `@tool` calls that read/write the object's member variables.
+
+| Scenario | Behavior |
+|---|---|
+| Lock available | Acquires immediately, returns `None` |
+| Lock held by another caller | Blocks until the lock is released |
+| Lock not acquired within `timeout` seconds | Raises `TimeoutError` |
+| `timeout` is `None` | Blocks indefinitely |
+
+**Concurrency Invariant:** The lock is acquired on the **target object**, not on a `thread_id`. Two concurrent calls to the same object — same `thread_id` or different — both block. The object is the protection boundary.
+
+### `release() -> None`
+
+Releases the `threading.Lock` acquired by a prior `acquire()` call. Signals that the invocation is complete and other callers waiting on the same object can proceed.
+
+| Scenario | Behavior |
+|---|---|
+| Lock held by caller | Releases the lock, unblocks waiting callers |
+| Lock not held | Raises `RuntimeError` (double-release protection) |
+
+`invoke_agent()` and `AgenticObjectBase.invoke()` handle `release()` via try/finally to guarantee it's always called even on exceptions.
+
+## Related
+
+- [`invoke_agent()`](invoke_agent.md) — main entry point for agent-driven object interaction
+- [`AgenticObjectBase.invoke()`](invoke.md) — sub-agent invocation from sandboxed code

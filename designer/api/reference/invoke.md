@@ -13,6 +13,7 @@ class AgenticObjectBase:
         prompt: str,
         output_schema: type | None = None,
         persistent: bool = False,
+        timeout: float | None = None,
     ) -> Any:
         """Invoke a sub-agent on a target object."""
         ...
@@ -22,6 +23,12 @@ class AgenticObjectBase:
 
 Called from within sandboxed Python code. Invokes the global `invoke_agent()` on the target object with its own context-isolated execution. Available on every `AgenticObjectBase` subclass — not gated by the calling object's decorator flags.
 
+## Concurrency
+
+`invoke()` and `invoke_agent()` are **serialized per `AgenticObjectBase` instance** using an internal `threading.Lock`. Only one invocation runs at a time per object. This protects the object's member variables from race conditions caused by interleaved tool calls.
+
+See also: [`@agentic_object`](agentic_object.md#members) (acquire/release members)
+
 ## Parameters
 
 | Parameter | Type | Default | Purpose |
@@ -30,6 +37,7 @@ Called from within sandboxed Python code. Invokes the global `invoke_agent()` on
 | `prompt` | `str` | required | Task description for the sub-agent |
 | `output_schema` | `type` | `None` → `str` | Expected return type for the sub-agent |
 | `persistent` | `bool` | `False` | If `True`, inherit the parent's thread ID; if `False`, use a non-persistent thread that is destroyed immediately after the call |
+| `timeout` | `float \| None` | `None` | Maximum seconds to wait for the invocation lock on the target object. `None` = block indefinitely. Raises `TimeoutError` if the lock is not acquired in time. |
 
 ## Return Value
 

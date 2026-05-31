@@ -11,6 +11,7 @@ def invoke_agent(
     prompt: str = "",
     output_schema: type | None = None,
     thread_id: str | None = None,
+    timeout: float | None = None,
 ) -> Any:
     """Run an agent on an object. Returns structured output, Error, or raises Exception."""
     ...
@@ -20,6 +21,12 @@ def invoke_agent(
 
 Starts an agent that reasons over the object's `@tool` methods and works toward the given `prompt`. Returns a structured result matching `output_schema`, an `Error` object on task failure, or raises an exception on API failure.
 
+## Concurrency
+
+`invoke_agent()` and `AgenticObjectBase.invoke()` are **serialized per `AgenticObjectBase` instance** using an internal `threading.Lock`. Only one invocation runs at a time per object. This protects the object's member variables from race conditions caused by interleaved tool calls.
+
+See also: [`@agentic_object`](agentic_object.md#members) (acquire/release members)
+
 ## Parameters
 
 | Parameter | Type | Default | Purpose |
@@ -28,6 +35,7 @@ Starts an agent that reasons over the object's `@tool` methods and works toward 
 | `prompt` | `str` | `""` | Task description for the agent |
 | `output_schema` | `type` | `None` → `str` | Expected return type (dataclass, TypedDict, etc.) |
 | `thread_id` | `str \| None` | `None` → non-persistent | Persistent session ID. Omitted for single-shot calls |
+| `timeout` | `float \| None` | `None` | Maximum seconds to wait for the invocation lock. `None` = block indefinitely. Raises `TimeoutError` if the lock is not acquired in time. |
 
 ## Return Value Semantics
 
