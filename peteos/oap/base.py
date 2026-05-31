@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
+from dataclasses import dataclass, is_dataclass
 from typing import TYPE_CHECKING, Any
 
+from peteos.chatbot import ContentPart, Message
+from peteos.oap.error import Error
 from peteos.role import Role
 from peteos.toolmanager import Tool, ToolManager
 
@@ -184,7 +188,89 @@ class AgenticObjectBase:
         """The Role used for this object's invocations."""
         return self._oap_role
 
-    def invoke(
+    async def invoke_agent(
+        self,
+        prompt: str,
+        output_schema: type | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        """Invoke this object's agent.
+
+        Acquires the invocation lock, creates a Session, queues the prompt,
+        waits for produce_output (via poll loop on session state), extracts
+        structured output, then releases the lock.
+
+        Args:
+            prompt: Task description for the agent.
+            output_schema: Expected return type (dataclass, etc.).
+            timeout: Maximum seconds to wait for the invocation lock.
+
+        Returns:
+            Structured output, Error object, or raises Exception.
+
+        Raises:
+            ValueError: No _oap_agent set.
+            TimeoutError: Lock not acquired within timeout.
+        """
+        # --- Gatekeeper checks ---
+        if self._oap_agent is None:
+            raise ValueError("No Agent available")
+
+        # --- Acquire lock with timeout ---
+        self.acquire(timeout)
+        session: Session | None = None
+        try:
+            # --- Update output schema ---
+            self._oap_current_output_schema = output_schema
+
+            # --- Create Session via self's agent (canonical peteos approach) ---
+            session = await self._oap_agent.create_session()
+
+            # --- Queue initial prompt ---
+            user_message = Message(
+                role="user",
+                content=[ContentPart(part_type="text", text=prompt)],
+            )
+            await session.queue_message(user_message)
+
+            # --- Poll loop: wait for produce_output in session state ---
+            reminder_msg = "Please produce your final output now using produce_output."
+            start_time = time.time()
+            while True:
+                produced_data_str = session.state._data.get("_oap_produced_data")
+                if produced_data_str is not None:
+                    break  # output produced
+                elapsed = time.time() - start_time
+                if timeout is not None and elapsed > timeout:
+                    return Error("Agent did not produce output within timeout")
+                await asyncio.sleep(0.5)
+                await session.queue_message(Message(
+                    role="user",
+                    content=[ContentPart(part_type="text", text=reminder_msg)],
+                ))
+
+            # --- Extract and parse structured output ---
+            produced_data = json.loads(produced_data_str)
+            if output_schema is not None and output_schema is not str:
+                try:
+                    if is_dataclass(output_schema):
+                        produced_data = output_schema(**produced_data)
+                    elif output_schema in (dict, list):
+                        pass  # already correct type
+                except TypeError as e:
+                    return Error(f"Could not produce output matching {output_schema.__name__}: {e}")
+
+            return produced_data
+
+        finally:
+            self.release()
+            if session is not None:
+                try:
+                    await session.stop()
+                except Exception:
+                    pass
+
+    async def invoke(
         self,
         target: "AgenticObjectBase",
         prompt: str,
@@ -194,17 +280,15 @@ class AgenticObjectBase:
     ) -> Any:
         """Invoke a sub-agent on a target AgenticObjectBase.
 
-        Acquires the target's invocation lock, creates a Session using the
-        target's existing role and tool_manager, queues the prompt, waits for
-        produce_output (via after_step hook), extracts structured output,
-        then releases the lock.
+        Verifies that self allows sub-agent invocation, then forwards to
+        target.invoke_agent().
 
         Args:
             target: The sub-object to invoke the sub-agent on.
             prompt: Task description for the sub-agent.
             output_schema: Expected return type (dataclass, etc.).
             persistent: If True, inherit the parent's thread ID.
-            timeout: Maximum seconds to wait for the invocation lock.
+            timeout: Maximum seconds to wait for the invocation lock on the target.
 
         Returns:
             Structured output, Error object, or raises Exception.
@@ -213,59 +297,14 @@ class AgenticObjectBase:
             ValueError: Target has no _oap_agent set.
             TimeoutError: Lock not acquired within timeout.
         """
-        # --- Gatekeeper checks ---
-        #   Check target._oap_agent is not None
-        #   → Raise ValueError("No Agent available") if None
+        # --- Gatekeeper: verify self allows sub-agent invocation ---
+        config = getattr(self, "_oap_config", {})
+        if not config.get("invoke_sub_agents", False):
+            return Error("Sub-agent invocation not enabled")
 
-        # --- Acquire lock with timeout ---
-        #   target.acquire(timeout)
-        #   try:
-        #       ... (pipeline below)
-        #   finally:
-        #       target.release()
-
-        # --- Update output schema on target ---
-        #   target._oap_current_output_schema = output_schema
-        #   → The _output_schema_hook on target._oap_role reads this at serialization
-
-        # --- Create Session using target's existing role + tool_manager ---
-        #   target._oap_agent and target._oap_role are the agent's identity
-        #   target._oap_tool_manager has all @tool methods + produce_output
-        #   session = Session(role=target._oap_role, tool_manager=target._oap_tool_manager)
-        #   Session._initialize_chat_history() handles:
-        #     → SystemPromptMessage from role._all_hooks
-        #     → ToolDefinitionsMessage from tool_manager + role.tool_filter
-        #   await session.start()
-
-        # --- Queue initial prompt ---
-        #   Message(role="user", content=[ContentPart(part_type="text", text=prompt)])
-        #   await session.queue_message(user_message)
-
-        # --- Poll loop: wait for produce_output in session state ---
-        #   reminder_msg = "Please produce your final output now using produce_output."
-        #   start_time = time.time()
-        #   while True:
-        #       if session.state._data.get("_oap_produced_data") is not None:
-        #           break  # output produced
-        #       elapsed = time.time() - start_time
-        #       if timeout and elapsed > timeout:
-        #           return Error("Agent did not produce output within timeout")
-        #       await asyncio.sleep(0.5)
-        #       await session.queue_message(Message(role="user", content=[ContentPart(part_type="text", text=reminder_msg)]))
-
-        # --- Extract answer and parse structured output ---
-        #   Read produced data from session state (same pattern as pattern_reviewer)
-        #   raw_data_str = session.state._data.get("_oap_produced_data")
-        #   if raw_data_str is None:
-        #       → Return Error("Agent did not produce output")
-        #   produced_data = json.loads(raw_data_str)
-        #   If output_schema: cast produced_data to output_schema type
-        #     e.g. if output_schema is a dataclass: output_schema(**produced_data)
-        #     If types don't match: catch TypeError, return Error
-        #   Else: return produced_data as-is
-
-        # --- Cleanup ---
-        #   Deregister after_step hook
-        #   await session.stop()
-
-        raise NotImplementedError("Pseudo-code stub — pipeline above")
+        # --- Forward to target's invoke_agent ---
+        return await target.invoke_agent(
+            prompt=prompt,
+            output_schema=output_schema,
+            timeout=timeout,
+        )
