@@ -10,6 +10,7 @@ from dataclasses import dataclass, is_dataclass
 from typing import TYPE_CHECKING, Any
 
 from peteos.chatbot import ContentPart, Message
+from peteos.executionenvironment import ExecStatus
 from peteos.oap.error import Error
 from peteos.role import Role
 from peteos.toolmanager import Tool, ToolManager
@@ -218,57 +219,56 @@ class AgenticObjectBase:
 
         # --- Acquire lock with timeout ---
         self.acquire(timeout)
-        session: Session | None = None
+
+        # --- Update output schema (serialized by lock) ---
+        self._oap_current_output_schema = output_schema
+
+        # --- Create Session via self's agent (canonical peteos approach) ---
+        session: Session = await self._oap_agent.create_session()
+
         try:
-            # --- Update output schema ---
-            self._oap_current_output_schema = output_schema
-
-            # --- Create Session via self's agent (canonical peteos approach) ---
-            session = await self._oap_agent.create_session()
-
-            # --- Queue initial prompt ---
-            user_message = Message(
-                role="user",
-                content=[ContentPart(part_type="text", text=prompt)],
-            )
-            await session.queue_message(user_message)
-
-            # --- Poll loop: wait for produce_output in session state ---
+            # --- Wait for produce_output via after_step hook ---
+            done = asyncio.Event()
             reminder_msg = "Please produce your final output now using produce_output."
             start_time = time.time()
-            while True:
-                produced_data_str = session.state._data.get("_oap_produced_data")
-                if produced_data_str is not None:
-                    break  # output produced
+
+            def _on_step_done(sess: "Session", status: ExecStatus) -> None:
+                if sess.state._data.get("_oap_produced_data") is not None:
+                    done.set()
+                    return
                 elapsed = time.time() - start_time
                 if timeout is not None and elapsed > timeout:
-                    return Error("Agent did not produce output within timeout")
-                await asyncio.sleep(0.5)
-                await session.queue_message(Message(
+                    done.set()  # signal timeout to main loop
+                    return
+                sess.push_event(Message(
                     role="user",
                     content=[ContentPart(part_type="text", text=reminder_msg)],
                 ))
 
+            session.execution_environment.register_hook(
+                "after_step", _on_step_done, session
+            )
+
+            try:
+                await asyncio.wait_for(done.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                return Error("Agent did not produce output within timeout")
+
             # --- Extract and parse structured output ---
+            produced_data_str = session.state._data.get("_oap_produced_data")
+            if produced_data_str is None:
+                return Error("Agent did not produce output within timeout")
             produced_data = json.loads(produced_data_str)
-            if output_schema is not None and output_schema is not str:
-                try:
-                    if is_dataclass(output_schema):
-                        produced_data = output_schema(**produced_data)
-                    elif output_schema in (dict, list):
-                        pass  # already correct type
-                except TypeError as e:
-                    return Error(f"Could not produce output matching {output_schema.__name__}: {e}")
+            if output_schema is not None and is_dataclass(output_schema):
+                produced_data = output_schema(**produced_data)
 
             return produced_data
-
         finally:
+            try:
+                await session.stop()
+            except Exception:
+                pass
             self.release()
-            if session is not None:
-                try:
-                    await session.stop()
-                except Exception:
-                    pass
 
     async def invoke(
         self,
