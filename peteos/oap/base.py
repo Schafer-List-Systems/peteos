@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from peteos.chatbot import ContentPart, Message
 from peteos.executionenvironment import ExecStatus
 from peteos.oap.error import Error
+from peteos.oap.sandbox import create_sandbox_globals
 from peteos.role import Role
 from peteos.toolmanager import Tool, ToolManager
 
@@ -33,6 +34,7 @@ class AgenticObjectBase:
         self._oap_current_output_schema: type | None = None
         self._register_tools()
         self._register_output_schema_hook()
+        self._register_sandbox_tool()
 
     def _create_role(self) -> Role:
         """Create the Role for this object."""
@@ -68,6 +70,31 @@ class AgenticObjectBase:
             return ""
         schema_name = self._oap_current_output_schema.__name__
         return f"\n\n# Output Schema\nYour final answer must be produced via produce_output with an object matching {schema_name}."
+
+    def _register_sandbox_tool(self) -> None:
+        """Register python_exec tool when allow_code_execution is enabled on the class."""
+        config = getattr(self.__class__, "_oap_config", {})
+        if not config.get("allow_code_execution", False):
+            return
+        self._oap_tool_manager.register_tool(
+            Tool(
+                name="python_exec",
+                description="Execute sandboxed Python code. Access the object graph via `self`. No __builtins__, no __import__, no network, no filesystem.",
+                func=self._python_exec,
+            )
+        )
+
+    def _python_exec(self, code: str) -> str:
+        """Protected tool: executes sandboxed Python code."""
+        config = getattr(self.__class__, "_oap_config", {})
+        imports = config.get("imports", [])
+        sandbox_globals = create_sandbox_globals(self, imports)
+
+        try:
+            exec(code, sandbox_globals)
+            return "OK"
+        except Exception as e:
+            return f"Error: {type(e).__name__}: {e}"
 
     @tool(name="produce_output", description="Signal your final answer. Pass the result as a JSON-compatible value (str, int, float, bool, list, or dict).")
     def _produce_output(self, data: Any, session: "Session | None" = None) -> str:
