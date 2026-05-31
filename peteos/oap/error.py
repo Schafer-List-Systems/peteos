@@ -9,3 +9,11 @@ class Error:
 
     def __repr__(self) -> str:
         return f"Error('{self.message}')"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Error):
+            return False
+        return self.message == other.message
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)

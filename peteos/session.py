@@ -19,7 +19,6 @@ from peteos.activeclass import ActiveClass
 from peteos.chatbot import ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
 from peteos.logger import get_logger
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
@@ -491,52 +490,6 @@ class Session(ActiveClass):
         for channel in self._channels:
             channel.push_event(NotificationEvent(self.uuid, message))
 
-    @staticmethod
-    def load_from_json(
-        json_data: dict,
-        role_manager: RoleManager,
-        tool_manager: ToolManager
-    ) -> "Session":
-        uuid_str = json_data.get("uuid")
-        role_name = json_data["role"]
-        chat_history_data = json_data.get("chat_history", {})
-
-        role = role_manager.get_role(role_name)
-        if role is None:
-            raise ValueError(f"Role '{role_name}' not found in RoleManager")
-
-        for tool_name in role.required_tools:
-            if tool_manager.get_tool(tool_name) is None:
-                raise ValueError(
-                    f"Role '{role_name}' requires tool '{tool_name}', "
-                    f"but it's not registered in tool_manager"
-                )
-
-        chat_history = ChatHistory.from_dict(chat_history_data)
-        session_uuid = uuid.UUID(uuid_str) if uuid_str else None
-
-        return Session(
-            role=role,
-            tool_manager=tool_manager,
-            chat_history=chat_history,
-            session_uuid=session_uuid,
-        )
-
-    @staticmethod
-    def load_from_file(
-        file_path: str,
-        role_manager: RoleManager,
-        tool_manager: ToolManager
-    ) -> "Session":
-        with open(file_path, "r") as f:
-            json_data = json.load(f)
-        return Session.load_from_json(
-            json_data,
-            role_manager,
-            tool_manager,
-        )
-
-
 def _extract_last_assistant_text(chat_history: "ChatHistory") -> str:
     """Extract the text of the last assistant message from chat history."""
     for msg in reversed(chat_history.messages):
@@ -547,7 +500,6 @@ def _extract_last_assistant_text(chat_history: "ChatHistory") -> str:
 
 
 async def invoke_agent(
-    role_name: str,
     prompt: str,
     agent: "Agent | None" = None,
     *,
@@ -561,9 +513,8 @@ async def invoke_agent(
     waits for processing to complete, and returns the assistant's answer.
 
     Args:
-        role_name: Name of the role to invoke.
-        prompt: The user message / prompt to send to the agent.
-        agent: Optional Agent with registered role_manager and tool_manager.
+        prompt: The message / prompt to send to the agent.
+        agent: Optional Agent with an associated role and tool_manager.
                If provided, creates a new session via
                agent.create_session() with full hook support.
         existing_session: Optional pre-existing Session to reuse for
@@ -580,12 +531,11 @@ async def invoke_agent(
             - history (list[Message]): Full chat history for inspection.
 
     Raises:
-        ValueError: If role_name not found or neither agent nor existing_session provided.
+        ValueError: If neither agent nor existing_session provided.
         asyncio.TimeoutError: If timeout expires before response.
         RuntimeError: If existing_session is not running.
     """
     from peteos.agent import Agent as AgentType
-    from peteos.rolemanager import RoleManager as RM
 
     # --- Session setup ---
     if existing_session is not None:
@@ -596,7 +546,7 @@ async def invoke_agent(
                 "or call session.start()"
             )
     elif agent is not None:
-        session = await agent.create_session(role_name)
+        session = await agent.create_session()
     else:
         raise ValueError(
             "Either agent or existing_session must be provided."
