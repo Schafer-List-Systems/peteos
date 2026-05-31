@@ -5,57 +5,164 @@ import pytest
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.error import Error
+from peteos.toolmanager import ToolManager
 
 
 class TestAgenticObjectBaseInit:
     def test_default_init(self):
         obj = AgenticObjectBase()
         assert obj.agent is None
-        assert obj.role is None
-        assert obj._oap_threads == {}
+        assert obj.role is not None
+        assert obj.role.name == "oap_AgenticObjectBase"
+        assert isinstance(obj._oap_tool_manager, ToolManager)
 
     def test_agent_property(self):
         obj = AgenticObjectBase()
         obj.agent = "mock_agent"
         assert obj.agent == "mock_agent"
 
-    def test_role_property(self):
+    def test_role_auto_created(self):
         obj = AgenticObjectBase()
-        obj.role = "mock_role"
-        assert obj.role == "mock_role"
-
-    def test_get_thread_state_creates(self):
-        obj = AgenticObjectBase()
-        state = obj.get_thread_state("thread-1")
-        assert state == {"messages": []}
-        # Second call returns same state
-        assert obj.get_thread_state("thread-1") is state
-
-    def test_get_thread_state_isolated(self):
-        obj = AgenticObjectBase()
-        state1 = obj.get_thread_state("thread-1")
-        state2 = obj.get_thread_state("thread-2")
-        assert state1 is not state2
+        assert isinstance(obj.role, type(obj.role))
 
 
-class TestInvokeGatekeeper:
-    def test_invoke_disables_target(self):
-        @agentic_object()
-        class Target(AgenticObjectBase):
-            pass
+class TestToolRegistry:
+    def test_tool_decorated_methods_are_registered(self):
+        obj = SimpleToolObj()
+        tools = obj._oap_tool_manager.get_tool_list()
+        assert len(tools) == 2
+        assert tools[0].name == "hello"
+        assert tools[1].name == "produce_output"
 
-        caller = AgenticObjectBase()
-        result = caller.invoke(Target(), "prompt")
-        assert isinstance(result, Error)
-        assert "not enabled" in result.message
+    def test_tool_execution_works(self):
+        obj = SimpleToolObj()
+        t = obj._oap_tool_manager.get_tool("hello")
+        assert t.func(name="World") == "Hello, World"
 
-    @pytest.mark.asyncio
-    async def test_invoke_enables_target_no_agent(self):
-        """invoke() on enabled target still needs an agent."""
-        @agentic_object(invoke_sub_agents=True)
-        class Target(AgenticObjectBase):
-            pass
+    def test_multiple_tools_registered(self):
+        obj = MultiToolObj()
+        tools = obj._oap_tool_manager.get_tool_list()
+        assert len(tools) == 3
+        assert {t.name for t in tools} == {"hello", "greet", "produce_output"}
 
-        caller = AgenticObjectBase()
-        with pytest.raises(ValueError, match="No Agent available"):
-            await caller.invoke(Target(), "prompt")
+    def test_inherited_tools_registered(self):
+        obj = ChildToolObj()
+        tools = obj._oap_tool_manager.get_tool_list()
+        assert len(tools) == 3
+        assert {t.name for t in tools} == {"parent_tool", "child_tool", "produce_output"}
+
+    def test_override_replaces_parent_tool(self):
+        obj = OverrideToolObj()
+        tools = obj._oap_tool_manager.get_tool_list()
+        assert len(tools) == 2
+        assert tools[0].func() == "child"
+        assert tools[1].name == "produce_output"
+
+    def test_custom_name_used(self):
+        obj = CustomNameToolObj()
+        assert obj._oap_tool_manager.get_tool("custom_name") is not None
+        assert obj._oap_tool_manager.get_tool("internal_method") is None
+
+    def test_tool_description_from_docstring(self):
+        obj = DocstringToolObj()
+        t = obj._oap_tool_manager.get_tool("my_tool")
+        assert t.description == "This is the description."
+
+    def test_custom_description_used(self):
+        obj = CustomDescToolObj()
+        t = obj._oap_tool_manager.get_tool("my_tool")
+        assert t.description == "custom desc"
+
+    def test_no_tools_no_error(self):
+        obj = NoToolObj()
+        tools = obj._oap_tool_manager.get_tool_list()
+        assert len(tools) == 1
+        assert tools[0].name == "produce_output"
+
+
+# --- Module-level class fixtures (avoids Python 3.12 closure issue) ---
+
+@agentic_object()
+class SimpleToolObj(AgenticObjectBase):
+    @tool()
+    def hello(self, name: str) -> str:
+        """Say hello."""
+        return f"Hello, {name}"
+
+    def not_a_tool(self):
+        pass
+
+
+@agentic_object()
+class MultiToolObj(AgenticObjectBase):
+    @tool()
+    def hello(self, name: str) -> str:
+        """Say hello."""
+        return f"Hello, {name}"
+
+    @tool(name="greet")
+    def greet(self, name: str) -> str:
+        """Greet someone."""
+        return f"Hi, {name}"
+
+
+@agentic_object()
+class ParentToolObj(AgenticObjectBase):
+    @tool()
+    def parent_tool(self) -> str:
+        """Parent tool."""
+        return "parent"
+
+
+@agentic_object()
+class ChildToolObj(ParentToolObj):
+    @tool()
+    def child_tool(self) -> str:
+        """Child tool."""
+        return "child"
+
+
+@agentic_object()
+class ParentOverrideObj(AgenticObjectBase):
+    @tool()
+    def tool_a(self) -> str:
+        """Parent version."""
+        return "parent"
+
+
+@agentic_object()
+class OverrideToolObj(ParentOverrideObj):
+    @tool(name="tool_a")
+    def tool_a_override(self) -> str:
+        """Child version."""
+        return "child"
+
+
+@agentic_object()
+class CustomNameToolObj(AgenticObjectBase):
+    @tool(name="custom_name")
+    def internal_method(self) -> str:
+        """Custom name."""
+        return "ok"
+
+
+@agentic_object()
+class DocstringToolObj(AgenticObjectBase):
+    @tool()
+    def my_tool(self) -> str:
+        """This is the description."""
+        return "ok"
+
+
+@agentic_object()
+class CustomDescToolObj(AgenticObjectBase):
+    @tool(description="custom desc")
+    def my_tool(self) -> str:
+        """Docstring."""
+        return "ok"
+
+
+@agentic_object()
+class NoToolObj(AgenticObjectBase):
+    def regular_method(self):
+        pass

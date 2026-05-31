@@ -6,6 +6,7 @@ import asyncio
 import json
 import threading
 import time
+import uuid
 from dataclasses import dataclass, is_dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,7 @@ class AgenticObjectBase:
         self._oap_lock: threading.Lock = threading.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
+        self._oap_thread_store: dict[str, UUID] = {}
         self._register_tools()
         self._register_output_schema_hook()
         self._register_sandbox_tool()
@@ -220,17 +222,21 @@ class AgenticObjectBase:
         self,
         prompt: str,
         output_schema: type | None = None,
+        persistent_thread_id: str | None = None,
         timeout: float | None = None,
     ) -> Any:
         """Invoke this object's agent.
 
-        Acquires the invocation lock, creates a Session, queues the prompt,
-        waits for produce_output (via poll loop on session state), extracts
+        Acquires the invocation lock, creates or reuses a Session, queues the
+        prompt, waits for produce_output (via after_step hook), extracts
         structured output, then releases the lock.
 
         Args:
             prompt: Task description for the agent.
             output_schema: Expected return type (dataclass, etc.).
+            persistent_thread_id: If set, reuses or creates a persistent
+                session keyed by this ID. If None, creates a transient
+                session destroyed after the invocation.
             timeout: Maximum seconds to wait for the invocation lock.
 
         Returns:
@@ -250,8 +256,16 @@ class AgenticObjectBase:
         # --- Update output schema (serialized by lock) ---
         self._oap_current_output_schema = output_schema
 
-        # --- Create Session via self's agent (canonical peteos approach) ---
-        session: Session = await self._oap_agent.create_session()
+        # --- Create or reuse session ---
+        session: Session | None = None
+        if persistent_thread_id is not None:
+            stored_uuid = self._oap_thread_store.get(persistent_thread_id)
+            if stored_uuid is not None:
+                session = self._oap_agent.get_session(stored_uuid)
+        if session is None:
+            session = await self._oap_agent.create_session()
+            if persistent_thread_id is not None:
+                self._oap_thread_store[persistent_thread_id] = session.uuid
 
         try:
             # --- Wait for produce_output via after_step hook ---
@@ -291,10 +305,12 @@ class AgenticObjectBase:
 
             return produced_data
         finally:
-            try:
-                await session.stop()
-            except Exception:
-                pass
+            if persistent_thread_id is None:
+                try:
+                    await session.stop()
+                    self._oap_agent.destroy_session(session.uuid)
+                except Exception:
+                    pass
             self.release()
 
     async def invoke(
