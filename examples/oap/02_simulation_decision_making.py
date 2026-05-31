@@ -14,7 +14,7 @@ Configure your LLM backend before running:
 from dataclasses import dataclass
 
 from peteos import AgenticObjectBase, Error, tool
-from peteos.oap import invoke
+from peteos.oap import tool
 
 
 class LocationRecord(AgenticObjectBase):
@@ -145,18 +145,18 @@ async def main():
 
     # --- Invoke the agent ---
     try:
-        result = await invoke(
-            npc,
+        result = await npc.invoke_agent(
             prompt="Decide what to do next. Prioritize by hunger level and "
             "task urgency. Return structured output with your decision.",
             output_schema=Decision,
-            thread_id="npc-tick",
+            persistent_thread_id="npc-tick",
         )
-        print(f"Success: {result['success']}")
-        print(f"Result: {result['result']}")
-        print(f"Thread ID: {result['thread_id']}")
+        if isinstance(result, Error):
+            print(f"Error: {result.message}")
+        else:
+            print(f"Result: {result}")
     except Exception as e:
-        print(f"API failure: {e}")
+        print(f"API failure: {e!r}")
 
 
 if __name__ == "__main__":

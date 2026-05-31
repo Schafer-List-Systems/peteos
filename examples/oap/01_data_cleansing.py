@@ -14,7 +14,7 @@ Configure your LLM backend before running:
 from dataclasses import dataclass
 
 from peteos import AgenticObjectBase, Error, tool
-from peteos.oap import invoke
+from peteos.oap import tool
 
 
 class PersonRecord(AgenticObjectBase):
@@ -122,16 +122,16 @@ async def main():
 
     # --- Invoke the agent ---
     try:
-        result = await invoke(
-            person,
+        result = await person.invoke_agent(
             prompt="Normalize this record: split the name, convert height to cm, "
             "and format the date as ISO 8601.",
             output_schema=CleansingResult,
-            thread_id="clean-001",
+            persistent_thread_id="clean-001",
         )
-        print(f"Success: {result['success']}")
-        print(f"Result: {result['result']}")
-        print(f"Thread ID: {result['thread_id']}")
+        if isinstance(result, Error):
+            print(f"Error: {result.message}")
+        else:
+            print(f"Result: {result}")
     except Exception as e:
         print(f"API failure: {e!r}")
 
