@@ -35,6 +35,15 @@ class Task(AgenticObjectBase):
     def task_id(self) -> str:
         return self._node_data["id"]
 
+    _COLORS: dict[TaskState, str] = {
+        TaskState.SCHEDULED: "#808080",
+        TaskState.ACTIVE: "#3498db",
+        TaskState.OK: "#2ecc71",
+        TaskState.DENIED: "#e74c3c",
+        TaskState.PENDING: "#f39c12",
+        TaskState.DISABLED: "#636e72",
+    }
+
     @property
     def state(self) -> TaskState:
         return TaskState(self._node_data.get("_task_state", "SCHEDULED"))
@@ -42,6 +51,7 @@ class Task(AgenticObjectBase):
     @state.setter
     def state(self, value: TaskState) -> None:
         self._node_data["_task_state"] = value.value
+        self._node_data["color"] = self._COLORS[value]
 
     @property
     def text(self) -> str:
