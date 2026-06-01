@@ -5,16 +5,15 @@ Invoke sub-agents on nested agentic objects for context-isolated reasoning.
 Each sub-agent gets its own independent context window.
 
 Usage:
-    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/04_sub_object_invocation.py
-
-Configure your LLM backend before running:
-    await chatbot_manager.add_backend("name", "http://your-backend:port")
+    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/04_sub_object_invocation.py \
+        http://localhost:8080
 """
+
+import sys
 
 from dataclasses import dataclass
 
 from peteos import AgenticObjectBase, Error, agentic_object, tool
-from peteos.oap import invoke
 
 
 @dataclass
@@ -28,6 +27,7 @@ class PriceRecord(AgenticObjectBase):
     """A price record with a raw price string."""
 
     def __init__(self, raw_value: str = "100 USD"):
+        super().__init__()
         self._raw_value = raw_value
 
     @tool
@@ -49,11 +49,12 @@ class PriceRecord(AgenticObjectBase):
         return value
 
 
-@agentic_object(allow_code_execution=True)
+@agentic_object(allow_code_execution=True, imports=[PriceRecord])
 class InventoryItem(AgenticObjectBase):
     """An inventory item with a price record."""
 
     def __init__(self, name: str, price: PriceRecord):
+        super().__init__()
         self._name = name
         self._price = price
 
@@ -68,11 +69,12 @@ class InventoryItem(AgenticObjectBase):
         return self._price
 
 
-@agentic_object(allow_code_execution=True)
+@agentic_object(allow_code_execution=True, imports=[InventoryItem, PriceRecord])
 class InventoryManager(AgenticObjectBase):
     """Manages items with sub-agents for price parsing."""
 
     def __init__(self):
+        super().__init__()
         self._items = [
             InventoryItem(name="Widget A", price=PriceRecord(raw_value="100 USD")),
             InventoryItem(name="Widget B", price=PriceRecord(raw_value="50 EUR")),
@@ -99,30 +101,23 @@ class InventoryManager(AgenticObjectBase):
 
 async def main():
     """Set up an Agent and invoke it to parse prices via sub-agents."""
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <backend-url>")
+        sys.exit(1)
+    backend_url = sys.argv[1]
+
     # --- Set up peteos components ---
-    from peteos.agent import Agent
     from peteos.chatbot.manager import ChatBotManager
-    from peteos.role import Role
-    from peteos.rolemanager import RoleManager
-    from peteos.toolmanager import ToolManager
 
-    role_manager = RoleManager()
     chatbot_manager = ChatBotManager(timeout=None)
-    tool_manager = ToolManager()
+    await chatbot_manager.add_backend("local", backend_url)
 
-    # Configure your LLM backend here:
-    # await chatbot_manager.add_backend("name", "http://your-backend:port")
-
-    # --- Create Agent and attach it to the OAP object ---
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
-
+    # --- Create OAP objects (Agents are auto-created in __init__) ---
     manager = InventoryManager()
-    manager.agent = agent
 
     # --- Invoke the agent ---
     try:
-        result = await invoke(
-            manager,
+        result = await manager.invoke_agent(
             prompt=(
                 "Parse all prices across all items using sandboxed code. "
                 "Iterate over self.get_items(), and for each item invoke "
@@ -131,12 +126,14 @@ async def main():
                 "Return a list of PriceData objects."
             ),
             output_schema=list[PriceData],
+            persistent_thread_id="prices-001",
         )
-        print(f"Success: {result['success']}")
-        print(f"Result: {result['result']}")
-        print(f"Thread ID: {result['thread_id']}")
+        if isinstance(result, Error):
+            print(f"Error: {result.message}")
+        else:
+            print(f"Result: {result}")
     except Exception as e:
-        print(f"API failure: {e}")
+        print(f"API failure: {e!r}")
 
 
 if __name__ == "__main__":
