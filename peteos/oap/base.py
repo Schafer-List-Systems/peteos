@@ -92,7 +92,12 @@ class AgenticObjectBase:
         if self._oap_current_output_schema is None:
             return ""
         schema_name = self._oap_current_output_schema.__name__
-        return f"\n\n# Output Schema\nYour final answer must be produced via produce_output with an object matching {schema_name}."
+        if is_dataclass(self._oap_current_output_schema):
+            import dataclasses
+            fields = dataclasses.fields(self._oap_current_output_schema)
+            field_lines = "\n".join(f"  - {f.name}: {f.type.__name__}" for f in fields)
+            return f"\n\n# Output Schema\nYour final answer must be produced via produce_output with a JSON object containing these fields:\n{field_lines}."
+        return f"\n\n# Output Schema\nYour final answer must be produced via produce_output with a value of type {schema_name}."
 
     def _register_sandbox_tool(self) -> None:
         """Register python_exec tool when allow_code_execution is enabled on the class."""
@@ -119,17 +124,16 @@ class AgenticObjectBase:
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
 
-    @tool(name="produce_output", description="Signal your final answer. Pass the result as a JSON-compatible value (str, int, float, bool, list, or dict).")
-    def _produce_output(self, data: Any, session: "Session | None" = None) -> str:
+    @tool(name="produce_output", description="Signal your final answer. Pass the result as a JSON string describing the output data.")
+    def _produce_output(self, data: str, session: "Session | None" = None) -> str:
         """Protected tool: signals the agent has produced its final answer.
 
-        Validates the data against the current output schema (if set),
-        writes the result to the session's AgenticState, and returns
-        the validation result. A non-OK response serves as error
-        feedback the agent can use to correct its tool call.
+        Parses the JSON string and validates it against the current output
+        schema. If validation fails, returns an error message the agent can
+        use to correct its tool call.
 
         Args:
-            data: The result to produce (any JSON-compatible value).
+            data: The result as a JSON string.
             session: The session (injected by the execution environment).
 
         Returns:
@@ -137,12 +141,24 @@ class AgenticObjectBase:
         """
         if session is None:
             return "Error: session not available."
-        if self._oap_current_output_schema is not None:
-            error = self._validate_produced_data(data)
-            if error:
-                return error
+        # Parse JSON — the LLM always sends a string.
         try:
-            session.state.create("_oap_produced_data", json.dumps(data))
+            parsed = json.loads(data)
+        except json.JSONDecodeError as e:
+            return f"Error: invalid JSON: {e}"
+
+        # Validate and cast to schema if set.
+        error = self._validate_produced_data(parsed)
+        if error:
+            return error
+
+        # Cast to dataclass if applicable.
+        if self._oap_current_output_schema is not None and is_dataclass(self._oap_current_output_schema):
+            if isinstance(parsed, dict):
+                parsed = self._oap_current_output_schema(**parsed)
+
+        try:
+            session.state.create("_oap_produced_data", parsed)
         except ValueError as e:
             return f"Error: {e}"
         return "OK"
@@ -313,7 +329,7 @@ class AgenticObjectBase:
         try:
             # --- Wait for produce_output via after_step hook ---
             done = asyncio.Event()
-            reminder_msg = "Please produce your final output now using produce_output."
+            reminder_msg = "Please produce your final output using produce_output() or produce_error(). Mind the output schema!"
             start_time = time.time()
 
             async def _on_step_done(sess: "Session", status: ExecStatus) -> None:
@@ -351,18 +367,8 @@ class AgenticObjectBase:
                 return Error("Agent did not produce output within timeout")
 
             # --- Extract and parse structured output ---
-            produced_data_str = session.state._data.get("_oap_produced_data")
-            if produced_data_str is not None:
-                produced_data = json.loads(produced_data_str)
-                if output_schema is not None and is_dataclass(output_schema):
-                    if isinstance(produced_data, dict):
-                        produced_data = output_schema(**produced_data)
-                    else:
-                        return Error(
-                            f"Expected a dict for {output_schema.__name__}, "
-                            f"got {type(produced_data).__name__}. Did you call produce_output "
-                            f"with a data object or produce_error with an error message?"
-                        )
+            produced_data = session.state._data.get("_oap_produced_data")
+            if produced_data is not None:
                 return produced_data
 
             error_msg = session.state._data.get("_oap_error")
