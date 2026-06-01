@@ -311,7 +311,7 @@ class Session(ActiveClass):
                 events_processed += 1
 
                 if isinstance(event, Message):
-                    self.append_and_notify(event)
+                    await self.append_and_notify(event)
                 elif isinstance(event, ApprovalEvent):
                     self._handle_approval(event)
                 else:
@@ -323,7 +323,7 @@ class Session(ActiveClass):
             need_reentry = False
 
             status, _ = await self.execution_environment.step(self)
-            self.execution_environment._call_hooks("after_step", status)
+            await self.execution_environment._call_hooks("after_step", status)
 
             if status == ExecStatus.INTERRUPTED:
                 _logger.debug("[session] run(): Execution interrupted, exiting loop.")
@@ -464,7 +464,7 @@ class Session(ActiveClass):
             record.approval_status = ToolApprovalStatus.DENIED
             return False
 
-    def append_and_notify(self, message: Message) -> None:
+    async def append_and_notify(self, message: Message) -> None:
         """Append a message to chat history and publish a notification.
 
         Replaces the inline pattern:
@@ -477,16 +477,16 @@ class Session(ActiveClass):
             message: The message to append and notify on.
         """
         self.chat_history.append_message(message)
-        self.execution_environment._call_hooks("after_message_append", self, message)
-        self.publish_notification(message)
+        await self.execution_environment._call_hooks("after_message_append", self, message)
+        await self.publish_notification(message)
 
-    def publish_notification(
+    async def publish_notification(
             self,
             message: Message
     ) -> None:
         """Publish a notification to all subscribed channels."""
         from peteos.channels.channel import NotificationEvent
-        self.execution_environment._call_hooks("before_notification_publish", self, message)
+        await self.execution_environment._call_hooks("before_notification_publish", self, message)
         for channel in self._channels:
             channel.push_event(NotificationEvent(self.uuid, message))
 

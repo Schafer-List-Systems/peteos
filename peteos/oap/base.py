@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from peteos.chatbot import ContentPart, Message
 from peteos.executionenvironment import ExecStatus
+from peteos.logger import get_logger
 from peteos.oap.error import Error
 from peteos.oap.sandbox import create_sandbox_globals
 from peteos.role import Role
@@ -19,16 +20,18 @@ from peteos.toolmanager import Tool, ToolManager
 
 from peteos.oap.decorators import tool
 
+_logger = get_logger(__name__)
+
 if TYPE_CHECKING:
-    from peteos.agent import Agent
     from peteos.session import Session
+
+from peteos.agent import Agent
 
 
 class AgenticObjectBase:
     """Base class for all Object-Agentic Programming objects."""
 
     def __init__(self) -> None:
-        self._oap_agent: Agent | None = None
         self._oap_role: Role = self._create_role()
         self._oap_lock: threading.Lock = threading.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
@@ -37,6 +40,9 @@ class AgenticObjectBase:
         self._register_tools()
         self._register_output_schema_hook()
         self._register_sandbox_tool()
+        self._oap_agent: Agent = self._create_agent()
+        tool_names = [t.name for t in self._oap_tool_manager.get_tool_list()]
+        _logger.debug("Registered tools for %s: %s", self.__class__.__name__, tool_names)
 
     def _create_role(self) -> Role:
         """Create the Role for this object."""
@@ -44,7 +50,22 @@ class AgenticObjectBase:
         return Role(
             name=f"oap_{class_name}",
             description=f"Agent for {class_name}",
+            tool_filter=[".*"],
+            system_prompt=(
+                f"You are an agent working on a {class_name} object. "
+                f"You have tools to read and modify the state of this object. "
+                f"Use those tools and the information you already have to fulfill the user's request. "
+                f"NEVER ask the user for more information or clarification. "
+                f"If you cannot produce the requested output, use produce_output to return an error message explaining why. "
+            ),
         )
+
+    def _create_agent(self) -> Agent:
+        """Create an Agent wired to this object's role and tool_manager."""
+        # Auto-approve all registered tools so they pass Session.add_tool_call()
+        for t in self._oap_tool_manager.get_tool_list():
+            self._oap_role.auto_approve_tools.append(t.name)
+        return Agent(self._oap_role, self._oap_tool_manager)
 
     def _register_tools(self) -> None:
         """Register @tool-decorated methods from this class and its parents."""
@@ -122,6 +143,28 @@ class AgenticObjectBase:
                 return error
         try:
             session.state.create("_oap_produced_data", json.dumps(data))
+        except ValueError as e:
+            return f"Error: {e}"
+        return "OK"
+
+    @tool(name="produce_error", description="Signal that you could not produce the requested output. Pass an error message explaining why (e.g., missing required data or an invalid state).")
+    def _produce_error(self, message: str, session: "Session | None" = None) -> str:
+        """Protected tool: signals the agent could not fulfill the task.
+
+        Writes the error message to the session's AgenticState so that
+        invoke_agent returns an Error object.
+
+        Args:
+            message: Human-readable error explanation.
+            session: The session (injected by the execution environment).
+
+        Returns:
+            "OK" on success, or an error message if the session is missing.
+        """
+        if session is None:
+            return "Error: session not available."
+        try:
+            session.state.create("_oap_error", message)
         except ValueError as e:
             return f"Error: {e}"
         return "OK"
@@ -273,15 +316,21 @@ class AgenticObjectBase:
             reminder_msg = "Please produce your final output now using produce_output."
             start_time = time.time()
 
-            def _on_step_done(sess: "Session", status: ExecStatus) -> None:
+            async def _on_step_done(sess: "Session", status: ExecStatus) -> None:
                 if sess.state._data.get("_oap_produced_data") is not None:
                     done.set()
+                    sess.execution_environment.set_interrupt()
+                    return
+                if sess.state._data.get("_oap_error") is not None:
+                    done.set()
+                    sess.execution_environment.set_interrupt()
                     return
                 elapsed = time.time() - start_time
                 if timeout is not None and elapsed > timeout:
-                    done.set()  # signal timeout to main loop
+                    done.set()
+                    sess.execution_environment.set_interrupt()
                     return
-                sess.push_event(Message(
+                await sess.queue_message(Message(
                     role="user",
                     content=[ContentPart(part_type="text", text=reminder_msg)],
                 ))
@@ -290,6 +339,12 @@ class AgenticObjectBase:
                 "after_step", _on_step_done, session
             )
 
+            # --- Queue the initial prompt so the agent actually runs ---
+            await session.queue_message(Message(
+                role="user",
+                content=[ContentPart(part_type="text", text=prompt)],
+            ))
+
             try:
                 await asyncio.wait_for(done.wait(), timeout=timeout)
             except asyncio.TimeoutError:
@@ -297,14 +352,32 @@ class AgenticObjectBase:
 
             # --- Extract and parse structured output ---
             produced_data_str = session.state._data.get("_oap_produced_data")
-            if produced_data_str is None:
-                return Error("Agent did not produce output within timeout")
-            produced_data = json.loads(produced_data_str)
-            if output_schema is not None and is_dataclass(output_schema):
-                produced_data = output_schema(**produced_data)
+            if produced_data_str is not None:
+                produced_data = json.loads(produced_data_str)
+                if output_schema is not None and is_dataclass(output_schema):
+                    if isinstance(produced_data, dict):
+                        produced_data = output_schema(**produced_data)
+                    else:
+                        return Error(
+                            f"Expected a dict for {output_schema.__name__}, "
+                            f"got {type(produced_data).__name__}. Did you call produce_output "
+                            f"with a data object or produce_error with an error message?"
+                        )
+                return produced_data
 
-            return produced_data
+            error_msg = session.state._data.get("_oap_error")
+            if error_msg is not None:
+                return Error(error_msg)
+
+            return Error("Agent did not produce output within timeout")
         finally:
+            # Clear OAP state variables so the next invocation starts fresh
+            if session is not None:
+                try:
+                    session.state._data.pop("_oap_produced_data", None)
+                    session.state._data.pop("_oap_error", None)
+                except Exception:
+                    pass
             if persistent_thread_id is None:
                 try:
                     await session.stop()

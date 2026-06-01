@@ -114,7 +114,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         # We only send the extended chat history to the chatbot to get a further response when there are no (more)
         # pending tool calls.
         if not session.has_unfinished_tool_call():
-            self._call_hooks("before_send_to_chatbot", session, session.chat_history)
+            await self._call_hooks("before_send_to_chatbot", session, session.chat_history)
             response = await self.chatbot.send_message(session.chat_history)
             async for _ in response:
                 if self._interrupt:
@@ -144,6 +144,10 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 if item_type == "tool_use":
                     content_parts.append(ContentPart(part_type="tool_use", **item))
                     session.add_tool_call(item)
+                elif item_type == "texttool_use":
+                    content_parts.append(ContentPart(part_type="text", text=item["content"]))
+                    content_parts.append(ContentPart(part_type="tool_use", **item))
+                    session.add_tool_call(item)
                 elif item_type == "text":
                     content_value = item["content"]
                     content_parts.append(ContentPart(part_type="text", text=content_value))
@@ -153,11 +157,14 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     content_parts.append(
                         ContentPart(part_type="reasoning", reasoning=content_value)
                     )
+                else:
+                    _logger.debug("Unknown item type: %s", item_type)
+                    return (ExecStatus.ERROR, None)
 
             # --- Phase 4: Append assistant message ---
             _logger.debug("ChatBot response: role=%s, content_types=%s", response.data.get("role"), [item.get("type") for item in content_array] if isinstance(content_array, list) else "N/A")
             response_msg = Message(role=response.data["role"], content=content_parts)
-            session.append_and_notify(response_msg)
+            await session.append_and_notify(response_msg)
 
         # --- Phase 5: Execute tool calls ---
         from peteos.session import ToolApprovalStatus
@@ -182,8 +189,8 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                         tool_use_id=tool_call_id,
                     )],
                 )
-                session.append_and_notify(msg)
-                self._call_hooks("after_tool_execution", session, record.tool_call, denial_msg, False)
+                await session.append_and_notify(msg)
+                await self._call_hooks("after_tool_execution", session, record.tool_call, denial_msg, False)
                 _logger.debug("[repl] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
 
@@ -206,12 +213,12 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 return (ExecStatus.TOOL_NOT_FOUND, None)
 
             args = _cast_args_to_types(tool.func, args)
-            hook_result = self._call_hooks("before_tool_execution", session, tool_call)
+            hook_result = await self._call_hooks("before_tool_execution", session, tool_call)
             if hook_result is not None:
                 allow, message = hook_result
                 if not allow:
                     tool_call_id = tool_call.get("id", "")
-                    self._append_tool_result(session, tool_name=tool_name, content=message, tool_use_id=tool_call_id)
+                    await self._append_tool_result(session, tool_name=tool_name, content=message, tool_use_id=tool_call_id)
                     return (ExecStatus.TOOL_DENIED, None)
 
             tool_call_id = tool_call.get("id", "")
@@ -219,11 +226,11 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 result = tool.execute(**args, session=session)
                 if asyncio.iscoroutine(result):
                     result = await result
-                self._append_tool_result(session, tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
-                self._call_hooks("after_tool_execution", session, tool_call, str(result), True)
+                await self._append_tool_result(session, tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
+                await self._call_hooks("after_tool_execution", session, tool_call, str(result), True)
                 _logger.debug("Tool %s returned: %s", tool_name, str(result))
             except Exception as e:
-                self._append_tool_result(
+                await self._append_tool_result(
                     session,
                     tool_name=tool_name,
                     content=f"Error: {type(e).__name__}: {str(e)}",
@@ -260,7 +267,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         _logger.debug("[repl] step(): Response contained only reasoning part(s).")
         return (ExecStatus.CONTINUE, None)
 
-    def _append_tool_result(
+    async def _append_tool_result(
         self,
         session: "Session",
         tool_name: str,
@@ -273,4 +280,4 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 ContentPart(part_type="tool_result", name=tool_name, content=content, tool_use_id=tool_use_id)
             ],
         )
-        session.append_and_notify(msg)
+        await session.append_and_notify(msg)

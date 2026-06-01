@@ -6,17 +6,22 @@ from typing import Callable
 
 
 def tool(
-    name: str | None = None,
+    name: str | None | Callable = None,
     description: str | None = None,
-) -> Callable[[Callable], Callable]:
-    """Mark a method on an AgenticObjectBase subclass as callable by agents."""
+) -> Callable[[Callable], Callable] | Callable:
+    """Mark a method on an AgenticObjectBase subclass as callable by agents.
 
-    def decorator(func: Callable) -> Callable:
-        func._tool_name = name or func.__name__
+    Supports both @tool and @tool(name="custom_name").
+    """
+    def apply(func: Callable) -> Callable:
+        func._tool_name = name if isinstance(name, str) else func.__name__
         func._tool_description = description or (func.__doc__ or "").strip()
         return func
 
-    return decorator
+    # Handle @tool (no parentheses) — func passed as first positional arg
+    if callable(name):
+        return apply(name)
+    return apply
 
 
 def agentic_object(
