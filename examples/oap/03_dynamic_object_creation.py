@@ -5,16 +5,15 @@ Allow agents to create new agentic objects dynamically and add them to
 collections via sandboxed code execution.
 
 Usage:
-    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/03_dynamic_object_creation.py
-
-Configure your LLM backend before running:
-    await chatbot_manager.add_backend("name", "http://your-backend:port")
+    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/03_dynamic_object_creation.py \
+        http://localhost:8080
 """
+
+import sys
 
 from dataclasses import dataclass
 
 from peteos import AgenticObjectBase, Error, agentic_object, tool
-from peteos.oap import invoke
 
 
 @agentic_object(allow_code_execution=True)
@@ -22,6 +21,7 @@ class InventoryItem(AgenticObjectBase):
     """A single inventory item with name, quantity, and category."""
 
     def __init__(self, name: str = "New Item", quantity: int = 0, category: str = "uncategorized"):
+        super().__init__()
         self._name = name
         self._quantity = quantity
         self._category = category
@@ -57,11 +57,12 @@ class InventoryItem(AgenticObjectBase):
         self._category = category
 
 
-@agentic_object(allow_code_execution=True)
+@agentic_object(allow_code_execution=True, imports=[InventoryItem])
 class InventoryManager(AgenticObjectBase):
     """Manages a collection of inventory items. Uses sandboxed code to create new items."""
 
     def __init__(self):
+        super().__init__()
         self._items: list[InventoryItem] = []
 
     @tool
@@ -91,30 +92,23 @@ class SetupResult:
 
 async def main():
     """Set up an Agent and invoke it to create inventory items."""
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <backend-url>")
+        sys.exit(1)
+    backend_url = sys.argv[1]
+
     # --- Set up peteos components ---
-    from peteos.agent import Agent
     from peteos.chatbot.manager import ChatBotManager
-    from peteos.role import Role
-    from peteos.rolemanager import RoleManager
-    from peteos.toolmanager import ToolManager
 
-    role_manager = RoleManager()
     chatbot_manager = ChatBotManager(timeout=None)
-    tool_manager = ToolManager()
+    await chatbot_manager.add_backend("local", backend_url)
 
-    # Configure your LLM backend here:
-    # await chatbot_manager.add_backend("name", "http://your-backend:port")
-
-    # --- Create Agent and attach it to the OAP object ---
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
-
+    # --- Create OAP object (Agent is auto-created in __init__) ---
     manager = InventoryManager()
-    manager.agent = agent
 
     # --- Invoke the agent ---
     try:
-        result = await invoke(
-            manager,
+        result = await manager.invoke_agent(
             prompt=(
                 "Create 3 items: 'Widget A' (qty=10, cat=cat-0), "
                 "'Widget B' (qty=0, cat=cat-1), 'Gadget C' (qty=20, cat=cat-2). "
@@ -122,13 +116,14 @@ async def main():
                 "append them to self._items."
             ),
             output_schema=SetupResult,
-            thread_id="setup-001",
+            persistent_thread_id="setup-001",
         )
-        print(f"Success: {result['success']}")
-        print(f"Result: {result['result']}")
-        print(f"Thread ID: {result['thread_id']}")
+        if isinstance(result, Error):
+            print(f"Error: {result.message}")
+        else:
+            print(f"Result: {result}")
     except Exception as e:
-        print(f"API failure: {e}")
+        print(f"API failure: {e!r}")
 
 
 if __name__ == "__main__":
