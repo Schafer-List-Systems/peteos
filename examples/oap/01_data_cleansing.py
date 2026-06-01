@@ -5,22 +5,22 @@ Normalize messy, heterogeneous, or inconsistently formatted data records
 using agent reasoning.
 
 Usage:
-    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/01_data_cleansing.py
-
-Configure your LLM backend before running:
-    await chatbot_manager.add_backend("name", "http://your-backend:port")
+    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/01_data_cleansing.py \
+        http://localhost:8080
 """
 
+import sys
 from dataclasses import dataclass
 
 from peteos import AgenticObjectBase, Error, tool
-from peteos.oap import tool
+from peteos.chatbot.manager import ChatBotManager
 
 
 class PersonRecord(AgenticObjectBase):
     """A person record with messy personal data for normalization."""
 
     def __init__(self):
+        super().__init__()
         self._full_name = "Dr. John Michael Smith Jr."
         self._height = "5'11\""
         self._birth_date = "03/15/1990"
@@ -100,25 +100,16 @@ class CleansingResult:
 
 async def main():
     """Set up an Agent and invoke it on a PersonRecord."""
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <backend-url>")
+        sys.exit(1)
+    backend_url = sys.argv[1]
+
     # --- Set up peteos components ---
-    from peteos.agent import Agent
-    from peteos.chatbot.manager import ChatBotManager
-    from peteos.role import Role
-    from peteos.rolemanager import RoleManager
-    from peteos.toolmanager import ToolManager
-
-    role_manager = RoleManager()
     chatbot_manager = ChatBotManager(timeout=60)
-    tool_manager = ToolManager()
-
-    # Configure your LLM backend here:
-    await chatbot_manager.add_backend("local", "http://localhost:PORT")
-
-    # --- Create Agent and attach it to the OAP object ---
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    await chatbot_manager.add_backend("local", backend_url)
 
     person = PersonRecord()
-    person.agent = agent
 
     # --- Invoke the agent ---
     try:
