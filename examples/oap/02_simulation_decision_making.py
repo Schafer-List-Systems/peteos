@@ -19,6 +19,7 @@ class LocationRecord(AgenticObjectBase):
     """A position in a 2D simulation space."""
 
     def __init__(self, x: float = 0.0, y: float = 0.0):
+        super().__init__()
         self._x = x
         self._y = y
 
@@ -50,6 +51,7 @@ class TaskRecord(AgenticObjectBase):
     """A task in the simulation."""
 
     def __init__(self):
+        super().__init__()
         self._description = "Fetch water"
         self._priority = 5
         self._target_location = LocationRecord(x=45.0, y=12.0)
@@ -87,6 +89,7 @@ class NPC(AgenticObjectBase):
     """A simulated character that reasons over its state to decide actions."""
 
     def __init__(self):
+        super().__init__()
         self._position = LocationRecord(x=15.2, y=8.5)
         self._hunger = 75.0  # 0-100 scale
         self._tasks = [TaskRecord()]
