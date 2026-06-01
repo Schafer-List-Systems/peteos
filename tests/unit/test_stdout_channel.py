@@ -9,7 +9,6 @@ from peteos.channels import ReadStdoutChannel
 from peteos.channels.channel import Channel
 from peteos.agent import Agent
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 from peteos.chatbot import ChatBotManager
 
@@ -29,9 +28,8 @@ def _cleanup_channels():
 
 def _make_agent():
     _cleanup_channels()
-    rm = RoleManager()
-    rm.register_role(Role(name="test", description="Test role"))
-    return Agent(rm, ToolManager())
+    role = Role(name="test", description="Test role")
+    return Agent(role, ToolManager())
 
 
 class TestReadStdoutChannelInit:

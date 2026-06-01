@@ -10,7 +10,6 @@ from peteos.channels.channel import Channel
 from peteos.agent import Agent
 from peteos.channels import InteractiveShellChannel
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.chatbot import ChatBotManager
 
 
@@ -32,7 +31,7 @@ class TestShellChannelInit:
     """Test InteractiveShellChannel initialization."""
 
     def setup_method(self):
-        """Set up agent with role manager."""
+        """Set up agent."""
         _cleanup_channels()
 
     def teardown_method(self):
@@ -42,10 +41,10 @@ class TestShellChannelInit:
     @pytest.mark.asyncio
     async def test_shell_channel_creation(self):
         """Test creating a shell channel."""
-        role_manager = RoleManager()
+        role = Role(name="test", description="Test role")
         tool_manager = MagicMock()
 
-        agent = Agent(role_manager, tool_manager)
+        agent = Agent(role, tool_manager)
         shell_channel = InteractiveShellChannel("shell", agent)
 
         assert shell_channel.name == "shell"
@@ -57,10 +56,10 @@ class TestShellChannelInit:
 
     def test_shell_channel_registered_with_agent(self):
         """Test shell channel is registered with agent."""
-        role_manager = RoleManager()
+        role = Role(name="test", description="Test role")
         tool_manager = MagicMock()
 
-        agent = Agent(role_manager, tool_manager)
+        agent = Agent(role, tool_manager)
         channel = InteractiveShellChannel("shell", agent)
 
         assert agent.get_channel("shell") == channel
@@ -73,13 +72,10 @@ class TestShellChannelCommands:
         """Set up agent with roles."""
         _cleanup_channels()
 
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(Role(name="test", description="Test role"))
-        self.role_manager.register_role(Role(name="assistant", description="Assistant role"))
-
+        self.role = Role(name="test", description="Test role")
         self.tool_manager = MagicMock()
 
-        self.agent = Agent(self.role_manager, self.tool_manager)
+        self.agent = Agent(self.role, self.tool_manager)
 
     def teardown_method(self):
         """Clean up."""
@@ -102,24 +98,25 @@ class TestShellChannelCommands:
         assert output == ""
         assert self.agent.get_session(channel.active_session_uuid) is not None
 
-    def test_command_new_missing_role(self):
-        """Test /new without role returns usage."""
+    def test_command_new_creates_session(self):
+        """Test /new creates a session without role arg."""
         channel = InteractiveShellChannel("shell", self.agent)
         should_continue, output = channel.handle_command("/new")
 
         assert should_continue is True
-        assert "Usage: /new" in output
+        assert output == ""
+        assert self.agent.get_session(channel.active_session_uuid) is not None
 
     def test_command_list(self):
         """Test /list command lists sessions."""
         channel = InteractiveShellChannel("shell", self.agent)
         # Create a session first
-        channel.handle_command("/new test")
+        channel.handle_command("/new")
         # Now list
         should_continue, output = channel.handle_command("/list")
 
         assert should_continue is True
-        assert "Sessions:" in output
+        assert "Sessions (test):" in output
         assert "(active)" in output
 
     def test_command_list_empty(self):
@@ -130,34 +127,33 @@ class TestShellChannelCommands:
         assert should_continue is True
         assert "No sessions available" in output
 
-    def test_command_select_existing_session(self):
-        """Test /select with existing session."""
+    def test_command_switch_existing_session(self):
+        """Test /switch with existing session."""
         channel = InteractiveShellChannel("shell", self.agent)
         # Create and get UUID
-        channel.handle_command("/new test")
+        channel.handle_command("/new")
         session_uuid = channel.active_session_uuid
 
-        # Select the same session
-        should_continue, output = channel.handle_command(f"/select {session_uuid}")
+        # Switch to the same session
+        should_continue, output = channel.handle_command(f"/switch {session_uuid}")
 
         assert should_continue is True
-        # Session selection is now logged, not displayed
         assert output == ""
         assert channel.active_session_uuid == session_uuid
 
-    def test_command_select_invalid_uuid(self):
-        """Test /select with invalid UUID."""
+    def test_command_switch_invalid_uuid(self):
+        """Test /switch with invalid UUID."""
         channel = InteractiveShellChannel("shell", self.agent)
-        should_continue, output = channel.handle_command("/select invalid-uuid")
+        should_continue, output = channel.handle_command("/switch invalid-uuid")
 
         assert should_continue is True
         assert "Invalid UUID" in output
 
-    def test_command_select_nonexistent_session(self):
-        """Test /select with non-existent session."""
+    def test_command_switch_nonexistent_session(self):
+        """Test /switch with non-existent session."""
         channel = InteractiveShellChannel("shell", self.agent)
         session_uuid = uuid.UUID("810fb120-e4e5-4e32-9718-88bbcaf7641a")
-        should_continue, output = channel.handle_command(f"/select {session_uuid}")
+        should_continue, output = channel.handle_command(f"/switch {session_uuid}")
 
         assert should_continue is True
         assert "not found" in output
@@ -219,10 +215,9 @@ class TestShellChannelRun:
         """Set up agent."""
         _cleanup_channels()
 
-        self.role_manager = RoleManager()
-        self.role_manager.register_role(Role(name="test", description="Test"))
+        self.role = Role(name="test", description="Test")
         self.tool_manager = MagicMock()
-        self.agent = Agent(self.role_manager, self.tool_manager)
+        self.agent = Agent(self.role, self.tool_manager)
 
     def teardown_method(self):
         """Clean up."""

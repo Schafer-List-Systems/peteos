@@ -17,7 +17,6 @@ from peteos.channels import InteractiveShellChannel
 from peteos.chatbot.manager import ChatBotManager
 from peteos.logger import setup_logging
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
@@ -74,9 +73,8 @@ async def setup_components():
     print("Starting mock backend on http://localhost:18888...")
     runner = await create_mock_backend(18888)
 
-    # Setup role manager
-    role_manager = RoleManager()
-    role_manager.register_role(Role(name="demo", description="Demo role", model="demo-model"))
+    # Setup role
+    role = Role(name="demo", description="Demo role", model="demo-model")
 
     # Setup chatbot manager with mock backend
     ChatBotManager.reset()
@@ -103,7 +101,7 @@ async def setup_components():
     tool_manager.register_tool(func=get_weather)
     tool_manager.register_tool(func=calculate)
 
-    return runner, role_manager, tool_manager
+    return runner, role, tool_manager
 
 
 async def main():
@@ -117,12 +115,12 @@ async def main():
     print()
 
     # Setup components
-    runner, role_manager, tool_manager = await setup_components()
+    runner, role, tool_manager = await setup_components()
     print("Components ready!")
     print()
 
     # Create the Agent
-    agent = Agent(role_manager, tool_manager)
+    agent = Agent(role, tool_manager)
     await agent.start()
     print("Agent started")
     print()

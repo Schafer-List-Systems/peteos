@@ -13,7 +13,6 @@ from peteos.agent import Agent
 from peteos.chatbot import ChatBotManager
 from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
@@ -72,10 +71,7 @@ async def test_message_processed_during_execution_env_run():
     await client.start_server()
 
     try:
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test role", model="test-model")
-        )
+        role = Role(name="test", description="Test role", model="test-model")
 
         ChatBotManager.reset()
         await ChatBotManager.add_backend(
@@ -83,9 +79,9 @@ async def test_message_processed_during_execution_env_run():
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
-        session = await agent.create_session("test")
+        session = await agent.create_session()
 
         user_message = Message(
             role="user",
@@ -115,10 +111,7 @@ async def test_multiple_messages_processed_in_sequence():
     await client.start_server()
 
     try:
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test role", model="test-model")
-        )
+        role = Role(name="test", description="Test role", model="test-model")
 
         ChatBotManager.reset()
         await ChatBotManager.add_backend(
@@ -126,9 +119,9 @@ async def test_multiple_messages_processed_in_sequence():
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
-        session = await agent.create_session("test")
+        session = await agent.create_session()
 
         # Queue all 3 messages at once
         for i in range(3):
@@ -161,10 +154,7 @@ async def test_messages_not_lost_when_queue_polling():
     await client.start_server()
 
     try:
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test role", model="test-model")
-        )
+        role = Role(name="test", description="Test role", model="test-model")
 
         ChatBotManager.reset()
         await ChatBotManager.add_backend(
@@ -172,9 +162,9 @@ async def test_messages_not_lost_when_queue_polling():
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
-        session = await agent.create_session("test")
+        session = await agent.create_session()
 
         msg = Message(
             role="user",

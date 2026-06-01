@@ -14,7 +14,6 @@ from peteos.channels import NextcloudTalkChannel
 from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 
 
 def _cleanup_channels():
@@ -44,11 +43,10 @@ def clean_registry():
 
 @pytest.fixture
 def agent():
-    role_manager = RoleManager()
-    role_manager.register_role(Role(name="test", description="Test"))
+    role = Role(name="test", description="Test")
     tool_manager = MagicMock()
     agent_mock = MagicMock(
-        role_manager=role_manager,
+        role=role,
         create_session=AsyncMock(),
         get_session=MagicMock(),
         register_channel=MagicMock(),
@@ -87,8 +85,6 @@ class TestNextcloudTalkChannelInit:
     """Test NextcloudTalkChannel initialization."""
 
     def test_channel_creation(self, agent):
-        role_manager = RoleManager()
-        role_manager.register_role(Role(name="test", description="Test"))
         agent = MagicMock(create_session=MagicMock(), get_session=MagicMock())
 
         channel = NextcloudTalkChannel(
@@ -160,8 +156,7 @@ class TestEventDispatch:
 
     @pytest.mark.asyncio
     async def test_handle_create_message(self, agent):
-        agent.role_manager = RoleManager()
-        agent.role_manager.register_role(Role(name="test", description="Test"))
+        agent.role = Role(name="test", description="Test")
 
         session_uuid = uuid.uuid4()
         session_mock = MagicMock(uuid=session_uuid)

@@ -6,7 +6,6 @@ from peteos.agent import Agent
 from peteos.chatbot.manager import ChatBotManager
 from peteos.logger import setup_logging
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager, Tool
 from peteos.chatbot.message import Message
 from peteos.chatbot.contentpart import ContentPart
@@ -14,8 +13,7 @@ from peteos.chatbot.contentpart import ContentPart
 async def test():
     setup_logging(level='DEBUG', debug=True)
 
-    role_manager = RoleManager()
-    role_manager.register_role(Role(name='test', description='Test role', model='.*'))
+    role = Role(name='test', description='Test role', model='.*')
 
     ChatBotManager.reset()
     await ChatBotManager.load_from_file('config/chatbot_config.json')
@@ -29,10 +27,10 @@ async def test():
 
     tool_manager.register_tool(Tool.from_callable(random_number))
 
-    agent = Agent(role_manager, tool_manager)
+    agent = Agent(role, tool_manager)
     await agent.start()
 
-    session = agent.create_session('test')
+    session = await agent.create_session()
     print(f'Session created: {session.uuid}')
     print()
 

@@ -5,16 +5,14 @@ Use agent reasoning to drive decisions in simulations — game NPCs, robots,
 or any state-driven system.
 
 Usage:
-    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/02_simulation_decision_making.py
-
-Configure your LLM backend before running:
-    await chatbot_manager.add_backend("name", "http://your-backend:port")
+    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/02_simulation_decision_making.py \
+        http://localhost:8080
 """
 
+import sys
 from dataclasses import dataclass
 
 from peteos import AgenticObjectBase, Error, tool
-from peteos.oap import tool
 
 
 class LocationRecord(AgenticObjectBase):
@@ -123,25 +121,18 @@ class NPC(AgenticObjectBase):
 
 async def main():
     """Set up an Agent and invoke it on an NPC for decision making."""
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <backend-url>")
+        sys.exit(1)
+    backend_url = sys.argv[1]
+
     # --- Set up peteos components ---
-    from peteos.agent import Agent
     from peteos.chatbot.manager import ChatBotManager
-    from peteos.role import Role
-    from peteos.rolemanager import RoleManager
-    from peteos.toolmanager import ToolManager
 
-    role_manager = RoleManager()
     chatbot_manager = ChatBotManager(timeout=None)
-    tool_manager = ToolManager()
-
-    # Configure your LLM backend here:
-    await chatbot_manager.add_backend("local", "http://localhost:PORT")
-
-    # --- Create Agent and attach it to the OAP object ---
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    await chatbot_manager.add_backend("local", backend_url)
 
     npc = NPC()
-    npc.agent = agent
 
     # --- Invoke the agent ---
     try:

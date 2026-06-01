@@ -138,8 +138,7 @@ class TestHookCalling:
         env.register_hook("before_tool_execution", test_hook)
 
         # Manually call hooks
-        env._call_hooks("before_tool_execution", {"name": "test"})
-
+        result = await env._call_hooks("before_tool_execution", {"name": "test"})
         assert hook_called[0]
 
     @pytest.mark.asyncio
@@ -155,7 +154,7 @@ class TestHookCalling:
 
         env.register_hook("before_tool_execution", blocking_hook)
 
-        result = env._call_hooks("before_tool_execution", {"name": "test"})
+        result = await env._call_hooks("before_tool_execution", {"name": "test"})
 
         assert result == (False, "Blocked!")
 
@@ -179,7 +178,7 @@ class TestHookCalling:
         env.register_hook("before_tool_execution", hook1)
         env.register_hook("before_tool_execution", hook2)
 
-        result = env._call_hooks("before_tool_execution", {"name": "test"})
+        result = await env._call_hooks("before_tool_execution", {"name": "test"})
 
         assert result == (False, "First")
         assert call_order == [1]  # hook2 should not be called

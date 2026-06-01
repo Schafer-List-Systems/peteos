@@ -49,7 +49,7 @@ def _make_mock_session(chat_history, tool_manager, has_unfinished=False, has_pen
 
     mock.pop_pending_tool_call = pop_record
 
-    def append_and_notify(message):
+    async def append_and_notify(message):
         chat_history.append_message(message)
 
     mock.append_and_notify = append_and_notify

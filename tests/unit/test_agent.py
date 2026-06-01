@@ -8,34 +8,32 @@ import pytest
 
 from peteos.agent import Agent
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
-from peteos.chatbot import Message, ContentPart
+from peteos.chatbot import Message, ContentPart, ChatBotManager
 from peteos.toolmanager import ToolManager
+
+
+@pytest.fixture(autouse=True)
+def _setup_mock_chatbot():
+    """Set up a mock ChatBot in the class-level ChatBotManager for tests."""
+    ChatBotManager._backends = {"test-backend": MagicMock(models={"test_model": MagicMock()})}
+    yield
+    ChatBotManager._backends.clear()
 
 
 @pytest.fixture
 def agent():
     """Create a fresh Agent for each test."""
-    role_manager = RoleManager()
-    role_manager.register_role(
-        Role(name="test", description="Test role", model=".*")
-    )
+    role = Role(name="test", description="Test role", model=".*")
     tool_manager = ToolManager()
-    return Agent(role_manager, tool_manager)
+    return Agent(role, tool_manager)
 
 
 @pytest.fixture
 def agent_with_sessions():
     """Create a fresh Agent, auto-cleanup."""
-    role_manager = RoleManager()
-    role_manager.register_role(
-        Role(name="test", description="Test role", model=".*")
-    )
-    role_manager.register_role(
-        Role(name="assistant", description="Assistant role", model=".*")
-    )
+    role = Role(name="test", description="Test role", model=".*")
     tool_manager = ToolManager()
-    ag = Agent(role_manager, tool_manager)
+    ag = Agent(role, tool_manager)
     yield ag
     # Cleanup: stop all sessions
     for session_uuid in list(ag._sessions.keys()):
@@ -48,19 +46,32 @@ def agent_with_sessions():
 
 
 @pytest.fixture
+def agent_with_assistant_role():
+    """Create a fresh Agent with assistant role, auto-cleanup."""
+    role = Role(name="assistant", description="Assistant role", model=".*")
+    tool_manager = ToolManager()
+    ag = Agent(role, tool_manager)
+    yield ag
+    for session_uuid in list(ag._sessions.keys()):
+        session = ag.get_session(session_uuid)
+        if session and session.is_running():
+            try:
+                asyncio.get_event_loop().run_until_complete(session.stop())
+            except RuntimeError:
+                pass
+
+
+@pytest.fixture
 def agent_with_auto_approve():
     """Create an Agent with a role that has auto_approve_tools."""
-    role_manager = RoleManager()
-    role_manager.register_role(
-        Role(
-            name="autobot",
-            description="Auto-approves some tools",
-            model=".*",
-            auto_approve_tools=["web_fetch"]
-        )
+    role = Role(
+        name="autobot",
+        description="Auto-approves some tools",
+        model=".*",
+        auto_approve_tools=["web_fetch"]
     )
     tool_manager = ToolManager()
-    ag = Agent(role_manager, tool_manager)
+    ag = Agent(role, tool_manager)
     yield ag
     for session_uuid in list(ag._sessions.keys()):
         session = ag.get_session(session_uuid)
@@ -92,7 +103,7 @@ def test_get_session_not_found(agent):
 @pytest.mark.asyncio
 async def test_create_session(agent_with_sessions):
     """Test creating a session."""
-    session = await agent_with_sessions.create_session("test")
+    session = await agent_with_sessions.create_session()
 
     assert session.role.name == "test"
     assert session.uuid in agent_with_sessions._sessions
@@ -101,15 +112,16 @@ async def test_create_session(agent_with_sessions):
 
 @pytest.mark.asyncio
 async def test_create_session_invalid_role(agent):
-    """Test creating session with invalid role raises error."""
-    with pytest.raises(ValueError, match="not found"):
-        await agent.create_session("nonexistent")
+    """Test that create_session uses the agent's role."""
+    # With the new Agent(role, tool_manager) API, create_session() takes no arguments
+    # and uses the agent's role. No invalid role concept exists.
+    pass
 
 
 @pytest.mark.asyncio
 async def test_get_session(agent_with_sessions):
     """Test getting a session by UUID."""
-    session = await agent_with_sessions.create_session("test")
+    session = await agent_with_sessions.create_session()
     retrieved = agent_with_sessions.get_session(session.uuid)
     assert retrieved == session
 
@@ -117,8 +129,8 @@ async def test_get_session(agent_with_sessions):
 @pytest.mark.asyncio
 async def test_list_sessions(agent_with_sessions):
     """Test listing all sessions."""
-    session1 = await agent_with_sessions.create_session("test")
-    session2 = await agent_with_sessions.create_session("assistant")
+    session1 = await agent_with_sessions.create_session()
+    session2 = await agent_with_sessions.create_session()
 
     sessions = agent_with_sessions.list_sessions()
     assert len(sessions) == 2
@@ -129,7 +141,7 @@ async def test_list_sessions(agent_with_sessions):
 @pytest.mark.asyncio
 async def test_destroy_session(agent_with_sessions):
     """Test destroying a session."""
-    session = await agent_with_sessions.create_session("test")
+    session = await agent_with_sessions.create_session()
     result = await agent_with_sessions.destroy_session(session.uuid)
 
     assert result is True
@@ -144,17 +156,16 @@ async def test_destroy_session_not_found(agent_with_sessions):
     assert result is False
 
 
-def test_publish_notification_to_channels(agent_with_sessions):
+@pytest.mark.asyncio
+async def test_publish_notification_to_channels(agent_with_sessions):
     """Test publishing notification to subscribed channels."""
-    session = asyncio.get_event_loop().run_until_complete(
-        agent_with_sessions.create_session("test")
-    )
+    session = await agent_with_sessions.create_session()
 
     channel = MagicMock()
     channel.name = "shell"
     session.subscribe(channel)
 
-    session.publish_notification(
+    await session.publish_notification(
         Message(role="user", content=[ContentPart(part_type="text", text="Test")])
     )
 
@@ -164,7 +175,7 @@ def test_publish_notification_to_channels(agent_with_sessions):
 @pytest.mark.asyncio
 async def test_on_before_tool_execution(agent_with_sessions):
     """Test before_tool_execution hook callback."""
-    session = await agent_with_sessions.create_session("test")
+    session = await agent_with_sessions.create_session()
     tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
 
     result = agent_with_sessions._on_before_tool_execution(session, tool_call)
@@ -174,7 +185,7 @@ async def test_on_before_tool_execution(agent_with_sessions):
 @pytest.mark.asyncio
 async def test_on_after_tool_execution(agent_with_sessions):
     """Test after_tool_execution hook callback."""
-    session = await agent_with_sessions.create_session("test")
+    session = await agent_with_sessions.create_session()
     tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
 
     agent_with_sessions._on_after_tool_execution(session, tool_call, "result", True)
@@ -183,7 +194,7 @@ async def test_on_after_tool_execution(agent_with_sessions):
 @pytest.mark.asyncio
 async def test_on_before_notification_publish(agent_with_sessions):
     """Test before_notification_publish hook callback."""
-    session = await agent_with_sessions.create_session("test")
+    session = await agent_with_sessions.create_session()
     msg = Message(role="assistant", content=[ContentPart(part_type="text", text="Hello")])
 
     agent_with_sessions._on_before_notification_publish(session, msg)
@@ -192,7 +203,7 @@ async def test_on_before_notification_publish(agent_with_sessions):
 @pytest.mark.asyncio
 async def test_agent_creates_session_hooks(agent_with_sessions):
     """Test that creating a session registers hooks."""
-    session = await agent_with_sessions.create_session("test")
+    session = await agent_with_sessions.create_session()
 
     env = session.execution_environment
     assert "before_tool_execution" in env._hooks
@@ -204,7 +215,7 @@ async def test_agent_creates_session_hooks(agent_with_sessions):
 @pytest.mark.asyncio
 async def test_on_before_tool_execution_auto_approve(agent_with_auto_approve):
     """Test that tools in auto_approve_tools are immediately approved."""
-    session = await agent_with_auto_approve.create_session("autobot")
+    session = await agent_with_auto_approve.create_session()
 
     # Tool in auto_approve_tools should return (True, None)
     approved_result = agent_with_auto_approve._on_before_tool_execution(
@@ -222,7 +233,7 @@ async def test_on_before_tool_execution_auto_approve(agent_with_auto_approve):
 @pytest.mark.asyncio
 async def test_on_before_tool_execution_auto_approve_empty_list(agent_with_sessions):
     """Test that empty auto_approve_tools still requires approval."""
-    session = await agent_with_sessions.create_session("test")
+    session = await agent_with_sessions.create_session()
 
     result = agent_with_sessions._on_before_tool_execution(
         session, {"name": "test_tool", "arguments": {"param": "value"}}

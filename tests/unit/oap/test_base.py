@@ -11,15 +11,19 @@ from peteos.toolmanager import ToolManager
 class TestAgenticObjectBaseInit:
     def test_default_init(self):
         obj = AgenticObjectBase()
-        assert obj.agent is None
+        assert obj.agent is not None
         assert obj.role is not None
         assert obj.role.name == "oap_AgenticObjectBase"
         assert isinstance(obj._oap_tool_manager, ToolManager)
 
     def test_agent_property(self):
         obj = AgenticObjectBase()
+        original = obj.agent
+        assert original is not None
         obj.agent = "mock_agent"
         assert obj.agent == "mock_agent"
+        # Should be able to restore
+        obj.agent = original
 
     def test_role_auto_created(self):
         obj = AgenticObjectBase()
@@ -30,9 +34,8 @@ class TestToolRegistry:
     def test_tool_decorated_methods_are_registered(self):
         obj = SimpleToolObj()
         tools = obj._oap_tool_manager.get_tool_list()
-        assert len(tools) == 2
-        assert tools[0].name == "hello"
-        assert tools[1].name == "produce_output"
+        assert len(tools) == 3
+        assert {t.name for t in tools} == {"hello", "produce_output", "produce_error"}
 
     def test_tool_execution_works(self):
         obj = SimpleToolObj()
@@ -42,21 +45,21 @@ class TestToolRegistry:
     def test_multiple_tools_registered(self):
         obj = MultiToolObj()
         tools = obj._oap_tool_manager.get_tool_list()
-        assert len(tools) == 3
-        assert {t.name for t in tools} == {"hello", "greet", "produce_output"}
+        assert len(tools) == 4
+        assert {t.name for t in tools} == {"hello", "greet", "produce_output", "produce_error"}
 
     def test_inherited_tools_registered(self):
         obj = ChildToolObj()
         tools = obj._oap_tool_manager.get_tool_list()
-        assert len(tools) == 3
-        assert {t.name for t in tools} == {"parent_tool", "child_tool", "produce_output"}
+        assert len(tools) == 4
+        assert {t.name for t in tools} == {"parent_tool", "child_tool", "produce_output", "produce_error"}
 
     def test_override_replaces_parent_tool(self):
         obj = OverrideToolObj()
         tools = obj._oap_tool_manager.get_tool_list()
-        assert len(tools) == 2
+        assert len(tools) == 3
         assert tools[0].func() == "child"
-        assert tools[1].name == "produce_output"
+        assert {t.name for t in tools} == {"tool_a", "produce_output", "produce_error"}
 
     def test_custom_name_used(self):
         obj = CustomNameToolObj()
@@ -76,8 +79,8 @@ class TestToolRegistry:
     def test_no_tools_no_error(self):
         obj = NoToolObj()
         tools = obj._oap_tool_manager.get_tool_list()
-        assert len(tools) == 1
-        assert tools[0].name == "produce_output"
+        assert len(tools) == 2
+        assert {t.name for t in tools} == {"produce_output", "produce_error"}
 
 
 # --- Module-level class fixtures (avoids Python 3.12 closure issue) ---

@@ -12,7 +12,6 @@ from peteos.agent import Agent
 from peteos.chatbot import ChatBotManager
 from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
@@ -69,8 +68,7 @@ class TestAgentChatFlow(AioHTTPTestCase):
     @pytest.mark.asyncio
     async def test_message_queue_processing(self):
         """Test that posted messages are processed by the event loop."""
-        role_manager = RoleManager()
-        role_manager.register_role(Role(name="test", description="Test", model=".*"))
+        role = Role(name="test", description="Test", model=".*")
 
         ChatBotManager.reset()
         await ChatBotManager.add_backend(
@@ -78,10 +76,10 @@ class TestAgentChatFlow(AioHTTPTestCase):
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
         try:
-            session = await agent.create_session("test")
+            session = await agent.create_session()
 
             msg = Message(
                 role="user",
@@ -101,8 +99,7 @@ class TestAgentChatFlow(AioHTTPTestCase):
     @pytest.mark.asyncio
     async def test_message_triggers_chatbot(self):
         """Test that messages trigger the chatbot to generate responses."""
-        role_manager = RoleManager()
-        role_manager.register_role(Role(name="test", description="Test", model=".*"))
+        role = Role(name="test", description="Test", model=".*")
 
         ChatBotManager.reset()
         await ChatBotManager.add_backend(
@@ -110,10 +107,10 @@ class TestAgentChatFlow(AioHTTPTestCase):
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
         try:
-            session = await agent.create_session("test")
+            session = await agent.create_session()
 
             msg = Message(
                 role="user",
@@ -132,8 +129,7 @@ class TestAgentChatFlow(AioHTTPTestCase):
     @pytest.mark.asyncio
     async def test_full_chat_roundtrip(self):
         """Test complete user question -> agent response flow."""
-        role_manager = RoleManager()
-        role_manager.register_role(Role(name="test", description="Test", model=".*"))
+        role = Role(name="test", description="Test", model=".*")
 
         ChatBotManager.reset()
         await ChatBotManager.add_backend(
@@ -141,10 +137,10 @@ class TestAgentChatFlow(AioHTTPTestCase):
         )
 
         tool_manager = ToolManager()
-        agent = Agent(role_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
         try:
-            session = await agent.create_session("test")
+            session = await agent.create_session()
 
             question = "What is the weather?"
             msg = Message(

@@ -9,7 +9,7 @@ import pytest
 from peteos.chatbot import ChatHistory
 from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
+from peteos.agent import Agent
 from peteos.session import Session
 from peteos.toolmanager import ToolManager, Tool
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
@@ -72,14 +72,11 @@ def test_session_init_with_custom_chat_history():
     assert len(session.chat_history.messages) == 1
 
 
-def test_session_load_from_json():
-    """Test loading Session from JSON dict."""
-    role_manager = RoleManager()
+def test_agent_load_session_from_json():
+    """Test loading Session via Agent.load_session_from_json."""
     tool_manager = ToolManager()
-
-    # Register a role
     role = Role(name="test", description="A test role")
-    role_manager.register_role(role)
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     # Register a required tool
     def dummy_tool():
@@ -111,10 +108,9 @@ def test_session_load_from_json():
         }
     }
 
-    session = Session.load_from_json(
+    session = agent.load_session_from_json(
         session_data,
-        role_manager,
-        tool_manager
+        tool_manager,
     )
 
     assert session.uuid.hex == "810fb120e4e54e32971888bbcaf7641a"
@@ -124,58 +120,50 @@ def test_session_load_from_json():
     assert session.chat_history.messages[1].content[0].text == "Hi!"
 
 
-def test_session_load_from_json_without_uuid():
+def test_agent_load_session_from_json_without_uuid():
     """Test loading Session from JSON without UUID."""
-    role_manager = RoleManager()
     tool_manager = ToolManager()
-
     role = Role(name="test", description="A test role")
-    role_manager.register_role(role)
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     session_data = {
         "role": "test",
         "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
     }
 
-    session = Session.load_from_json(
+    session = agent.load_session_from_json(
         session_data,
-        role_manager,
-        tool_manager
+        tool_manager,
     )
 
     assert session.uuid is not None
 
 
-def test_session_load_from_json_missing_role():
-    """Test loading Session fails when role not found."""
-    role_manager = RoleManager()
+def test_agent_load_session_from_json_role_mismatch():
+    """Test loading Session fails when role name doesn't match."""
     tool_manager = ToolManager()
+    role = Role(name="myrole", description="Different role")
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     session_data = {
         "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
-        "role": "nonexistent",
+        "role": "other",
         "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
     }
 
-    with pytest.raises(ValueError, match="not found in RoleManager"):
-        Session.load_from_json(
-            session_data,
-            role_manager,
-            tool_manager
-        )
+    with pytest.raises(ValueError, match="Role mismatch"):
+        agent.load_session_from_json(session_data, tool_manager)
 
 
-def test_session_load_from_json_missing_required_tool():
+def test_agent_load_session_from_json_missing_required_tool():
     """Test loading Session fails when required tool is missing."""
-    role_manager = RoleManager()
     tool_manager = ToolManager()
-
     role = Role(
         name="test",
         description="A test role",
         required_tools=["missing_tool"]
     )
-    role_manager.register_role(role)
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     session_data = {
         "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
@@ -183,44 +171,35 @@ def test_session_load_from_json_missing_required_tool():
         "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
     }
 
-    with pytest.raises(ValueError, match="requires tool"):
-        Session.load_from_json(
-            session_data,
-            role_manager,
-            tool_manager
-        )
+    with pytest.raises(ValueError, match="Required tool"):
+        agent.load_session_from_json(session_data, tool_manager)
 
 
-def test_session_load_from_json_without_chat_history():
+def test_agent_load_session_from_json_without_chat_history():
     """Test loading Session without chat_history in JSON."""
-    role_manager = RoleManager()
     tool_manager = ToolManager()
-
     role = Role(name="test", description="A test role")
-    role_manager.register_role(role)
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     session_data = {
         "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
         "role": "test"
     }
 
-    session = Session.load_from_json(
+    session = agent.load_session_from_json(
         session_data,
-        role_manager,
-        tool_manager
+        tool_manager,
     )
 
     assert session.chat_history is not None
     assert len(session.chat_history.messages) == 0
 
 
-def test_session_load_from_file():
+def test_agent_load_session_from_file():
     """Test loading Session from JSON file."""
-    role_manager = RoleManager()
     tool_manager = ToolManager()
-
     role = Role(name="test", description="A test role")
-    role_manager.register_role(role)
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     def dummy_tool():
         return "result"
@@ -248,10 +227,9 @@ def test_session_load_from_file():
 
         session_file.write_text(json.dumps(session_data))
 
-        session = Session.load_from_file(
+        session = agent.load_session_from_file(
             str(session_file),
-            role_manager,
-            tool_manager
+            tool_manager,
         )
 
         assert session.uuid.hex == "810fb120e4e54e32971888bbcaf7641a"
@@ -260,13 +238,11 @@ def test_session_load_from_file():
         assert session.chat_history.messages[0].get_role() == "user"
 
 
-def test_session_load_from_file_without_timestamps():
+def test_agent_load_session_from_file_without_timestamps():
     """Test loading Session from file without timestamps."""
-    role_manager = RoleManager()
     tool_manager = ToolManager()
-
     role = Role(name="test", description="A test role")
-    role_manager.register_role(role)
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         session_file = Path(tmpdir) / "session.json"
@@ -287,10 +263,9 @@ def test_session_load_from_file_without_timestamps():
 
         session_file.write_text(json.dumps(session_data))
 
-        session = Session.load_from_file(
+        session = agent.load_session_from_file(
             str(session_file),
-            role_manager,
-            tool_manager
+            tool_manager,
         )
 
         assert len(session.chat_history.messages) == 1
@@ -298,13 +273,11 @@ def test_session_load_from_file_without_timestamps():
         assert session.chat_history.messages[0].creation_timestamp is not None
 
 
-def test_session_load_from_file_no_uuid():
+def test_agent_load_session_from_file_no_uuid():
     """Test loading Session from file without UUID."""
-    role_manager = RoleManager()
     tool_manager = ToolManager()
-
     role = Role(name="test", description="A test role")
-    role_manager.register_role(role)
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         session_file = Path(tmpdir) / "session.json"
@@ -315,22 +288,19 @@ def test_session_load_from_file_no_uuid():
 
         session_file.write_text(json.dumps(session_data))
 
-        session = Session.load_from_file(
+        session = agent.load_session_from_file(
             str(session_file),
-            role_manager,
-            tool_manager
+            tool_manager,
         )
 
         assert session.uuid is not None
 
 
-def test_session_load_from_json_empty_chat_history():
+def test_agent_load_session_from_json_empty_chat_history():
     """Test loading Session with empty chat_history list."""
-    role_manager = RoleManager()
     tool_manager = ToolManager()
-
     role = Role(name="test", description="A test role")
-    role_manager.register_role(role)
+    agent = Agent(role=role, tool_manager=tool_manager)
 
     session_data = {
         "uuid": "810fb120-e4e5-4e32-9718-88bbcaf7641a",
@@ -338,10 +308,9 @@ def test_session_load_from_json_empty_chat_history():
         "chat_history": {"unanchored": [], "anchors": {}, "generation_config": {}}
     }
 
-    session = Session.load_from_json(
+    session = agent.load_session_from_json(
         session_data,
-        role_manager,
-        tool_manager
+        tool_manager,
     )
 
     assert session.chat_history is not None

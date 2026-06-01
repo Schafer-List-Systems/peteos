@@ -30,7 +30,6 @@ from peteos.agent import Agent
 from peteos.chatbot.manager import ChatBotManager
 from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
@@ -44,20 +43,17 @@ async def main():
     print(f"Protocol: {chat_protocol}")
     print()
 
-    # Create role manager with a role
-    role_manager = RoleManager()
-    role_manager.register_role(
-        Role(name="test", description="Test role", model=model)
-    )
+    # Create role
+    role = Role(name="test", description="Test role", model=model)
 
     # Setup ChatBotManager with backend
     ChatBotManager.reset()
     await ChatBotManager.add_backend(chat_protocol, base_url)
 
     tool_manager = ToolManager()
-    agent = Agent(role_manager, tool_manager)
+    agent = Agent(role, tool_manager)
 
-    session = await agent.create_session("test")
+    session = await agent.create_session()
 
     # Define the multi-turn conversation
     questions = [

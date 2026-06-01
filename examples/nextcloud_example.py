@@ -36,7 +36,6 @@ from peteos.chatbot.manager import ChatBotManager
 from peteos.chatbot import Message, ContentPart
 from peteos.logger import setup_logging
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
@@ -53,24 +52,26 @@ async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json")
         raise
 
 
-def setup_role_manager():
-    """Setup RoleManager with available roles.
+def setup_role() -> Role:
+    """Setup the role for the agent.
 
     Returns:
-        Configured RoleManager with roles loaded from roles/ directory.
+        Role loaded from roles/ directory, or default 'test' role.
     """
-    role_manager = RoleManager()
+    from pathlib import Path
 
     try:
-        loaded_roles = role_manager.load_from_dir("roles")
-        print(f"Loaded roles: {', '.join(loaded_roles)}")
+        role_dir = Path("roles")
+        if role_dir.is_dir():
+            for entry in sorted(role_dir.iterdir()):
+                if entry.is_dir():
+                    role = Role.load_from_path(str(entry))
+                    print(f"Loaded role: {role.name}")
+                    return role
     except FileNotFoundError:
-        print("Note: No roles directory found. Creating default 'test' role.")
-        role_manager.register_role(
-            Role(name="test", description="Default test role", model=".*")
-        )
-
-    return role_manager
+        pass
+    print("Note: No roles directory found. Creating default 'test' role.")
+    return Role(name="test", description="Default test role", model=".*")
 
 
 def setup_tool_manager():
@@ -180,12 +181,12 @@ async def main():
     print()
 
     # Setup components
-    role_manager = setup_role_manager()
+    role = setup_role()
     await setup_chatbot_manager(args.chatbot_config)
     tool_manager = setup_tool_manager()
 
     # Create the Agent
-    agent = Agent(role_manager, tool_manager)
+    agent = Agent(role, tool_manager)
 
     # Load Nextcloud configuration
     try:
@@ -212,8 +213,7 @@ async def main():
     print()
 
     # Create a session for the first room and register it
-    role_name = config.get("default_role", "test")
-    session = await agent.create_session(role_name)
+    session = await agent.create_session()
     print(f"Created session: {session.uuid}")
     print()
 
@@ -227,7 +227,7 @@ async def main():
     # to let the app register the room with a session
     async def on_room_joined(room_token: str):
         """Handle new room join: create session and register the room."""
-        new_session = await agent.create_session(role_name)
+        new_session = await agent.create_session()
         await nextcloud.register_room(new_session.uuid, room_token)
         print(f"Registered new room {room_token} with session {new_session.uuid}")
 
