@@ -5,9 +5,7 @@ Zero dependencies — stdlib only.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from email import policy
@@ -16,6 +14,7 @@ from email.parser import BytesParser
 from imaplib import IMAP4_SSL
 from pathlib import Path
 from smtplib import SMTP
+from typing import Sequence
 
 from . import config
 
@@ -31,6 +30,7 @@ def send_email(
     subject: str,
     body: str,
     cc: str | None = None,
+    attachments: Sequence[str | Path] = (),
 ) -> None:
     """Send a plain-text email over TLS.
 
@@ -39,6 +39,7 @@ def send_email(
         subject: Email subject line.
         body: Plain-text body.
         cc: Optional CC address.
+        attachments: File paths to attach.
     """
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -46,7 +47,18 @@ def send_email(
     msg["To"] = to
     if cc:
         msg["Cc"] = cc
-    msg.set_content(body)
+
+    if attachments:
+        msg.add_alternative(body, subtype="html")
+        for path in attachments:
+            msg.add_attachment(
+                Path(path).read_bytes(),
+                maintype="application",
+                subtype="octet-stream",
+                filename=Path(path).name,
+            )
+    else:
+        msg.set_content(body)
 
     with SMTP(config.SMTP_HOST, config.SMTP_PORT) as server:
         server.starttls()
@@ -68,61 +80,23 @@ class EmailInfo:
     attachments: list[Path] = field(default_factory=list)
 
 
-def _load_tracking(path: Path) -> dict[str, set[int]]:
-    if path.exists():
-        with open(path, "r") as f:
-            raw = json.load(f)
-        return {folder: set(ints) for folder, ints in raw.items()}
-    return {}
-
-
-def _save_tracking(path: Path, tracking: dict[str, set[int]]) -> None:
-    tmp = str(path) + ".tmp"
-    raw = {folder: sorted(uids) for folder, uids in tracking.items()}
-    with open(tmp, "w") as f:
-        json.dump(raw, f, indent=2)
-    os.replace(tmp, str(path))
-
-
-def _default_tracking_path() -> Path:
-    return Path(os.path.dirname(__file__)) / "imap_tracking.json"
-
-
-@dataclass
-class _Tracking:
-    path: Path
-    data: dict[str, set[int]] = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.data = _load_tracking(self.path)
-
-    def get_processed(self, folder: str) -> set[int]:
-        return self.data.setdefault(folder, set())
-
-    def mark_processed(self, folder: str, uids: set[int]) -> None:
-        self.data.setdefault(folder, set()).update(uids)
-        _save_tracking(self.path, self.data)
-
-
 def search_emails(
     folder: str | None = None,
     subject_regex: re.Pattern | None = None,
-    tracking_path: Path | None = None,
 ) -> list[int]:
-    """Search IMAP for unseen emails matching a subject regex.
+    """Search IMAP for unread emails matching a subject regex.
+
+    IMAP's UNSEEN flag handles deduplication — once an email is fetched,
+    it is marked SEEN on the server and won't appear again.
 
     Args:
         folder: IMAP folder to search (default from config).
         subject_regex: If provided, filter by subject pattern.
-        tracking_path: Path to local tracking file.
 
     Returns:
-        List of message UIDs that match and are not yet processed.
+        List of message UIDs that match.
     """
     folder = folder or config.IMAP_FOLDER
-    tracking_path = tracking_path or _default_tracking_path()
-    tracking = _Tracking(path=tracking_path)
-    processed = tracking.get_processed(folder)
 
     con = IMAP4_SSL(config.IMAP_HOST, config.IMAP_PORT)
     con.login(config.IMAP_USERNAME, config.IMAP_PASSWORD)
@@ -134,19 +108,19 @@ def search_emails(
         con.logout()
         return []
 
-    all_uids = set(int(uid) for uid in data[0].split()) - processed
+    uids = [int(uid) for uid in data[0].split()]
 
     if subject_regex is None:
         con.logout()
-        return list(all_uids)
+        return uids
 
     # Fetch subjects for filtering (batch fetch)
-    uid_str = b",".join(str(uid).encode() for uid in all_uids)
+    uid_str = b",".join(str(uid).encode() for uid in uids)
     status, msg_data = con.fetch(uid_str, "(BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
     con.logout()
 
     if status != "OK":
-        return list(all_uids)
+        return uids
 
     matched: list[int] = []
     for response in msg_data:
@@ -164,7 +138,6 @@ def fetch_email(
     uid: int,
     folder: str | None = None,
     attachments_dir: Path | None = None,
-    tracking_path: Path | None = None,
 ) -> EmailInfo:
     """Download and parse a single email by UID.
 
@@ -172,15 +145,11 @@ def fetch_email(
         uid: IMAP message UID.
         folder: IMAP folder (default from config).
         attachments_dir: Directory to save attachments.
-        tracking_path: Path to local tracking file.
 
     Returns:
         Parsed EmailInfo with body text and saved attachments.
     """
     folder = folder or config.IMAP_FOLDER
-    tracking_path = tracking_path or _default_tracking_path()
-    tracking = _Tracking(path=tracking_path)
-    tracking.mark_processed(folder, {uid})
 
     con = IMAP4_SSL(config.IMAP_HOST, config.IMAP_PORT)
     con.login(config.IMAP_USERNAME, config.IMAP_PASSWORD)

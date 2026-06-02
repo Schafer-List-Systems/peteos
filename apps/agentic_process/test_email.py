@@ -14,7 +14,9 @@ Usage:
 import asyncio
 import re
 import sys
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from . import config
 from .email import fetch_email, search_emails, send_email
@@ -30,35 +32,39 @@ async def main() -> int:
 
     # 1. Baseline: count unread emails
     print("[1/3] Searching for unread emails (baseline)...")
-    baseline = search_emails(tracking_path=None)
+    baseline = search_emails()
     print(f"  Found {len(baseline)} unread email(s)")
     print()
 
-    # 2. Send test email to self
+    # 2. Send test email to self with a small attachment
     subject = "peteos-healthcheck"
     body = f"Health check sent at {datetime.now(timezone.utc).isoformat()}"
-    print("[2/3] Sending test email to self...")
+    print("[2/4] Sending test email to self with attachment...")
     try:
+        tmp_path = Path("/tmp/peteos-healthcheck-attachment.txt")
+        tmp_path.write_text("Hello from PetEOS — health check attachment")
         send_email(
             to=config.FROM_ADDRESS,
             subject=subject,
             body=body,
+            attachments=[tmp_path],
         )
         print("  Sent OK")
     except Exception as e:
         print(f"  FAILED: {e}")
         return 1
+    finally:
+        tmp_path.unlink(missing_ok=True)
     print()
 
-    # 3. Verify delivery
-    print("[3/3] Waiting for delivery, then searching again...")
+    # 3. Verify delivery and attachment
+    print("[3/4] Waiting for delivery, then searching again...")
     import time
     time.sleep(5)
 
     # Use the existing API — search_emails with subject_regex does everything we need
     matched = search_emails(
         subject_regex=re.compile(re.escape(subject), re.IGNORECASE),
-        tracking_path=None,
     )
 
     if not matched:
@@ -68,14 +74,41 @@ async def main() -> int:
     print(f"  Found {len(matched)} matching email(s)")
     uid = matched[-1]  # most recent
 
-    info = fetch_email(uid=uid, attachments_dir=None, tracking_path=None)
+    # Fetch and save attachments to a temp dir
+    temp_dir = Path("/tmp/peteos-attachments")
+    temp_dir.mkdir(exist_ok=True)
+    info = fetch_email(uid=uid, attachments_dir=temp_dir)
     print(f"  From:    {info.from_addr}")
     print(f"  Subject: {info.subject}")
     print(f"  Body:    {info.body_text}")
+    print(f"  Attachments: {info.attachments}")
 
     if subject not in info.subject:
         print(f"  FAILED: expected subject '{subject}'")
         return 1
+
+    if not info.attachments:
+        print("  FAILED: no attachments found")
+        return 1
+
+    # 4. Verify attachment integrity
+    print("[4/4] Verifying attachment integrity...")
+    saved = info.attachments[0]
+    if not saved.name == "peteos-healthcheck-attachment.txt":
+        print(f"  FAILED: unexpected attachment filename {saved.name}")
+        return 1
+    if saved.read_text() != "Hello from PetEOS — health check attachment":
+        print("  FAILED: attachment content mismatch")
+        return 1
+    print("  Attachment OK")
+
+    # Cleanup
+    for child in temp_dir.iterdir():
+        child.unlink()
+    try:
+        temp_dir.rmdir()
+    except FileNotFoundError:
+        pass
 
     print()
     print("=== PASS ===")
