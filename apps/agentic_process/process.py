@@ -22,7 +22,7 @@ class Process(Workflow):
         task.state = TaskState.ACTIVE
         self._active_tasks.append(task.task_id)
 
-    def update(self) -> bool:
+    async def update(self) -> bool:
         """Process one step of the engine.
 
         Must be called iteratively by an external scheduler.
@@ -37,15 +37,8 @@ class Process(Workflow):
         task_id = self._active_tasks.pop(0)
         task = self._tasks[task_id]
 
-        # 2. Trigger the agent on this task
-        #    The agent calls accept() or deny() tools, which update task state.
-        #    The agent also evaluates outgoing edge conditions and sets each edge
-        #    to ENABLED or DISABLED (transitioning from SCHEDULED).
-        #    If no tool is called, the task remains in its current state.
-        task.proceed()
-
-        # 3. Handle the task's new state
-        state = task.state
+        # 2. Trigger the agent on this task and handle state changes
+        state = await task.proceed()
 
         if state == TaskState.PENDING:
             # 3a. Task is waiting for external input
@@ -71,15 +64,7 @@ class Process(Workflow):
         return bool(self._active_tasks)
 
     def _activate_ready_tasks(self, completed_task: "Task") -> None:
-        """Find all READY successor tasks of the completed task and transition them to ACTIVE.
-
-        A task is READY when:
-        - All its incoming edges are in a terminal state (ENABLED or DISABLED)
-        - The task itself is still SCHEDULED
-
-        A READY task transitions to ACTIVE when:
-        - Every ENABLED incoming edge has its predecessor task in OK state
-        """
+        """Find all READY successor tasks of the completed task and transition them to ACTIVE."""
         for successor in completed_task.get_successor_tasks():
             if successor.state != TaskState.SCHEDULED:
                 raise RuntimeError(

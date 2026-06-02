@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **Process Engine** drives a runtime Process forward through its Workflow by iteratively invoking agents on active tasks and propagating state changes through the graph. Unlike a traditional state machine with a single active state, multiple tasks can be ACTIVE concurrently. The engine maintains an ordered queue of active task IDs and processes them one at a time per invocation.
+The **Process Engine** drives a runtime Process forward through its Workflow by iteratively invoking agents on active tasks and propagating state changes through the graph. Unlike a traditional state machine with a single active state, multiple tasks can be ACTIVE concurrently. The engine maintains a queue of active task IDs and processes them one at a time per invocation.
 
 ## Core Data Structures
 
@@ -24,7 +24,7 @@ flowchart TD
     F -->|OK| I[Invoke agent on edges\nevaluate outgoing conditions]
     I --> J[Transition edges from SCHEDULED\nto ENABLED or DISABLED]
     J --> K[Find all READY successor tasks\nall incoming edges resolved]
-    K --> L{Every enabled incoming edge\nhas predecessor in OK?}
+    K --> L{All edges ENABLED with\npredecessors OK?}
     L -->|Yes| M[Transition READY to ACTIVE\nAppend to _active_tasks queue]
     L -->|No| N[Keep READY as SCHEDULED]
     M --> P[Return]
@@ -46,7 +46,7 @@ flowchart TD
 
 ## Edge Evaluation
 
-When a task reaches `OK`, the agent running that task decides the state of each outgoing edge — enabling or disabling them based on the edge's `condition`. The engine does not invoke a separate agent on the edge; edges are plain data objects, not OAP objects.
+When a task reaches `OK`, the engine invokes the agent on that task again to evaluate edge conditions. Each edge starts in `SCHEDULED` state (condition undetermined) and the agent transitions it to `ENABLED` or `DISABLED`.
 
 There is one exception: when a task transitions to `DISABLED`, all of its outgoing edges are automatically set to `DISABLED` by the engine without agent evaluation. A disabled task cannot activate any successors.
 

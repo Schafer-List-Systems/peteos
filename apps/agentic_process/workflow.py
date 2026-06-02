@@ -31,10 +31,11 @@ class Workflow:
             edge_objs.append(Edge(edge_d))
 
         # Build tasks
+        process_id = json_data.get("metadata", {}).get("process_id")
         tasks: dict[str, Task] = {}
         for node_d in json_data.get("nodes", []):
             node_d.setdefault("_task_state", "SCHEDULED")
-            tasks[node_d["id"]] = Task(node_d)
+            tasks[node_d["id"]] = Task(node_d, process_id=process_id)
 
         # Wire edges to tasks
         for edge_obj in edge_objs:
@@ -140,6 +141,13 @@ class Workflow:
         process_path = os.path.join(dirname, f"{name}-{process_id}{ext}")
 
         shutil.copy2(self._json_path, process_path)
+
+        # Write process_id to the copied canvas's metadata
+        with open(process_path, "r") as f:
+            process_json_data = json.load(f)
+        process_json_data["metadata"]["process_id"] = process_id
+        with open(process_path, "w") as f:
+            json.dump(process_json_data, f, indent=2)
 
         from .process import Process
 

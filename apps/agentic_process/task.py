@@ -9,11 +9,12 @@ from ._types import EdgeState, TaskState
 class Task(AgenticObjectBase):
     """Each Task is an OAP object that wraps a JSON node object."""
 
-    def __init__(self, node_data: dict) -> None:
+    def __init__(self, node_data: dict, process_id: str | None = None) -> None:
         super().__init__()
         self._node_data = node_data
         self._outgoing_edges: list[Edge] = []
         self._incoming_edges: list[Edge] = []
+        self._process_id = process_id
 
     def get_outgoing_edges(self) -> list[Edge]:
         return self._outgoing_edges
@@ -103,3 +104,28 @@ class Task(AgenticObjectBase):
     def deny(self) -> None:
         """Deny the task and reject the overall process."""
         self.state = TaskState.DENIED
+
+    async def proceed(self) -> TaskState:
+        """Invoke the agent on this task, evaluate edge conditions, and return the new state."""
+        thread_id = f"{self._process_id}-{self.task_id}" if self._process_id else None
+
+        # 1. Invoke agent — it calls accept(), deny(), or set_text() tools
+        await self.invoke_agent(
+            prompt=self.text,
+            persistent_thread_id=thread_id,
+        )
+
+        # 2. If OK, evaluate outgoing edge conditions
+        new_state = self.state
+        if new_state == TaskState.OK:
+            for edge in self._outgoing_edges:
+                edge_prompt = f"Is the condition '{edge.condition}' met? Reply with a single word: 'yes' or 'no'."
+                result = await self.invoke_agent(
+                    prompt=edge_prompt,
+                    output_schema=str,
+                    persistent_thread_id=thread_id,
+                )
+                is_met = result == "yes" if result else False
+                edge.state = EdgeState.ENABLED if is_met else EdgeState.DISABLED
+
+        return new_state
