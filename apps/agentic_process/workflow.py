@@ -138,8 +138,20 @@ class Workflow:
         process_id = uuid.uuid4().hex[:4].upper()
         dirname, basename = os.path.split(self._json_path)
         name, ext = os.path.splitext(basename)
-        process_path = os.path.join(dirname, f"{name}-{process_id}{ext}")
+        process_dir = os.path.join(dirname, f"{name}-{process_id}")
+        process_path = os.path.join(process_dir, f"{name}-{process_id}{ext}")
 
+        if os.path.exists(process_dir):
+            raise FileExistsError(
+                f"Process directory already exists: {process_dir}. "
+                "Expected an empty directory for a new process instance."
+            )
+        if os.path.exists(process_path):
+            raise FileExistsError(
+                f"Process canvas already exists: {process_path}. "
+                "Existing processes must not be overwritten."
+            )
+        os.makedirs(process_dir)
         shutil.copy2(self._json_path, process_path)
 
         # Write process_id to the copied canvas's metadata
