@@ -46,18 +46,24 @@ class AgenticObjectBase:
 
     def _create_role(self) -> Role:
         """Create the Role for this object."""
-        class_name = self.__class__.__name__
-        return Role(
-            name=f"oap_{class_name}",
-            description=f"Agent for {class_name}",
-            tool_filter=[".*"],
-            system_prompt=(
+        cls = self.__class__
+        class_name = cls.__name__
+        doc = (cls.__doc__ or "").strip() if cls is not AgenticObjectBase else ""
+        if doc:
+            system_prompt = doc
+        else:
+            system_prompt = (
                 f"You are an agent working on a {class_name} object. "
                 f"You have tools to read and modify the state of this object. "
                 f"Use those tools and the information you already have to fulfill the user's request. "
                 f"NEVER ask the user for more information or clarification. "
                 f"If you cannot produce the requested output, use produce_output to return an error message explaining why. "
-            ),
+            )
+        return Role(
+            name=f"oap_{class_name}",
+            description=f"Agent for {class_name}",
+            tool_filter=[".*"],
+            system_prompt=system_prompt,
         )
 
     def _create_agent(self) -> Agent:

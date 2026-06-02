@@ -29,6 +29,33 @@ class TestAgenticObjectBaseInit:
         obj = AgenticObjectBase()
         assert isinstance(obj.role, type(obj.role))
 
+    def test_system_prompt_default_no_docstring(self):
+        obj = AgenticObjectBase()
+        assert "You are an agent working on a AgenticObjectBase object" in obj.role.system_prompt
+
+    def test_system_prompt_from_class_docstring(self):
+        class DocstringObj(AgenticObjectBase):
+            """You are a special analysis agent."""
+        obj = DocstringObj()
+        assert obj.role.system_prompt == "You are a special analysis agent."
+        assert "You are an agent working on a DocstringObj object" not in obj.role.system_prompt
+
+    def test_system_prompt_empty_docstring_falls_back(self):
+        class EmptyDocstringObj(AgenticObjectBase):
+            """"""
+        obj = EmptyDocstringObj()
+        assert "You are an agent working on a EmptyDocstringObj object" in obj.role.system_prompt
+
+    def test_system_prompt_strips_whitespace(self):
+        class WhitespaceDocstringObj(AgenticObjectBase):
+            """
+
+            You are a whitespacey agent.
+
+            """
+        obj = WhitespaceDocstringObj()
+        assert obj.role.system_prompt == "You are a whitespacey agent."
+
 
 class TestToolRegistry:
     def test_tool_decorated_methods_are_registered(self):
