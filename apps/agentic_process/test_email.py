@@ -18,8 +18,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config
-from .email import fetch_email, search_emails, send_email
+from apps.agentic_process import config
+from apps.agentic_process.email_client import fetch_email, search_emails, send_email
 
 
 async def main() -> int:

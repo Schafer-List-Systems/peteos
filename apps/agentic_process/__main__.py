@@ -12,18 +12,16 @@ Usage:
 import asyncio
 import sys
 
+from apps.agentic_process import email_client
+from apps.agentic_process.process import Process
+from apps.agentic_process.workflow import Workflow
 from peteos.chatbot.manager import ChatBotManager
 from peteos.oap.base import AgenticObjectBase
-
-from .process import Process
-from .workflow import Workflow
 
 
 def test_send_email():
     """A small manual test for sending a mail."""
-    from .email import send_email
-
-    send_email(
+    email_client.send_email(
         to="info@aios.tools",
         subject="Agentic Process Test Email",
         body="This is a test email from the agentic process engine.",
