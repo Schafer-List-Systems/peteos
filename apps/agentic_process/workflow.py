@@ -27,7 +27,7 @@ class Workflow:
         # Build edges first
         edge_objs: list[Edge] = []
         for edge_d in json_data.get("edges", []):
-            edge_d.setdefault("_edge_state", "SCHEDULED")
+            edge_d.setdefault("_edge_state", "scheduled")
             edge_objs.append(Edge(edge_d))
 
         # Build tasks
