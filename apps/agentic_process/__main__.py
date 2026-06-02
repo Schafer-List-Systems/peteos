@@ -31,6 +31,9 @@ def test_send_email():
 
 
 async def main() -> None:
+    test_send_email()
+    return
+
     """Set up backend, load workflow, and run engine loop."""
     if len(sys.argv) < 3:
         print(f"Usage: {sys.argv[0]} <workflow-canvas> <backend-url>")

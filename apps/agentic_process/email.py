@@ -91,7 +91,10 @@ def _default_tracking_path() -> Path:
 @dataclass
 class _Tracking:
     path: Path
-    data: dict[str, set[int]] = field(default_factory=_load_tracking)
+    data: dict[str, set[int]] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.data = _load_tracking(self.path)
 
     def get_processed(self, folder: str) -> set[int]:
         return self.data.setdefault(folder, set())
