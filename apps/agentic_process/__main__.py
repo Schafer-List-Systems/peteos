@@ -1,38 +1,24 @@
 #!/usr/bin/env python3
 """Agentic Process Engine — runtime entry point.
 
-Loads a workflow definition, connects to an LLM backend,
-and drives the process engine loop.
+Watches an IMAP mailbox for incoming emails and routes them through
+the dispatcher OAP into agentic processes.
 
 Usage:
-    PYTHONPATH=/home/frygge/projects/private/peteos python -m apps.agentic_process \
-        workflow.canvas http://localhost:8080
+    PYTHONPATH=/home/frygge/projects/private/peteos \
+      python apps/agentic_process/__main__.py <workflow-canvas> <backend-url>
 """
 
 import asyncio
 import sys
+import time
 
-from apps.agentic_process import email_client
-from apps.agentic_process.process import Process
-from apps.agentic_process.workflow import Workflow
+from apps.agentic_process.app_main import AppMain
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
-
-
-def test_send_email():
-    """A small manual test for sending a mail."""
-    email_client.send_email(
-        to="info@aios.tools",
-        subject="Agentic Process Test Email",
-        body="This is a test email from the agentic process engine.",
-    )
 
 
 async def main() -> None:
-    test_send_email()
-    return
-
-    """Set up backend, load workflow, and run engine loop."""
+    """Watch for incoming emails and route them via the dispatcher."""
     if len(sys.argv) < 3:
         print(f"Usage: {sys.argv[0]} <workflow-canvas> <backend-url>")
         sys.exit(1)
@@ -43,18 +29,24 @@ async def main() -> None:
     chatbot_manager = ChatBotManager(timeout=60)
     await chatbot_manager.add_backend("local", backend_url)
 
-    # --- Load workflow and create process ---
-    workflow = Workflow(workflow_path)
-    process = workflow.create_process()
-    process.start()
+    app_main = AppMain(workflow_path=workflow_path)
 
-    # --- Engine loop ---
-    while process._active_tasks:
-        more = await process.update()
-        if not more:
-            break
+    print("Agentic process engine started. Waiting for emails...")
 
-    print("Process complete")
+    while True:
+        try:
+            uids = app_main.poll_new_emails()
+        except Exception as e:
+            print(f"IMAP error: {e}", file=sys.stderr)
+            uids = []
+
+        for uid in uids:
+            try:
+                await app_main.dispatcher.dispatch_email(uid)
+            except Exception as e:
+                print(f"Dispatcher error for UID {uid}: {e}", file=sys.stderr)
+
+        time.sleep(5)
 
 
 if __name__ == "__main__":

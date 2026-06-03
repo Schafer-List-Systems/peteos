@@ -77,7 +77,7 @@ async def main() -> int:
     # Fetch and save attachments to a temp dir
     temp_dir = Path("/tmp/peteos-attachments")
     temp_dir.mkdir(exist_ok=True)
-    info = fetch_email(uid=uid, attachments_dir=temp_dir)
+    info = fetch_email(uid=uid, cached_inbox=temp_dir)
     print(f"  From:    {info.from_addr}")
     print(f"  Subject: {info.subject}")
     print(f"  Body:    {info.body_text}")

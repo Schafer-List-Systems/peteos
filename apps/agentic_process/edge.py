@@ -34,11 +34,16 @@ class Edge:
 
     @property
     def state(self) -> "EdgeState":
-        return EdgeState(self._edge_data.get("_edge_state", "SCHEDULED"))
+        raw = self._edge_data.get("_edge_state")
+        return EdgeState(raw) if raw is not None else EdgeState.SCHEDULED
 
     @state.setter
     def state(self, value: "EdgeState") -> None:
         self._edge_data["_edge_state"] = value.value
+        if self._from_task is not None:
+            process = self._from_task._process
+            if process is not None:
+                process.store()
 
     def get_from_task(self) -> Task:
         return self._from_task

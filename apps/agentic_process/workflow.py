@@ -34,7 +34,7 @@ class Workflow:
         process_id = json_data.get("metadata", {}).get("process_id")
         tasks: dict[str, Task] = {}
         for node_d in json_data.get("nodes", []):
-            node_d.setdefault("_task_state", "SCHEDULED")
+            node_d.setdefault("_task_state", None)
             tasks[node_d["id"]] = Task(node_d, process_id=process_id)
 
         # Wire edges to tasks
@@ -57,6 +57,10 @@ class Workflow:
             (t for t in tasks.values() if not t._incoming_edges),
             None,
         )
+
+        # Wire tasks to their parent workflow/process instance
+        for task in tasks.values():
+            task._process = self
 
         working_directory = os.path.dirname(json_path) or "."
 
@@ -164,4 +168,5 @@ class Workflow:
         from .process import Process
 
         process = Process(process_path)
+        process._process_dir = process_dir
         return process

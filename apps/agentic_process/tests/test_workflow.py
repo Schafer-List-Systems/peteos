@@ -414,8 +414,8 @@ def test_is_ready_returns_false_when_predecessor_not_ok():
 # ── Process.start tests ──────────────────────────────────────────────
 
 
-def test_start_activates_start_task():
-    """start() activates the start task and adds it to _active_tasks."""
+def test_start_starts_task_as_pending():
+    """start() sets the start task to PENDING (not ACTIVE)."""
     path = _chain_workflow(["a", "b", "c"])
     try:
         wf = Workflow(path)
@@ -423,8 +423,8 @@ def test_start_activates_start_task():
         assert process._active_tasks == []
         assert process._tasks["a"].state == TaskState.SCHEDULED
         process.start()
-        assert "a" in process._active_tasks
-        assert process._tasks["a"].state == TaskState.ACTIVE
+        assert "a" not in process._active_tasks
+        assert process._tasks["a"].state == TaskState.PENDING
     finally:
         os.unlink(path)
 
