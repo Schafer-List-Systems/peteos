@@ -4,6 +4,7 @@ Provides functions to convert local image files or URLs into ContentPart
 objects suitable for inclusion in chatbot message content.
 """
 
+import asyncio
 import base64
 import mimetypes
 import logging
@@ -146,12 +147,15 @@ async def url_to_base64(url: str, timeout: float) -> str:
     """
     import aiohttp
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"Failed to fetch image from {url}: HTTP {resp.status}")
-            data = await resp.read()
-    return base64.b64encode(data).decode("ascii")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"Failed to fetch image from {url}: HTTP {resp.status}")
+                data = await resp.read()
+        return base64.b64encode(data).decode("ascii")
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"Timeout fetching image from {url} after {timeout}s")
 
 
 def _get_media_type_for_base64(data: bytes, url: str = "") -> Optional[str]:
@@ -216,7 +220,7 @@ def create_image_content_part(
 
 async def create_image_content_part_async(
     src: str,
-    timeout: float,
+    timeout: float = None,
 ) -> ContentPart:
     """Async version of create_image_content_part for URL fetching.
 

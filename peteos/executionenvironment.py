@@ -11,7 +11,6 @@ from peteos.toolmanager import ToolManager
 
 class ExecStatus(str, Enum):
     FINISHED = "finished"
-    INTERRUPTED = "interrupted"
     CONTINUE = "continue"
     PENDING = "pending"
     ERROR = "error"
@@ -38,7 +37,6 @@ class ExecutionEnvironment(ABC):
             role: The Role instance to use (for model selection).
         """
         self._chatbot: ChatBot = ExecutionEnvironment._select_chatbot(role)
-        self._interrupt = False
         self._completion_signal: asyncio.Event = asyncio.Event()
         self._completion_signal.set()  # Start as signaled (not running)
         self._hooks: dict[str, list[Callable]] = {
@@ -70,14 +68,6 @@ class ExecutionEnvironment(ABC):
     def is_running(self) -> bool:
         """Check if the execution environment is currently running."""
         return not self._completion_signal.is_set()
-
-    def set_interrupt(self) -> None:
-        """Request interruption of the execution loop."""
-        self._interrupt = True
-
-    def clear_interrupt(self) -> None:
-        """Clear the interrupt flag."""
-        self._interrupt = False
 
     def get_chat_history(self) -> ChatHistory:
         """Get the internal chat history."""
@@ -169,7 +159,7 @@ class ExecutionEnvironment(ABC):
         returns the first non-None result from hooks, which can be a tuple
         ``(allow: bool, message: str)`` to disallow the tool call. For all
         other hook points every callback is invoked and the last return value
-        is returned.
+        is returned, which can be an ``ExecStatus`` to control session flow.
 
         Args:
             hook_point: One of the registered hook points.
@@ -178,7 +168,7 @@ class ExecutionEnvironment(ABC):
         Returns:
             The return value from the first hook that returns a value for
             ``before_tool_execution``, or the last hook's return value
-            (which may be ``None``) for other hook points.
+            (which may be ``None`` or an ``ExecStatus``) for other hook points.
 
         Raises:
             ValueError: If hook_point is not a valid hook point.
@@ -193,5 +183,7 @@ class ExecutionEnvironment(ABC):
                 result = await result
             last_result = result
             if hook_point == "before_tool_execution" and last_result is not None:
+                return last_result
+            if hook_point == "after_step" and last_result is not None:
                 return last_result
         return last_result

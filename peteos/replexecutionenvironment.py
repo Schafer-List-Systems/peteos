@@ -117,11 +117,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
             await self._call_hooks("before_send_to_chatbot", session, session.chat_history)
             response = await self.chatbot.send_message(session.chat_history)
             async for _ in response:
-                if self._interrupt:
-                    return (ExecStatus.INTERRUPTED, None)
-
-            if self._interrupt:
-                return (ExecStatus.INTERRUPTED, None)
+                pass
 
             # --- Phase 2: Error handling ---
             if "error" in response.data:
@@ -163,6 +159,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
 
             # --- Phase 4: Append assistant message ---
             _logger.debug("ChatBot response: role=%s, content_types=%s", response.data.get("role"), [item.get("type") for item in content_array] if isinstance(content_array, list) else "N/A")
+            _logger.debug("ChatBot full response data: %s", json.dumps(response.data, indent=2, default=str))
             response_msg = Message(role=response.data["role"], content=content_parts)
             await session.append_and_notify(response_msg)
 

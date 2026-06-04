@@ -114,7 +114,7 @@ class HTTPClient:
             except GeneratorExit:
                 await client.aclose()
                 raise
-            except Exception:
+            except Exception as e:
                 await client.aclose()
                 if attempt < self._max_retries:
                     delay = self._retry_delays[attempt]
@@ -122,6 +122,7 @@ class HTTPClient:
                         _logger.warning("HTTP POST to %s failed (attempt %d/%d), retrying in %ss", url, attempt + 1, self._max_retries, delay)
                     await asyncio.sleep(delay)
                     continue
+                _logger.error("HTTP POST to %s failed after %d retries: %s: %s", url, self._max_retries, type(e).__name__, e)
                 raise
 
     async def get(self, url: str) -> dict:

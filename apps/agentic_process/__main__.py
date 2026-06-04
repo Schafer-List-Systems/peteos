@@ -14,7 +14,9 @@ import sys
 import time
 
 from apps.agentic_process.app_main import AppMain
+from apps.agentic_process.email_client import search_emails
 from peteos.chatbot.manager import ChatBotManager
+from peteos.logger import setup_logging
 
 
 async def main() -> None:
@@ -25,9 +27,12 @@ async def main() -> None:
 
     workflow_path, backend_url = sys.argv[1], sys.argv[2]
 
+    # --- Enable debug logging ---
+    setup_logging(level="DEBUG", debug=True)
+
     # --- Connect to LLM backend ---
-    chatbot_manager = ChatBotManager(timeout=60)
-    await chatbot_manager.add_backend("local", backend_url)
+    chatbot_manager = ChatBotManager(timeout=300)
+    await chatbot_manager.add_backend("local", backend_url, api_type="anthropic", streaming=False)
 
     app_main = AppMain(workflow_path=workflow_path)
 
@@ -35,7 +40,7 @@ async def main() -> None:
 
     while True:
         try:
-            uids = app_main.poll_new_emails()
+            uids = search_emails()
         except Exception as e:
             print(f"IMAP error: {e}", file=sys.stderr)
             uids = []

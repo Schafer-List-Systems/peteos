@@ -123,9 +123,7 @@ class OpenAIChatBot(GenericChatBot):
         streaming_mode = self._config.streaming if streaming is None else streaming
         body = self._build_body(chat_history, streaming)
 
-        _logger.warning("=== REQUEST BODY (OpenAI) ===")
-        _logger.warning("%s", json.dumps(body, indent=2, default=str)[:5000])
-        _logger.warning("=== END ===")
+        _logger.debug("OpenAI request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
 
         if streaming_mode:
             stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body)
@@ -284,7 +282,6 @@ class OpenAIChatBot(GenericChatBot):
             if key not in body:
                 body[key] = value
 
-        _logger.debug("OpenAI request body: %s", json.dumps(body, indent=2))
         return body
 
 

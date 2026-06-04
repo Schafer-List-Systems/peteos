@@ -130,7 +130,7 @@ class AgenticObjectBase:
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
 
-    @tool(name="produce_output", description="Signal your final answer. Pass the result as a JSON string describing the output data.")
+    @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
     def _produce_output(self, data: str, session: "Session | None" = None) -> str:
         """Protected tool: signals the agent has produced its final answer.
 
@@ -146,6 +146,7 @@ class AgenticObjectBase:
             "OK" on success, or an error message the agent can fix.
         """
         if session is None:
+            _logger.debug("_produce_output: session is None")
             return "Error: session not available."
         # Parse JSON — the LLM always sends a string.
         try:
@@ -165,6 +166,10 @@ class AgenticObjectBase:
 
         try:
             session.state.create("_oap_produced_data", parsed)
+            _logger.debug(
+                "_produce_output: wrote to session %s, _oap_produced_data=%s",
+                session.uuid, parsed,
+            )
         except ValueError as e:
             return f"Error: {e}"
         return "OK"
@@ -242,6 +247,11 @@ class AgenticObjectBase:
         if timeout is None:
             self._oap_lock.acquire()
         elif not self._oap_lock.acquire(timeout=timeout):
+            _logger.error(
+                "Could not acquire invocation lock for %s within %.1fs",
+                self.__class__.__name__,
+                timeout,
+            )
             raise TimeoutError(
                 f"Could not acquire invocation lock within {timeout}s"
             )
@@ -283,12 +293,18 @@ class AgenticObjectBase:
         """The Role used for this object's invocations."""
         return self._oap_role
 
+    async def _load_image(self, src: str, timeout: float) -> ContentPart:
+        """Load an image from a file path or URL into a ContentPart."""
+        from peteos.utils.image import create_image_content_part_async
+        return await create_image_content_part_async(src, timeout)
+
     async def invoke_agent(
         self,
         prompt: str,
         output_schema: type | None = None,
         persistent_thread_id: str | None = None,
         timeout: float | None = None,
+        image: str | None = None,
     ) -> Any:
         """Invoke this object's agent.
 
@@ -303,6 +319,9 @@ class AgenticObjectBase:
                 session keyed by this ID. If None, creates a transient
                 session destroyed after the invocation.
             timeout: Maximum seconds to wait for the invocation lock.
+            image: Optional local file path or HTTP(S) URL to attach an image
+                to the prompt. The image is base64-encoded and sent alongside
+                the text prompt.
 
         Returns:
             Structured output, Error object, or raises Exception.
@@ -333,55 +352,58 @@ class AgenticObjectBase:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
 
         try:
-            # --- Wait for produce_output via after_step hook ---
-            done = asyncio.Event()
-            reminder_msg = "Please produce your final output using produce_output() or produce_error(). Mind the output schema!"
-            start_time = time.time()
-
-            async def _on_step_done(sess: "Session", status: ExecStatus) -> None:
-                if sess.state._data.get("_oap_produced_data") is not None:
-                    done.set()
-                    sess.execution_environment.set_interrupt()
-                    return
-                if sess.state._data.get("_oap_error") is not None:
-                    done.set()
-                    sess.execution_environment.set_interrupt()
-                    return
-                elapsed = time.time() - start_time
-                if timeout is not None and elapsed > timeout:
-                    done.set()
-                    sess.execution_environment.set_interrupt()
-                    return
-                await sess.queue_message(Message(
-                    role="user",
-                    content=[ContentPart(part_type="text", text=reminder_msg)],
-                ))
+            async def _on_step_done(sess: "Session", status: ExecStatus) -> ExecStatus | None:
+                produced = sess.state._data.get("_oap_produced_data")
+                errored = sess.state._data.get("_oap_error")
+                if produced is not None:
+                    _logger.debug("_on_step_done: produced data found, returning FINISHED")
+                    return ExecStatus.FINISHED
+                if errored is not None:
+                    _logger.debug("_on_step_done: error found, returning FINISHED")
+                    return ExecStatus.FINISHED
+                return None
 
             session.execution_environment.register_hook(
                 "after_step", _on_step_done, session
             )
 
-            # --- Queue the initial prompt so the agent actually runs ---
+            content: list[ContentPart] = [ContentPart(part_type="text", text=prompt)]
+            if image is not None:
+                image_part = await self._load_image(image, timeout or 30.0)
+                content.append(image_part)
+
             await session.queue_message(Message(
                 role="user",
-                content=[ContentPart(part_type="text", text=prompt)],
+                content=content,
             ))
 
-            try:
-                await asyncio.wait_for(done.wait(), timeout=timeout)
-            except asyncio.TimeoutError:
-                return Error("Agent did not produce output within timeout")
+            reminder_msg = f"Please produce your final output using the `produce_output` or `produce_error` tool.\n" \
+                           f"Mind the output schema!"
+            start_time = time.time()
 
-            # --- Extract and parse structured output ---
-            produced_data = session.state._data.get("_oap_produced_data")
-            if produced_data is not None:
-                return produced_data
+            while True:
+                await session.wait_for_idle(timeout=timeout)
+                produced_data = session.state._data.get("_oap_produced_data")
+                if produced_data is not None:
+                    return produced_data
+                error_msg = session.state._data.get("_oap_error")
+                if error_msg is not None:
+                    return Error(error_msg)
 
-            error_msg = session.state._data.get("_oap_error")
-            if error_msg is not None:
-                return Error(error_msg)
+                elapsed = time.time() - start_time
+                if timeout is not None and elapsed > timeout:
+                    _logger.error(
+                        "invoke_agent timeout hit for %s thread=%s after %.1fs",
+                        self.__class__.__name__,
+                        persistent_thread_id,
+                        elapsed,
+                    )
+                    return Error(f"Agent did not produce output within {timeout}s timeout")
 
-            return Error("Agent did not produce output within timeout")
+                await session.queue_message(Message(
+                    role="user",
+                    content=[ContentPart(part_type="text", text=reminder_msg)],
+                ))
         finally:
             # Clear OAP state variables so the next invocation starts fresh
             if session is not None:

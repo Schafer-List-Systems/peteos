@@ -3,7 +3,7 @@ from __future__ import annotations
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
 
-from ._types import EdgeState, TaskState
+from ._types import EdgeState, TaskState, TaskStatus
 from apps.agentic_process.email_client import (
     get_cached_email,
     list_cached_emails,
@@ -13,22 +13,29 @@ from pathlib import Path
 
 
 class Task(AgenticObjectBase):
-    """You are a task agent within an agentic process engine.
+    """You are a task agent within an agentic process engine. Your
+    purpose is to gather the information in order to evaluate the
+    conditions of all outgoing edges regarding the text of this task.
 
-    Read your purpose from the task text using `get_text`. During the
-    conversation, update the task text via `set_text` to persist facts
-    and provide progress information. This text is also read by your
-    supervisor and used to redirect incoming emails towards you if
-    there is relevant information for you. That's why you also need to
-    provide the information about requests in the task text.
+    Read your task text using `get_text` tool. During the conversation,
+    update the task text via `append_text` to persist facts and provide
+    progress information. Avoid apponding redundant information! This
+    text is also read by your supervisor and used to redirect incoming
+    emails towards you if there is relevant information for you.
+    That's why you also need to provide the information about requests
+    in the task text.
 
-    You get the information required to fulfill your purpose from the
-    emails. If the information you need to fulfill your purpose is not
+    When you deny, then the whole process is denied. when you are
+    ready for evaluation of the outgoing edges, produce output `ready`. The
+    agentic harness will then ask you for an evaluation of each condition
+    separately. Your evaluation steers the process, conditionally
+    activating successive tasks as nodes in the process graph.
+
+    You get the information required to evaluate the conditions from the
+    emails. If the information you need for evaluation is not
     available, you can request it via email. If your purpose cannot be
-    satisfied even after requesting further information When you deny
+    satisfied even after requesting further information, then you deny
     this task and therefore the whole process you are part of.
-
-    Use `accept` to complete the task successfully or `deny` to reject it.
     """
 
     def __init__(self, node_data: dict, process_id: str | None = None) -> None:
@@ -79,6 +86,10 @@ class Task(AgenticObjectBase):
         self._node_data["color"] = self._COLORS[value]
         process = self._process
         if process is not None:
+            if value == TaskState.ACTIVE and self.task_id not in process._active_tasks:
+                process._active_tasks.append(self.task_id)
+            elif value != TaskState.ACTIVE and self.task_id in process._active_tasks:
+                process._active_tasks.remove(self.task_id)
             if value == TaskState.PENDING and self.task_id not in process._pending_tasks:
                 process._pending_tasks.add(self.task_id)
             elif value != TaskState.PENDING and self.task_id in process._pending_tasks:
@@ -102,9 +113,9 @@ class Task(AgenticObjectBase):
         return self.text
 
     @tool
-    def set_text(self, value: str) -> None:
-        """Set the text of this task."""
-        self.text = value
+    def append_text(self, value: str) -> None:
+        """Append a bullet point to the text of this task. Be concise!"""
+        self.text = self.text + "\n- " + value
 
     @property
     def metadata(self) -> dict:
@@ -129,15 +140,9 @@ class Task(AgenticObjectBase):
 
         return True
 
-    @tool
-    def accept(self) -> None:
-        """Mark this task as completed successfully."""
-        self.state = TaskState.OK
-
-    @tool
-    def deny(self) -> None:
-        """Deny the task and reject the overall process."""
-        self.state = TaskState.DENIED
+    def activate(self) -> None:
+        """Transition this task to the ACTIVE state."""
+        self.state = TaskState.ACTIVE
 
     @property
     def _cached_inbox(self) -> Path:
@@ -216,6 +221,17 @@ class Task(AgenticObjectBase):
         return f"ERROR: read_attachment is not yet implemented."
 
     @tool
+    def get_outgoing_conditions(self) -> str:
+        """Get the condition strings of all outgoing edges.
+
+        Returns:
+            A newline-separated list of edge conditions.
+        """
+        if not self._outgoing_edges:
+            return "No outgoing edges."
+        return "\n".join(f"- {e.condition}" for e in self._outgoing_edges)
+
+    @tool
     def request(self, uid: int, body: str) -> None:
         """Send a reply to the sender of the specified cached email.
 
@@ -233,8 +249,8 @@ class Task(AgenticObjectBase):
     async def proceed(self, email_uid: int | None = None) -> TaskState:
         """Invoke the agent on this task, evaluate edge conditions, and return the new state.
 
-        Activates the task before invoking the agent, then returns it
-        to PENDING if not yet completed or terminated.
+        Activates the task before invoking the agent, then forces a
+        structured response (ready, deny, or pending) via produce_output.
 
         Args:
             email_uid: If provided, the agent processes this email.
@@ -252,24 +268,48 @@ class Task(AgenticObjectBase):
         else:
             prompt = self.text
 
-        # 1. Invoke agent — it calls accept(), deny(), or set_text() tools
-        await self.invoke_agent(
-            prompt=prompt,
+        status = await self.invoke_agent(
+            prompt = (
+                f"Process the incoming email (IMAP UID {email_uid}). "
+                f"Use your tools to read and act on the email content."
+                f"When you have analyzed all relevant information, produce one word as output:\n"
+                f"- ready: you have everything to evaluate edge conditions\n"
+                f"- deny: you reject the task and the overall process\n"
+                f"- pending: you need more information that you already requested via request()"
+            ),
+            output_schema=TaskStatus,
             persistent_thread_id=thread_id,
         )
 
-        # 2. If OK, evaluate outgoing edge conditions
-        new_state = self.state
+        decision = status.decision
+
+        # 3. Set task state based on decision
+        if decision == "deny":
+            new_state = TaskState.DENIED
+        elif decision == "ready":
+            new_state = TaskState.OK
+        else:
+            new_state = TaskState.PENDING
+        self.state = new_state
+
+        # 4. If OK, evaluate outgoing edge conditions
         if new_state == TaskState.OK:
             for edge in self._outgoing_edges:
-                edge_prompt = f"Is the condition '{edge.condition}' met? Reply with a single word: 'yes' or 'no'."
+                edge_prompt = f"An outgoing edge of the task has the condition label '{edge.condition}'. Output a single word 'yes' or 'no' depending on whether the process should go along that edge."
                 result = await self.invoke_agent(
                     prompt=edge_prompt,
-                    output_schema=str,
                     persistent_thread_id=thread_id,
+                    output_schema=TaskStatus
                 )
-                is_met = result == "yes" if result else False
+
+                edge_decision = result.decision
+                is_met = edge_decision == "yes" if result else False
                 edge.state = EdgeState.ENABLED if is_met else EdgeState.DISABLED
+
+            # 5. Activate ready successor tasks
+            self._process._activate_ready_tasks(self)
+            # 6. Propagate DISABLED edges downstream
+            self._process._propagate_disabled(self.task_id)
 
         # If not done, return to PENDING
         if new_state not in (TaskState.OK, TaskState.DENIED):

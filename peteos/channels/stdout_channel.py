@@ -193,6 +193,11 @@ class ReadStdoutChannel(Channel):
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=self._config["process_terminate_timeout"])
             except asyncio.TimeoutError:
+                _logger.error(
+                    "Process %s did not terminate within %ss, killing",
+                    self._config["command"],
+                    self._config["process_terminate_timeout"],
+                )
                 self._process.kill()
             _logger.info("Stopped %s: %s", self.name, self._config["command"])
 

@@ -244,6 +244,21 @@ class Session(ActiveClass):
 
         self._pending_tool_calls: list[ToolCallRecord] = []
         self.tool_failure_policy: str = "continue"
+        self._idle: asyncio.Event = asyncio.Event()
+
+    async def wait_for_idle(self, timeout: float | None = None) -> bool:
+        """Wait until the session becomes idle (waiting for the next event).
+
+        Returns True if the session became idle, False if the timeout expired.
+
+        Args:
+            timeout: Maximum seconds to wait. None = wait indefinitely.
+        """
+        try:
+            await asyncio.wait_for(self._idle.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
 
     @property
     def state(self) -> AgenticState:
@@ -282,6 +297,7 @@ class Session(ActiveClass):
         """
         if not self.is_running():
             await self.start()
+        self._idle.clear()
         self.push_event(message)
 
     async def run(self) -> None:
@@ -297,9 +313,11 @@ class Session(ActiveClass):
 
         while self.is_running():
             if not need_reentry:
+                self._idle.set()
                 # Block until at least one event arrives
                 if not await self._wait_for_event():
                     continue
+                self._idle.clear()
 
             # Drain all accumulated events
             events_processed = 0
@@ -323,25 +341,23 @@ class Session(ActiveClass):
             need_reentry = False
 
             status, _ = await self.execution_environment.step(self)
-            await self.execution_environment._call_hooks("after_step", status)
+            hook_status = await self.execution_environment._call_hooks("after_step", status)
+            hook_return = hook_status if hook_status is not None else status
 
-            if status == ExecStatus.INTERRUPTED:
-                _logger.debug("[session] run(): Execution interrupted, exiting loop.")
-                break
-            if status == ExecStatus.ERROR:
+            if hook_return == ExecStatus.ERROR:
                 _logger.debug("[session] run(): Execution error, exiting loop.")
                 break
-            if status == ExecStatus.FINISHED:
+            if hook_return == ExecStatus.FINISHED:
                 _logger.debug("[session] run(): Step finished, waiting for next events.")
                 continue
-            if status == ExecStatus.PENDING:
+            if hook_return == ExecStatus.PENDING:
                 _logger.debug("[session] run(): Pending tool approval, re-entering step.")
                 continue
-            if status in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
+            if hook_return in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
                 _logger.debug("[session] run(): Tool call failed/denied, re-entering step loop.")
                 need_reentry = True
                 continue
-            if status == ExecStatus.TOOL_FAILED:
+            if hook_return == ExecStatus.TOOL_FAILED:
                 # Abort all remaining pending tool calls
                 for record in self._pending_tool_calls:
                     if record.approval_status == ToolApprovalStatus.PENDING:
@@ -353,8 +369,10 @@ class Session(ActiveClass):
                 _logger.debug("[session] Aborted all pending tool calls due to tool failure")
                 need_reentry = True
                 continue
-            # CONTINUE -> step returned success, re-enter to process tool results
-            need_reentry = True
+            if hook_return == ExecStatus.CONTINUE:
+                need_reentry = True
+                continue
+            need_reentry = False
             continue
 
     def add_tool_call(self, tool_call: dict) -> None:
@@ -579,6 +597,13 @@ async def invoke_agent(
         answer = _extract_last_assistant_text(session.chat_history)
         success = True
 
+    except asyncio.TimeoutError:
+        _logger.error(
+            "Session invoke_agent timeout hit: thread=%s after %.1fs",
+            existing_session.uuid if existing_session else "new",
+            timeout,
+        )
+        raise
     except Exception:
         raise
     finally:

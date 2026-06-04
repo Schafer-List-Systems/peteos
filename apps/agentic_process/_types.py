@@ -1,4 +1,4 @@
-from __future__ import annotations
+from dataclasses import dataclass
 
 from enum import Enum
 
@@ -16,3 +16,8 @@ class EdgeState(Enum):
     SCHEDULED = "scheduled"
     ENABLED = "enabled"
     DISABLED = "disabled"
+
+
+@dataclass
+class TaskStatus:
+    decision: str

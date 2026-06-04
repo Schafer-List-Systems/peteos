@@ -18,58 +18,12 @@ class Process(Workflow):
         self._process_dir: str = ""
 
     def start(self) -> None:
-        """Start the process with the start task in PENDING state.
+        """Start the process with the start task in ACTIVE state.
 
-        The start task begins as PENDING — it transitions to ACTIVE
-        when the first email arrives (not when the process is created).
+        The start task begins as ACTIVE — it transitions to PENDING
+        when it needs more information.
         """
-        self._start_task.state = TaskState.PENDING
-
-    def _activate_task(self, task: "Task") -> None:
-        """Transition a task to ACTIVE and enqueue it."""
-        task.state = TaskState.ACTIVE
-        self._active_tasks.append(task.task_id)
-
-    async def update(self) -> bool:
-        """Process one step of the engine.
-
-        Must be called iteratively by an external scheduler.
-        Each call processes one task from the active queue.
-
-        Returns True if there is more work to process, False otherwise.
-        """
-        if not self._active_tasks:
-            return False
-
-        # 1. Dequeue the first active task
-        task_id = self._active_tasks.pop(0)
-        task = self._tasks[task_id]
-
-        # 2. Trigger the agent on this task and handle state changes
-        state = await task.proceed()
-
-        if state == TaskState.PENDING:
-            # 3a. Task is waiting for external input
-            #     Remove from active queue (already popped) and add to pending set
-            self._pending_tasks.add(task_id)
-
-        elif state == TaskState.DENIED:
-            # 3b. Process is terminated
-            #     Disable all outgoing edges on this task
-            for edge in task.get_outgoing_edges():
-                edge.state = EdgeState.DISABLED
-
-        elif state == TaskState.OK:
-            # 3c. Task completed successfully
-            #     Agent has already evaluated outgoing edges and set their states.
-            #     Now find all READY successor tasks and activate them.
-            self._activate_ready_tasks(task)
-
-        # 4. Check if this task's downstream has become DISABLED
-        #    (all incoming edges of successor tasks are now DISABLED)
-        self._propagate_disabled(task_id)
-
-        return bool(self._active_tasks)
+        self._start_task.state = TaskState.ACTIVE
 
     def _activate_ready_tasks(self, completed_task: "Task") -> None:
         """Find all READY successor tasks of the completed task and transition them to ACTIVE."""
@@ -81,7 +35,7 @@ class Process(Workflow):
                 )
 
             if successor.is_ready():
-                self._activate_task(successor)
+                successor.activate()
 
     def _propagate_disabled(self, task_id: str) -> None:
         """Find downstream tasks that have become DISABLED and cascade.
@@ -113,7 +67,7 @@ class Process(Workflow):
                 for edge in task.get_outgoing_edges():
                     queue.append(edge.get_to_task().task_id)
             elif task.is_ready():
-                self._activate_task(task)
+                task.activate()
                 # An ACTIVE task does not propagate DISABLED further
 
     def is_terminated(self) -> bool:
@@ -125,6 +79,11 @@ class Process(Workflow):
     def pending_tasks(self) -> set[str]:
         """Return the set of pending task IDs."""
         return self._pending_tasks
+
+    @property
+    def active_tasks(self) -> list[str]:
+        """Return the list of active task IDs."""
+        return self._active_tasks
 
     def get_task(self, task_id: str) -> Task | None:
         """Return the task with the given ID, or None."""
