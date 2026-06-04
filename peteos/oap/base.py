@@ -118,6 +118,19 @@ class AgenticObjectBase:
             )
         )
 
+    def _register_media_tool(self) -> None:
+        """Register read_media tool when allow_media_access is enabled on the class."""
+        config = getattr(self.__class__, "_oap_config", {})
+        if not config.get("allow_media_access", False):
+            return
+        self._oap_tool_manager.register_tool(
+            Tool(
+                name="read_media",
+                description="Read a local media file (image, video, PDF) or fetch one from a URL. The content is provided as user message.",
+                func=self._read_media,
+            )
+        )
+
     def _python_exec(self, code: str) -> str:
         """Protected tool: executes sandboxed Python code."""
         config = getattr(self.__class__, "_oap_config", {})
@@ -397,13 +410,38 @@ class AgenticObjectBase:
             async def _on_step_done(sess: "Session", status: ExecStatus) -> ExecStatus | None:
                 produced = sess.state._data.get("_oap_produced_data")
                 errored = sess.state._data.get("_oap_error")
-                if produced is not None:
-                    _logger.debug("_on_step_done: produced data found, returning FINISHED")
-                    return ExecStatus.FINISHED
                 if errored is not None:
                     _logger.debug("_on_step_done: error found, returning FINISHED")
                     return ExecStatus.FINISHED
-                return None
+                elif produced is not None:
+                    _logger.debug("_on_step_done: produced data found, returning FINISHED")
+                    return ExecStatus.FINISHED
+                else:
+                    schema_desc = ""
+                    if self._oap_current_output_schema is not None:
+                        schema_name = self._oap_current_output_schema.__name__
+                        if is_dataclass(self._oap_current_output_schema):
+                            import dataclasses
+                            fields = dataclasses.fields(self._oap_current_output_schema)
+                            schema_desc = (
+                                f" The expected output is a {schema_name} with fields: "
+                                f"{', '.join(f'{f.name}: {f.type.__name__}' for f in fields)}. "
+                                f"Use `produce_output` with a JSON object matching this schema."
+                            )
+                        else:
+                            schema_desc = (
+                                f" The expected output is of type {schema_name}. "
+                                f"Use `produce_output` with a value of that type."
+                            )
+                    reminder = (
+                        f"It looks like you finished a step without calling `produce_output` or `produce_error`. "
+                        f"If you have your final answer, call `produce_output` with your result.{schema_desc} "
+                    )
+                    await session.queue_message(Message(
+                        role="user",
+                        content=[ContentPart(part_type="text", text=reminder)],
+                    ))
+                    return None
 
             session.execution_environment.register_hook(
                 "after_step", _on_step_done, session

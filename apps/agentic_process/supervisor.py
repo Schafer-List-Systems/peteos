@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import uuid as uuid_mod
 
+from apps.agentic_process.process import Process
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
 
@@ -37,8 +38,8 @@ class ProcessSupervisor(AgenticObjectBase):
     escalate or reply to the email depending on the email you got and
     the tasks that are pending.
 
-    Use `reply_to_email` whenever you need to communicate directly with
-    the user. Use `escalate` for error conditions you cannot resolve.
+    Use `set_reply` to compose a reply to the original sender and
+    `set_escalation` for error conditions you cannot resolve.
     """
 
     def __init__(self, app_main, process_id: str):
@@ -54,6 +55,8 @@ class ProcessSupervisor(AgenticObjectBase):
         self._process_id = process_id
         self._tasks_triggered: int = 0
         self._seen_emails: dict[int, set[str]] = {}
+        self._reply_body: str | None = None
+        self._escalation: tuple[str, str] | None = None
         self.app_main = app_main
 
     def _set_uid(self, uid: int) -> None:
@@ -68,6 +71,8 @@ class ProcessSupervisor(AgenticObjectBase):
             )
         self._uid = uid
         self._seen_emails = {uid: set()}
+        self._reply_body = None
+        self._escalation = None
 
     def _get_uid(self) -> int | None:
         """Get the current email UID, or None if not set."""
@@ -88,6 +93,28 @@ class ProcessSupervisor(AgenticObjectBase):
     def _get_dispatch_thread_id(self) -> str | None:
         """Get the current dispatch thread ID, or None."""
         return self._dispatch_thread_id
+
+    def _gather_requests(self) -> dict[str, str]:
+        """Collect non-empty requests from all tasks in this process."""
+        process = self.app_main.find_process(self._process_id)
+        assert process is not None, (
+            f"Process {self._process_id} not in registry"
+        )
+        pending: dict[str, str] = {}
+        for task in process._tasks.values():
+            req = task.get_request()
+            if req:
+                pending[task.task_id] = req
+        return pending
+
+    def _clear_requests(self) -> None:
+        """Clear the pending request from all tasks in this process."""
+        process = self.app_main.find_process(self._process_id)
+        assert process is not None, (
+            f"Process {self._process_id} not in registry"
+        )
+        for task in process._tasks.values():
+            task._clear_request()
 
     async def dispatch_email(self, uid: int, max_retries: int = 3) -> None:
         """Dispatch an email to the supervisor agent.
@@ -150,22 +177,49 @@ class ProcessSupervisor(AgenticObjectBase):
 
                 # No active tasks and no pending tasks — process is terminated.
                 # Inform the user of the outcome.
+                requests = self._gather_requests()
                 if process.is_denied():
                     outcome_prompt = (
                         f"The process {self._process_id} is finished and has been denied. "
                         f"Inform the user accordingly."
                     )
+                elif process.is_accepted():
+                    if requests is not None:
+                        outcome_prompt = (
+                            f"The process {self._process_id} has been accepted, "
+                            f"but the following tasks still have pending requests:\n{requests}\n"
+                            f"Escalate to an admin for review!"
+                        )
+                    else:
+                        outcome_prompt = (
+                            f"The process {self._process_id} is finished and has been accepted. "
+                            f"Inform the user accordingly!"
+                        )
+                elif requests is not None:
+                    outcome_prompt = (
+                        f"The process has paused. The following tasks have pending requests for information:\n"
+                        f"{requests}\n"
+                        f"Read the original email with your tools, then formulate an appropriate reply "
+                        f"using ``set_reply``. Ignore internal or redundant information. "
+                        f"Use ``set_escalation`` if the requests cannot be resolved or need escalation."
+                    )
                 else:
                     outcome_prompt = (
-                        f"The process {self._process_id} is finished and has been accepted. "
-                        f"Inform the user accordingly."
+                        f"The process {self._process_id} cannot proceed further. "
+                        f"There are no active tasks, no pending tasks, "
+                        f"and the process is neither denied nor accepted. "
+                        f"Escalate this state to an admin."
                     )
-                await self.invoke_agent(
-                    prompt=outcome_prompt,
-                    persistent_thread_id=self._dispatch_thread_id,
-                )
+                if outcome_prompt:
+                    await self.invoke_agent(
+                        prompt=outcome_prompt,
+                        persistent_thread_id=self._dispatch_thread_id,
+                    )
                 break
         finally:
+            # Send formulated emails if any were set
+            self._send_reply()
+            self._send_escalation()
             self._tasks_triggered = 0
             self._seen_emails.clear()
             self._uid = None
@@ -283,32 +337,76 @@ class ProcessSupervisor(AgenticObjectBase):
         return task.text
 
     @tool
-    def reply_to_email(self, body: str) -> None:
-        """Send a reply to the user who sent the current email.
+    def set_reply(self, body: str) -> str:
+        """Set the reply email body to send to the original sender.
 
-        The subject includes the process ID.
+        Each call overwrites any previously set reply. The subject and
+        recipient are derived automatically from the incoming email.
+        The reply is only sent at the end of the dispatch cycle if
+        non-empty. Use ``get_reply`` to recheck what is currently set.
 
         Args:
             body: The body text of the reply.
+
+        Returns:
+            A confirmation string.
         """
+        self._reply_body = body
+        return "Reply has been set and will be sent at the end of the dispatch cycle. You should use the `produce_output` tool to hand over to the dispatcher!"
+
+    @tool
+    def get_reply(self) -> str:
+        """Get the currently set reply email body, or empty string."""
+        if self._reply_body is None:
+            return ""
+        return self._reply_body
+
+    def _send_reply(self) -> None:
+        """Internal: send the formulated reply and reset."""
+        if self._reply_body is None:
+            return
         uid = self._get_uid()
         info = fetch_email(uid)
         subject = f"[{self._process_id}] Re: {info.subject}"
-        send_email(to=info.from_addr, subject=subject, body=body)
+        send_email(to=info.from_addr, subject=subject, body=self._reply_body)
+        self._reply_body = None
 
     @tool
-    def escalate(self, subject: str, body: str) -> None:
-        """Forward the email to the escalation address with an error note.
+    def set_escalation(self, subject: str, body: str) -> str:
+        """Set the escalation email to send to the escalation address.
 
-        The subject includes the process ID.
+        Each call overwrites any previously set escalation. The subject
+        is prefixed with ``ProcessSupervisor:`` and the process ID.
+        The escalation is only sent at the end of the dispatch cycle if
+        non-empty. Use ``get_escalation`` to recheck what is currently set.
 
         Args:
             subject: Subject of the escalation email.
             body: Body text of the escalation email.
+
+        Returns:
+            A confirmation string.
         """
+        self._escalation = (subject, body)
+        return "Escalation has been set and will be sent at the end of the dispatch cycle."
+
+    @tool
+    def get_escalation(self) -> str:
+        """Get the currently set escalation email as 'subject | body', or empty string."""
+        if self._escalation is None:
+            return ""
+        subject, body = self._escalation
+        return f"{subject} | {body}"
+
+    def _send_escalation(self) -> None:
+        """Internal: send the formulated escalation and reset."""
+        if self._escalation is None:
+            return
+        subject, body = self._escalation
         full_subject = f"ProcessSupervisor: {subject} [{self._process_id}]"
         send_email(
             to=config.ESCALATION_EMAIL,
             subject=full_subject,
             body=body,
         )
+        self._escalation = None

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from peteos.logger import get_logger
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
+
+_logger = get_logger(__name__)
 
 from ._types import EdgeState, TaskState, TaskStatus
 from apps.agentic_process.email_client import (
     get_cached_email,
     list_cached_emails,
-    send_email,
 )
 from pathlib import Path
 
@@ -47,6 +49,7 @@ class Task(AgenticObjectBase):
         self._incoming_edges: list[Edge] = []
         self._process_id = process_id
         self._process: object | None = None
+        self._request: str | None = None
 
     def get_outgoing_edges(self) -> list[Edge]:
         return self._outgoing_edges
@@ -115,9 +118,22 @@ class Task(AgenticObjectBase):
         return self.text
 
     @tool
-    def append_text(self, value: str) -> None:
-        """Append a bullet point to the text of this task. Be concise!"""
-        self.text = self.text + "\n- " + value
+    def append_text(self, value: str) -> str:
+        """Append a bullet point to the text of this task. Be concise!
+
+        Returns:
+            The updated task text.
+        """
+        timestamp = self._format_timestamp()
+        self.text = self.text + f"\n- {timestamp} {value}"
+        return self.text
+
+    @staticmethod
+    def _format_timestamp() -> str:
+        """Return the current local time as [YYYY-MM-DD HH:MM:SS]."""
+        from datetime import datetime
+        now = datetime.now()
+        return f"[{now.strftime('%d.%m.%Y %H:%M:%S')}]"
 
     @property
     def metadata(self) -> dict:
@@ -234,19 +250,32 @@ class Task(AgenticObjectBase):
         return "\n".join(f"- {e.condition}" for e in self._outgoing_edges)
 
     @tool
-    def request(self, uid: int, body: str) -> None:
-        """Send a reply to the sender of the specified cached email.
+    def set_request(self, body: str) -> str:
+        """Set a request for information from the sender of the current email.
+
+        Each call overwrites any previously set request. The subject
+        and recipient are derived automatically from the incoming email.
+        The request is sent by the supervisor at the end of the dispatch
+        cycle if non-empty. Use ``get_request`` to recheck what is
+        currently set.
 
         Args:
-            uid: The IMAP UID of the email to reply to.
-            body: The body text of the reply.
+            body: The body text of the request.
         """
-        try:
-            info = get_cached_email(uid, self._cached_inbox)
-        except FileNotFoundError:
-            return
-        subject = f"[{self.task_id}] Re: {info.subject}"
-        send_email(to=info.from_addr, subject=subject, body=body)
+        self._request = body
+
+        return "You have formulated the request. You should use the `produce_output` tool with the 'decision' field set to 'pending' to hand over to the super visor who will query for your request!"
+
+    @tool
+    def get_request(self) -> str:
+        """Get the currently set request body, or empty string."""
+        if self._request is None:
+            return ""
+        return self._request
+
+    def _clear_request(self) -> None:
+        """Clear the pending request after the supervisor processes it."""
+        self._request = None
 
     async def proceed(self, email_uid: int | None = None) -> TaskState:
         """Invoke the agent on this task, evaluate edge conditions, and return the new state.
