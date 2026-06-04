@@ -19,6 +19,31 @@ class ExecStatus(str, Enum):
     TOOL_DENIED = "tool_denied"
 
 
+_EXEC_SEVERITY: dict[ExecStatus | None, int] = {
+    None: -1,
+    ExecStatus.CONTINUE: 0,
+    ExecStatus.FINISHED: 1,
+    ExecStatus.PENDING: 2,
+    ExecStatus.TOOL_NOT_FOUND: 3,
+    ExecStatus.TOOL_DENIED: 4,
+    ExecStatus.TOOL_FAILED: 5,
+    ExecStatus.ERROR: 6,
+}
+
+
+def _merge_exec_status(a: ExecStatus | None, b: ExecStatus | None) -> ExecStatus | None:
+    """Merge two ExecStatus values by severity (worst wins).
+
+    This is commutative and associative — merging in any order yields
+    the same result.  ``None`` acts as the identity element.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if _EXEC_SEVERITY[a] >= _EXEC_SEVERITY[b] else b
+
+
 class ExecutionEnvironment(ABC):
     """Environment for executing agent actions."""
 
@@ -152,23 +177,21 @@ class ExecutionEnvironment(ABC):
             raise ValueError(f"Unknown hook point: {hook_point}")
         self._hooks[hook_point].clear()
 
-    async def _call_hooks(self, hook_point: str, *args: Any) -> Any | None:
-        """Call all hooks registered for a specific hook point.
+    async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
+        """Call all hooks for *hook_point*, merging results by severity.
 
-        Supports both sync and async callbacks. For ``before_tool_execution``,
-        returns the first non-None result from hooks, which can be a tuple
-        ``(allow: bool, message: str)`` to disallow the tool call. For all
-        other hook points every callback is invoked and the last return value
-        is returned, which can be an ``ExecStatus`` to control session flow.
+        Every registered hook is invoked unconditionally.  Results that
+        are ``ExecStatus`` are merged by severity (worst wins).  The
+        merge is commutative and associative so the order of hooks does
+        not matter.  ``None`` acts as the identity element — a hook that
+        returns ``None`` simply doesn't vote.
 
         Args:
             hook_point: One of the registered hook points.
             *args: Arguments to pass to each hook callback.
 
         Returns:
-            The return value from the first hook that returns a value for
-            ``before_tool_execution``, or the last hook's return value
-            (which may be ``None`` or an ``ExecStatus``) for other hook points.
+            The merged result (worst ``ExecStatus`` or ``None``).
 
         Raises:
             ValueError: If hook_point is not a valid hook point.
@@ -176,14 +199,43 @@ class ExecutionEnvironment(ABC):
         if hook_point not in self._hooks:
             raise ValueError(f"Unknown hook point: {hook_point}")
 
-        last_result = None
+        merged: ExecStatus | None = None
         for callback in self._hooks[hook_point]:
             result = callback(*args)
             if asyncio.iscoroutine(result):
                 result = await result
-            last_result = result
-            if hook_point == "before_tool_execution" and last_result is not None:
-                return last_result
-            if hook_point == "after_step" and last_result is not None:
-                return last_result
-        return last_result
+            if isinstance(result, ExecStatus):
+                merged = _merge_exec_status(merged, result)
+        return merged
+
+    async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
+        """Call all hooks for *hook_point*, collecting results and denying
+        on the first deny.
+
+        Hooks are invoked in registration order.  All hooks are called
+        unconditionally.  The first ``(False, str)`` tuple is recorded
+        and returned **without preventing** the remaining hooks from
+        being called.  Returns ``None`` if no hook denied.
+
+        Args:
+            hook_point: One of the registered hook points.
+            *args: Arguments to pass to each hook callback.
+
+        Returns:
+            The first ``(False, str)`` tuple, or ``None`` if no hook
+            denied.
+
+        Raises:
+            ValueError: If hook_point is not a valid hook point.
+        """
+        if hook_point not in self._hooks:
+            raise ValueError(f"Unknown hook point: {hook_point}")
+
+        first_deny: Any | None = None
+        for callback in self._hooks[hook_point]:
+            result = callback(*args)
+            if asyncio.iscoroutine(result):
+                result = await result
+            if first_deny is None and isinstance(result, tuple) and len(result) == 2 and result[0] is False:
+                first_deny = result
+        return first_deny

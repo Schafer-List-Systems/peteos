@@ -100,12 +100,19 @@ class MockExecutionEnvironment:
             self._hooks[hook_point] = []
         self._hooks[hook_point].append(callback)
 
-    async def _call_hooks(self, hook_point, *args):
+    async def call_hooks(self, hook_point, *args):
         for cb in self._hooks.get(hook_point, []):
             result = cb(*args)
             if asyncio.iscoroutinefunction(cb):
                 result = await result
-            if result is not None:
+        return None
+
+    async def call_hooks_deny(self, hook_point, *args):
+        for cb in self._hooks.get(hook_point, []):
+            result = cb(*args)
+            if asyncio.iscoroutinefunction(cb):
+                result = await result
+            if isinstance(result, tuple) and len(result) == 2 and result[0] is False:
                 return result
         return None
 

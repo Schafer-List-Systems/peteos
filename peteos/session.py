@@ -341,7 +341,7 @@ class Session(ActiveClass):
             need_reentry = False
 
             status, _ = await self.execution_environment.step(self)
-            hook_status = await self.execution_environment._call_hooks("after_step", status)
+            hook_status = await self.execution_environment.call_hooks("after_step", status)
             hook_return = hook_status if hook_status is not None else status
 
             if hook_return == ExecStatus.ERROR:
@@ -495,7 +495,7 @@ class Session(ActiveClass):
             message: The message to append and notify on.
         """
         self.chat_history.append_message(message)
-        await self.execution_environment._call_hooks("after_message_append", self, message)
+        await self.execution_environment.call_hooks("after_message_append", self, message)
         await self.publish_notification(message)
 
     async def publish_notification(
@@ -504,7 +504,7 @@ class Session(ActiveClass):
     ) -> None:
         """Publish a notification to all subscribed channels."""
         from peteos.channels.channel import NotificationEvent
-        await self.execution_environment._call_hooks("before_notification_publish", self, message)
+        await self.execution_environment.call_hooks("before_notification_publish", self, message)
         for channel in self._channels:
             channel.push_event(NotificationEvent(self.uuid, message))
 

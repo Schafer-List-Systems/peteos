@@ -125,7 +125,7 @@ class TestHookCalling:
 
     @pytest.mark.asyncio
     async def test_sync_hook_is_called(self, mock_role, mock_session):
-        """Test that a sync hook is called when _call_hooks is invoked."""
+        """Test that a sync hook is called when call_hooks is invoked."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
@@ -137,8 +137,7 @@ class TestHookCalling:
         env = REPLExecutionEnvironment(chat_history, tool_manager, mock_role)
         env.register_hook("before_tool_execution", test_hook)
 
-        # Manually call hooks
-        result = await env._call_hooks("before_tool_execution", {"name": "test"})
+        result = await env.call_hooks_deny("before_tool_execution", {"name": "test"})
         assert hook_called[0]
 
     @pytest.mark.asyncio
@@ -154,13 +153,13 @@ class TestHookCalling:
 
         env.register_hook("before_tool_execution", blocking_hook)
 
-        result = await env._call_hooks("before_tool_execution", {"name": "test"})
+        result = await env.call_hooks_deny("before_tool_execution", {"name": "test"})
 
         assert result == (False, "Blocked!")
 
     @pytest.mark.asyncio
-    async def test_multiple_hooks_only_first_result_used(self, mock_role, mock_session):
-        """Test that first hook returning a value stops hook chain."""
+    async def test_multiple_hooks_all_called_with_deny(self, mock_role, mock_session):
+        """Test that all hooks are called even when the first denies."""
         chat_history = ChatHistory()
         tool_manager = ToolManager()
 
@@ -178,7 +177,7 @@ class TestHookCalling:
         env.register_hook("before_tool_execution", hook1)
         env.register_hook("before_tool_execution", hook2)
 
-        result = await env._call_hooks("before_tool_execution", {"name": "test"})
+        result = await env.call_hooks_deny("before_tool_execution", {"name": "test"})
 
         assert result == (False, "First")
-        assert call_order == [1]  # hook2 should not be called
+        assert call_order == [1, 2]

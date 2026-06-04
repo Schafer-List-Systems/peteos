@@ -114,7 +114,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
         # We only send the extended chat history to the chatbot to get a further response when there are no (more)
         # pending tool calls.
         if not session.has_unfinished_tool_call():
-            await self._call_hooks("before_send_to_chatbot", session, session.chat_history)
+            await self.call_hooks("before_send_to_chatbot", session, session.chat_history)
             response = await self.chatbot.send_message(session.chat_history)
             async for _ in response:
                 pass
@@ -187,7 +187,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                     )],
                 )
                 await session.append_and_notify(msg)
-                await self._call_hooks("after_tool_execution", session, record.tool_call, denial_msg, False)
+                await self.call_hooks("after_tool_execution", session, record.tool_call, denial_msg, False)
                 _logger.debug("[repl] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
 
@@ -210,7 +210,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 return (ExecStatus.TOOL_NOT_FOUND, None)
 
             args = _cast_args_to_types(tool.func, args)
-            hook_result = await self._call_hooks("before_tool_execution", session, tool_call)
+            hook_result = await self.call_hooks_deny("before_tool_execution", session, tool_call)
             if hook_result is not None:
                 allow, message = hook_result
                 if not allow:
@@ -224,7 +224,7 @@ class REPLExecutionEnvironment(ExecutionEnvironment):
                 if asyncio.iscoroutine(result):
                     result = await result
                 await self._append_tool_result(session, tool_name=tool_name, content=str(result), tool_use_id=tool_call_id)
-                await self._call_hooks("after_tool_execution", session, tool_call, str(result), True)
+                await self.call_hooks("after_tool_execution", session, tool_call, str(result), True)
                 _logger.debug("Tool %s returned: %s", tool_name, str(result))
             except Exception as e:
                 await self._append_tool_result(
