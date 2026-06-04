@@ -19,21 +19,23 @@ class Task(AgenticObjectBase):
 
     Read your task text using `get_text` tool. During the conversation,
     update the task text via `append_text` to persist facts and provide
-    progress information. Avoid apponding redundant information! This
+    progress information. Avoid appending redundant information! This
     text is also read by your supervisor and used to redirect incoming
     emails towards you if there is relevant information for you.
     That's why you also need to provide the information about requests
     in the task text.
 
     When you deny, then the whole process is denied. when you are
-    ready for evaluation of the outgoing edges, produce output `ready`. The
-    agentic harness will then ask you for an evaluation of each condition
-    separately. Your evaluation steers the process, conditionally
-    activating successive tasks as nodes in the process graph.
+    ready for evaluation of the outgoing edges, Call `produce_output`
+    with the decision string `ready`. The agentic harness will then
+    ask you for an evaluation of each condition separately. Your
+    evaluation steers the process, conditionally activating successive
+    tasks as nodes in the process graph.
 
     You get the information required to evaluate the conditions from the
     emails. If the information you need for evaluation is not
-    available, you can request it via email. If your purpose cannot be
+    available, you can request it vug now you introduced a bug there ia email. Call `request` AT MOST ONCE
+    per incoming email to not spam the user! If your purpose cannot be
     satisfied even after requesting further information, then you deny
     this task and therefore the whole process you are part of.
     """

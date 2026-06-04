@@ -152,7 +152,16 @@ class AgenticObjectBase:
         try:
             parsed = json.loads(data)
         except json.JSONDecodeError as e:
-            return f"Error: invalid JSON: {e}"
+            schema_hint = ""
+            if self._oap_current_output_schema is not None:
+                import dataclasses
+                if is_dataclass(self._oap_current_output_schema):
+                    fields = dataclasses.fields(self._oap_current_output_schema)
+                    schema_hint = (
+                        f"\n\nExpected output schema {self._oap_current_output_schema.__name__} "
+                        f"with fields: {', '.join(f.name for f in fields)}."
+                    )
+            return f"Error: invalid JSON: {e}.{schema_hint}"
 
         # Validate and cast to schema if set.
         error = self._validate_produced_data(parsed)
@@ -198,7 +207,8 @@ class AgenticObjectBase:
         if session is None:
             return "Error: session not available."
 
-        media_part = await self._load_content_part(src, timeout=30.0)
+        from peteos.utils.image import create_content_part_async
+        media_part = await create_content_part_async(src, timeout=30.0)
 
         queued_msg = Message(
             role="user",
@@ -330,11 +340,6 @@ class AgenticObjectBase:
         """The Role used for this object's invocations."""
         return self._oap_role
 
-    async def _load_image(self, src: str, timeout: float) -> ContentPart:
-        """Load an image from a file path or URL into a ContentPart."""
-        from peteos.utils.image import create_image_content_part_async
-        return await create_image_content_part_async(src, timeout)
-
     async def invoke_agent(
         self,
         prompt: str,
@@ -406,7 +411,8 @@ class AgenticObjectBase:
 
             content: list[ContentPart] = [ContentPart(part_type="text", text=prompt)]
             if image is not None:
-                image_part = await self._load_image(image, timeout or 30.0)
+                from peteos.utils.image import create_image_content_part_async
+                image_part = await create_image_content_part_async(image, timeout or 30.0)
                 content.append(image_part)
 
             await session.queue_message(Message(

@@ -53,6 +53,7 @@ class ProcessSupervisor(AgenticObjectBase):
         self._dispatch_thread_id: str | None = None
         self._process_id = process_id
         self._tasks_triggered: int = 0
+        self._seen_emails: dict[int, set[str]] = {}
         self.app_main = app_main
 
     def _set_uid(self, uid: int) -> None:
@@ -66,6 +67,7 @@ class ProcessSupervisor(AgenticObjectBase):
                 f"UID already set to {self._uid}, cannot set to {uid}"
             )
         self._uid = uid
+        self._seen_emails = {uid: set()}
 
     def _get_uid(self) -> int | None:
         """Get the current email UID, or None if not set."""
@@ -91,12 +93,11 @@ class ProcessSupervisor(AgenticObjectBase):
         """Dispatch an email to the supervisor agent.
 
         Sets the UID and thread ID, then:
-        1. Programmatically triggers all ACTIVE tasks.
-        2. Invokes the agent to reason about PENDING tasks.
-        3. Repeats steps 1-2 if new PENDING tasks appeared.
-
-        If no task was triggered at all and no pending tasks exist,
-        invokes the agent to decide whether to reply or escalate.
+        1. Process all ACTIVE tasks (including newly activated ones) until
+           none remain.
+        2. If PENDING tasks remain, invoke the agent to reason about them.
+        3. If neither ACTIVE nor PENDING tasks remain, the process is
+           terminated — invoke the agent to inform the user of the outcome.
 
         Args:
             uid: The IMAP UID of the email to process.
@@ -117,49 +118,56 @@ class ProcessSupervisor(AgenticObjectBase):
         cached_inbox = Path(process.process_dir) / "cached_inbox"
         fetch_email(uid, cached_inbox=cached_inbox)
 
-        pending_ids = process.pending_tasks
         try:
             for attempt in range(max_retries):
-                # Step 1: Programmatically trigger all ACTIVE tasks
-                for active_id in process.active_tasks:
-                    task = process.get_task(active_id)
+                # Step 1: Process all ACTIVE tasks (including newly activated ones)
+                while process.active_tasks:
+                    task_id = process.active_tasks[-1]
+                    task = process.get_task(task_id)
                     if task is not None:
                         await task.proceed(email_uid=uid)
                         self._tasks_triggered += 1
+                        self._seen_emails[uid].add(task_id)
 
-                # Step 2: Agent reasons about PENDING tasks
-                pending_text = "\n".join(sorted(pending_ids))
-                prompt = (
-                    f"You received an email. "
-                    f"Read the email content with your tools. "
-                    f"Then decide for each pending task if the email is relevant for that task. "
-                    f"Read the task's text using `get_task_text` to understand the task's purpose and what information it needs. "
-                    f"Trigger relevant tasks calling `trigger_task`. "
-                    f"The process has the following pending tasks:\n{pending_text}"
-                )
-                await self.invoke_agent(
-                    prompt=prompt,
-                    persistent_thread_id=self._dispatch_thread_id,
-                )
-
-                # Check for new pending tasks
-                new_pending = process.pending_tasks
-                new_ids = new_pending - pending_ids
-                if new_ids:
-                    pending_ids = new_pending
-                    continue
-                if self._tasks_triggered == 0 and len(pending_ids) == 0:
+                # Filter out tasks that have already seen this email
+                pending_ids = process.pending_tasks - self._seen_emails[uid]
+                if pending_ids:
+                    # Step 2: Agent reasons about remaining pending tasks
+                    pending_text = "\n".join(sorted(pending_ids))
+                    prompt = (
+                        f"You received an email. "
+                        f"Read the email content with your tools. "
+                        f"Then decide for each pending task if the email is relevant for that task. "
+                        f"Read the task's text using `get_task_text` to understand the task's purpose and what information it needs. "
+                        f"Trigger relevant tasks calling `trigger_task`. "
+                        f"The process has the following pending tasks:\n{pending_text}"
+                    )
                     await self.invoke_agent(
-                        prompt=(
-                            "You did not trigger any task and there are no "
-                            "pending tasks. Decide whether to reply to the "
-                            "user for more information or escalate the issue."
-                        ),
+                        prompt=prompt,
                         persistent_thread_id=self._dispatch_thread_id,
                     )
+                    continue
+
+                # No active tasks and no pending tasks — process is terminated.
+                # Inform the user of the outcome.
+                if process.is_denied():
+                    outcome_prompt = (
+                        f"The process {self._process_id} is finished and has been denied. "
+                        f"Inform the user accordingly."
+                    )
+                else:
+                    outcome_prompt = (
+                        f"The process {self._process_id} is finished and has been accepted. "
+                        f"Inform the user accordingly."
+                    )
+                await self.invoke_agent(
+                    prompt=outcome_prompt,
+                    persistent_thread_id=self._dispatch_thread_id,
+                )
                 break
         finally:
             self._tasks_triggered = 0
+            self._seen_emails.clear()
             self._uid = None
             self._dispatch_thread_id = None
 
@@ -207,6 +215,8 @@ class ProcessSupervisor(AgenticObjectBase):
             )
 
         self._tasks_triggered += 1
+        if uid is not None:
+            self._seen_emails[uid].add(task_id)
 
         # Invoke the task agent via proceed
         result_state = await task.proceed(email_uid=uid)
@@ -230,7 +240,8 @@ class ProcessSupervisor(AgenticObjectBase):
 
     @tool
     def get_pending_task_ids(self) -> str:
-        """Get the list of task IDs for pending tasks in this process.
+        """Get the list of pending task IDs in this process that have not
+        yet seen the current email.
 
         Returns:
             A newline-separated list of pending task IDs.
@@ -241,7 +252,12 @@ class ProcessSupervisor(AgenticObjectBase):
         )
         if not process.pending_tasks:
             return "No pending tasks."
-        return "\n".join(sorted(process.pending_tasks))
+        uid = self._get_uid()
+        seen = self._seen_emails.get(uid, set()) if uid is not None else set()
+        pending_ids = process.pending_tasks - seen
+        if not pending_ids:
+            return "No pending tasks."
+        return "\n".join(sorted(pending_ids))
 
     @tool
     def get_task_text(self, task_id: str) -> str:

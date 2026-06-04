@@ -35,7 +35,11 @@ class Process(Workflow):
                 )
 
             if successor.is_ready():
-                successor.activate()
+                # At least one incoming edges of the successor must be enabled
+                for edge in successor._incoming_edges:
+                    if edge.state == EdgeState.ENABLED:
+                        successor.activate()
+                        break
 
     def _propagate_disabled(self, task_id: str) -> None:
         """Find downstream tasks that have become DISABLED and cascade.
@@ -74,6 +78,14 @@ class Process(Workflow):
         """True if no tasks remain active, pending, or can become active."""
         terminal_states = {TaskState.OK, TaskState.DENIED, TaskState.DISABLED}
         return all(t.state in terminal_states for t in self._tasks.values())
+
+    def is_denied(self) -> bool:
+        """True if any task has been denied."""
+        return any(t.state == TaskState.DENIED for t in self._tasks.values())
+
+    def is_accepted(self) -> bool:
+        """True if the process is terminated and not denied."""
+        return self.is_terminated() and not self.is_denied()
 
     @property
     def pending_tasks(self) -> set[str]:

@@ -35,7 +35,7 @@ async def main() -> None:
     await chatbot_manager.add_backend("local", backend_url,
         api_type="anthropic",
         streaming=False,
-        max_tokens=2048
+        max_tokens=8192
     )
 
     app_main = AppMain(workflow_path=workflow_path)
