@@ -295,15 +295,29 @@ class Task(AgenticObjectBase):
         # 4. If OK, evaluate outgoing edge conditions
         if new_state == TaskState.OK:
             for edge in self._outgoing_edges:
-                edge_prompt = f"An outgoing edge of the task has the condition label '{edge.condition}'. Output a single word 'yes' or 'no' depending on whether the process should go along that edge."
-                result = await self.invoke_agent(
-                    prompt=edge_prompt,
-                    persistent_thread_id=thread_id,
-                    output_schema=TaskStatus
-                )
+                edge_decision = None
+                max_attempts = 3
+                for attempt in range(max_attempts):
+                    result = await self.invoke_agent(
+                        prompt=(
+                            f"An outgoing edge of the task has the condition "
+                            f"label '{edge.condition}'. Use the tool `produce_output` with a "
+                            f"single 'yes' or 'no' as decision string depending on whether the "
+                            f"process should go along that edge or not."
+                        ),
+                        output_schema=TaskStatus,
+                        persistent_thread_id=thread_id,
+                    )
+                    edge_decision = result.decision
+                    if edge_decision in ("yes", "no"):
+                        break
+                    _logger.warning(
+                        "Task %s: edge '%s' decision was %r (attempt %d/%d), retrying",
+                        self.task_id, edge.condition, edge_decision,
+                        attempt + 1, max_attempts,
+                    )
 
-                edge_decision = result.decision
-                is_met = edge_decision == "yes" if result else False
+                is_met = (edge_decision == "yes")
                 edge.state = EdgeState.ENABLED if is_met else EdgeState.DISABLED
 
             # 5. Activate ready successor tasks
