@@ -183,7 +183,8 @@ class ProcessSupervisor(AgenticObjectBase):
                 if process.is_denied():
                     outcome_prompt = (
                         f"The process {self._process_id} is finished and has been denied. "
-                        f"Inform the user accordingly."
+                        f"Inform the user accordingly!"
+                        f"Escalate to an admin for review!"
                     )
                 elif process.is_accepted():
                     if requests is not None:
@@ -354,7 +355,7 @@ class ProcessSupervisor(AgenticObjectBase):
             A confirmation string.
         """
         self._reply_body = body
-        return "Reply has been set. USE THE `produce_output` NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
+        return "Reply has been set. USE THE `produce_output` TOOL NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
 
     @tool
     def get_reply(self) -> str:
@@ -390,7 +391,7 @@ class ProcessSupervisor(AgenticObjectBase):
             A confirmation string.
         """
         self._escalation = (subject, body)
-        return "Escalation has been set. USE THE `produce_output` NOW!"
+        return "Escalation has been set. USE THE `produce_output` TOOL NOW!"
 
     @tool
     def get_escalation(self) -> str:

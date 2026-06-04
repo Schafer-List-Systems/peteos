@@ -23,7 +23,7 @@ class Task(AgenticObjectBase):
 
     FOLLOW THE INSTRUCTIONS OF YOUR TASK DESCRIPTION THOROUGHLY! READ IT
     USING THE `get_text` TOOL! Make important notes in the task description via
-    the tool `append_text` to persist facts and provide progress information.
+    the tool `append_text` to PERSIST FACTS AND PROVIDE PROGRESS INFORMATION.
     Avoid appending redundant information! This text is also read by your
     supervisor and used to redirect incoming emails towards you. Therefore,
     you must also provide the information about requests in the task
@@ -305,17 +305,15 @@ class Task(AgenticObjectBase):
             )
         seen_ids: set[str] = set()
         for i, ev in enumerate(evaluations):
-            if not isinstance(ev, dict):
-                return False, f"Evaluation at index {i} is not a dict: {ev!r}"
-            edge_id = ev.get("edge_id")
-            if edge_id is None:
-                return False, f"Evaluation at index {i} missing 'edge_id'"
+            if not isinstance(ev, EdgeEvaluation):
+                return False, f"Evaluation at index {i} is not an EdgeEvaluation: {ev!r}"
+            edge_id = ev.edge_id
             if edge_id not in expected_ids:
                 return False, f"Unknown edge_id '{edge_id}' in evaluation at index {i}"
             if edge_id in seen_ids:
                 return False, f"Duplicate edge_id '{edge_id}' in evaluations"
             seen_ids.add(edge_id)
-            met = ev.get("met")
+            met = ev.met
             if not isinstance(met, bool):
                 return (
                     False,
@@ -406,7 +404,7 @@ class Task(AgenticObjectBase):
             eval_map: dict[str, bool] = {}
             if evaluations is not None:
                 for ev in evaluations:
-                    eval_map[ev["edge_id"]] = ev["met"]
+                    eval_map[ev.edge_id] = ev.met
             for edge in self._outgoing_edges:
                 is_met = eval_map.get(edge.to_task_id, False)
                 edge.state = EdgeState.ENABLED if is_met else EdgeState.DISABLED

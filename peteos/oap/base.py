@@ -8,7 +8,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, is_dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_origin, get_args
 
 from peteos.chatbot import ContentPart, Message
 from peteos.executionenvironment import ExecStatus
@@ -210,9 +210,19 @@ class AgenticObjectBase:
             return error
 
         # Cast to dataclass if applicable.
-        if self._oap_current_output_schema is not None and is_dataclass(self._oap_current_output_schema):
-            if isinstance(parsed, dict):
-                parsed = self._oap_current_output_schema(**parsed)
+        schema = self._oap_current_output_schema
+        if schema is not None:
+            origin = get_origin(schema)
+            args = get_args(schema)
+            if origin is list and args and is_dataclass(args[0]):
+                inner_type = args[0]
+                if isinstance(parsed, list):
+                    parsed = [
+                        inner_type(**item) if isinstance(item, dict) else item
+                        for item in parsed
+                    ]
+            elif is_dataclass(schema) and isinstance(parsed, dict):
+                parsed = schema(**parsed)
 
         try:
             session.state.create("_oap_produced_data", parsed)
