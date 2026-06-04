@@ -34,12 +34,14 @@ class ProcessSupervisor(AgenticObjectBase):
 
     Get the list of pending tasks and read their purpose to get the
     relevant task IDs for this email. Then trigger the relevant
-    tasks using `trigger_task`. If no task is relevant then either
+    tasks using `trigger_task`. If no task is relevant then
     escalate or reply to the email depending on the email you got and
     the tasks that are pending.
 
     Use `set_reply` to compose a reply to the original sender and
     `set_escalation` for error conditions you cannot resolve.
+    When you are done composing your answer, then use `produce_output`
+    to finish you turn and wait for the next E-Mail!
     """
 
     def __init__(self, app_main, process_id: str):
@@ -352,7 +354,7 @@ class ProcessSupervisor(AgenticObjectBase):
             A confirmation string.
         """
         self._reply_body = body
-        return "Reply has been set and will be sent at the end of the dispatch cycle. You should use the `produce_output` tool to hand over to the dispatcher!"
+        return "Reply has been set. USE THE `produce_output` NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
 
     @tool
     def get_reply(self) -> str:
@@ -388,7 +390,7 @@ class ProcessSupervisor(AgenticObjectBase):
             A confirmation string.
         """
         self._escalation = (subject, body)
-        return "Escalation has been set and will be sent at the end of the dispatch cycle."
+        return "Escalation has been set. USE THE `produce_output` NOW!"
 
     @tool
     def get_escalation(self) -> str:

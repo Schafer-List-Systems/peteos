@@ -22,6 +22,40 @@ from peteos.oap.decorators import tool
 
 _logger = get_logger(__name__)
 
+
+def _get_schema_description(schema: type | None) -> tuple[str, str] | None:
+    """Extract the JSON schema dict and docstring for a dataclass output schema.
+
+    Handles dataclasses and list[SomeDataclass].
+
+    Args:
+        schema: The output schema to describe.
+
+    Returns:
+        A tuple of (json_schema_str, docstring) or None if the schema
+        is not a dataclass or list[SomeDataclass].
+    """
+    from typing import get_args, get_origin
+    if schema is None:
+        return None
+    # Handle list[SomeDataclass]
+    origin = get_origin(schema)
+    args = get_args(schema)
+    if origin is list and args and is_dataclass(args[0]):
+        inner = args[0]
+        desc = _get_schema_description(inner)
+        if desc is None:
+            return None
+        inner_schema, inner_doc = desc
+        return f"[{inner_schema}, ...]", inner_doc
+    if not is_dataclass(schema):
+        return None
+    import dataclasses
+    fields = dataclasses.fields(schema)
+    json_schema = "{" + ", ".join(f"'{f.name}': {f.type.__name__}" for f in fields) + "}"
+    docstring = (schema.__doc__ or "").strip()
+    return json_schema, docstring
+
 if TYPE_CHECKING:
     from peteos.session import Session
 
@@ -95,15 +129,13 @@ class AgenticObjectBase:
 
     def _output_schema_hook(self) -> str:
         """System prompt hook: returns formatted output schema description."""
-        if self._oap_current_output_schema is None:
-            return ""
-        schema_name = self._oap_current_output_schema.__name__
-        if is_dataclass(self._oap_current_output_schema):
-            import dataclasses
-            fields = dataclasses.fields(self._oap_current_output_schema)
-            field_lines = "\n".join(f"  - {f.name}: {f.type.__name__}" for f in fields)
-            return f"\n\n# Output Schema\nYour final answer must be produced via produce_output with a JSON object containing these fields:\n{field_lines}."
-        return f"\n\n# Output Schema\nYour final answer must be produced via produce_output with a value of type {schema_name}."
+        desc = _get_schema_description(self._oap_current_output_schema)
+        if desc is not None:
+            json_schema, docstring = desc
+            return f"# Output\n\nProvide your final answer with the `produce_output` tool with a JSON object matching:\n{json_schema}\nSchema description: {docstring}"
+        if self._oap_current_output_schema is not None:
+            return f"# Output\n\nProvide your final answer with the `produce_output` tool with a value of type {self._oap_current_output_schema.__name__}."
+        return ""
 
     def _register_sandbox_tool(self) -> None:
         """Register python_exec tool when allow_code_execution is enabled on the class."""
@@ -166,15 +198,11 @@ class AgenticObjectBase:
             parsed = json.loads(data)
         except json.JSONDecodeError as e:
             schema_hint = ""
-            if self._oap_current_output_schema is not None:
-                import dataclasses
-                if is_dataclass(self._oap_current_output_schema):
-                    fields = dataclasses.fields(self._oap_current_output_schema)
-                    schema_hint = (
-                        f"\n\nExpected output schema {self._oap_current_output_schema.__name__} "
-                        f"with fields: {', '.join(f.name for f in fields)}."
-                    )
-            return f"Error: invalid JSON: {e}.{schema_hint}"
+            desc = _get_schema_description(self._oap_current_output_schema)
+            if desc is not None:
+                json_schema, docstring = desc
+                schema_hint = f"Provide your final answer with the `produce_output` tool with a JSON object matching:\n{json_schema}\nSchema description: {docstring}"
+            return f"Error: invalid JSON: {e}\n{schema_hint}"
 
         # Validate and cast to schema if set.
         error = self._validate_produced_data(parsed)
@@ -418,24 +446,19 @@ class AgenticObjectBase:
                     return ExecStatus.FINISHED
                 else:
                     schema_desc = ""
-                    if self._oap_current_output_schema is not None:
-                        schema_name = self._oap_current_output_schema.__name__
-                        if is_dataclass(self._oap_current_output_schema):
-                            import dataclasses
-                            fields = dataclasses.fields(self._oap_current_output_schema)
-                            schema_desc = (
-                                f" The expected output is a {schema_name} with fields: "
-                                f"{', '.join(f'{f.name}: {f.type.__name__}' for f in fields)}. "
-                                f"Use `produce_output` with a JSON object matching this schema."
-                            )
-                        else:
-                            schema_desc = (
-                                f" The expected output is of type {schema_name}. "
-                                f"Use `produce_output` with a value of that type."
-                            )
+                    desc = _get_schema_description(self._oap_current_output_schema)
+                    if desc is not None:
+                        json_schema, docstring = desc
+                        schema_desc = (
+                            f"Provide your final answer with the `produce_output` tool with a JSON object matching:\n{json_schema}\nSchema description: {docstring}"
+                        )
+                    elif self._oap_current_output_schema is not None:
+                        schema_desc = (
+                            f"Provide your final answer with the `produce_output` tool with a value of type {self._oap_current_output_schema.__name__}."
+                        )
                     reminder = (
                         f"It looks like you finished a step without calling `produce_output` or `produce_error`. "
-                        f"If you have your final answer, call `produce_output` with your result.{schema_desc} "
+                        f"If you have your final answer, call `produce_output` with your result!{schema_desc} "
                     )
                     await session.queue_message(Message(
                         role="user",

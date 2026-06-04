@@ -3,10 +3,12 @@ from __future__ import annotations
 from peteos.logger import get_logger
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
+from .edge import Edge
 
 _logger = get_logger(__name__)
 
-from ._types import EdgeState, TaskState, TaskStatus
+from ._types import EdgeState, TaskState, TaskStatus, EdgeEvaluation
+from typing import Any
 from apps.agentic_process.email_client import (
     get_cached_email,
     list_cached_emails,
@@ -15,28 +17,28 @@ from pathlib import Path
 
 
 class Task(AgenticObjectBase):
-    """You are a task agent within an agentic process engine. Your
-    purpose is to gather the information in order to evaluate the
-    conditions of all outgoing edges regarding the text of this task.
+    """You are a task agent within a user-interaction workflow.
+    Your purpose is to handle or execute a task in that human-in-the-loop
+    workflow.
 
-    Read your task text using `get_text` tool. During the conversation,
-    update the task text via `append_text` to persist facts and provide
-    progress information. Avoid appending redundant information! This
-    text is also read by your supervisor and used to redirect incoming
-    emails towards you if there is relevant information for you.
-    That's why you also need to provide the information about requests
-    in the task text.
+    FOLLOW THE INSTRUCTIONS OF YOUR TASK DESCRIPTION THOROUGHLY! READ IT
+    USING THE `get_text` TOOL! Make important notes in the task description via
+    the tool `append_text` to persist facts and provide progress information.
+    Avoid appending redundant information! This text is also read by your
+    supervisor and used to redirect incoming emails towards you. Therefore,
+    you must also provide the information about requests in the task
+    description!
 
     When you deny, then the whole process is denied. when you are
     ready for evaluation of the outgoing edges, Call `produce_output`
     with the decision string `ready`. The agentic harness will then
-    ask you for an evaluation of each condition separately. Your
-    evaluation steers the process, conditionally activating successive
-    tasks as nodes in the process graph.
+    ask you for an evaluation of each condition of the outgoing edges
+    separately. Your evaluation steers the process, conditionally
+    activating successive tasks as nodes in the process graph.
 
     You get the information required to evaluate the conditions from the
-    emails. If the information you need for evaluation is not
-    available, you can request it vug now you introduced a bug there ia email. Call `request` AT MOST ONCE
+    emails. Request information ONLY WHEN THE INFORMATION YOU NEED FOR
+    EVALUATION OF THE OUTGOING EDGES IS NOT AVAILABLE. Call `request` AT MOST ONCE
     per incoming email to not spam the user! If your purpose cannot be
     satisfied even after requesting further information, then you deny
     this task and therefore the whole process you are part of.
@@ -247,7 +249,7 @@ class Task(AgenticObjectBase):
         """
         if not self._outgoing_edges:
             return "No outgoing edges."
-        return "\n".join(f"- {e.condition}" for e in self._outgoing_edges)
+        return "\n".join(f"- {e.to_task_id}: {e.condition}" for e in self._outgoing_edges)
 
     @tool
     def set_request(self, body: str) -> str:
@@ -264,7 +266,10 @@ class Task(AgenticObjectBase):
         """
         self._request = body
 
-        return "You have formulated the request. You should use the `produce_output` tool with the 'decision' field set to 'pending' to hand over to the super visor who will query for your request!"
+        if body == "":
+            return "Request has been cleared! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
+        else:
+            return "Request has been set! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
 
     @tool
     def get_request(self) -> str:
@@ -276,6 +281,47 @@ class Task(AgenticObjectBase):
     def _clear_request(self) -> None:
         """Clear the pending request after the supervisor processes it."""
         self._request = None
+
+    def _validate_edge_evaluations(
+        self, evaluations: list[Any] | None
+    ) -> tuple[bool, str]:
+        """Validate that edge evaluations are well-formed.
+
+        Args:
+            evaluations: The evaluations returned by the agent.
+
+        Returns:
+            A tuple of (is_valid, error_message). The error message is
+            non-empty when validation fails so it can be fed back to
+            the agent on retry.
+        """
+        if not evaluations or not isinstance(evaluations, list):
+            return False, f"Expected a non-empty list of evaluations, got: {evaluations!r}"
+        expected_ids = {e.to_task_id for e in self._outgoing_edges}
+        if len(evaluations) != len(expected_ids):
+            return (
+                False,
+                f"Expected {len(expected_ids)} evaluations but got {len(evaluations)}",
+            )
+        seen_ids: set[str] = set()
+        for i, ev in enumerate(evaluations):
+            if not isinstance(ev, dict):
+                return False, f"Evaluation at index {i} is not a dict: {ev!r}"
+            edge_id = ev.get("edge_id")
+            if edge_id is None:
+                return False, f"Evaluation at index {i} missing 'edge_id'"
+            if edge_id not in expected_ids:
+                return False, f"Unknown edge_id '{edge_id}' in evaluation at index {i}"
+            if edge_id in seen_ids:
+                return False, f"Duplicate edge_id '{edge_id}' in evaluations"
+            seen_ids.add(edge_id)
+            met = ev.get("met")
+            if not isinstance(met, bool):
+                return (
+                    False,
+                    f"Evaluation for edge '{edge_id}' at index {i}: 'met' must be a boolean, got: {met!r}",
+                )
+        return True, ""
 
     async def proceed(self, email_uid: int | None = None) -> TaskState:
         """Invoke the agent on this task, evaluate edge conditions, and return the new state.
@@ -323,32 +369,46 @@ class Task(AgenticObjectBase):
             new_state = TaskState.PENDING
         self.state = new_state
 
-        # 4. If OK, evaluate outgoing edge conditions
-        if new_state == TaskState.OK:
-            for edge in self._outgoing_edges:
-                edge_decision = None
-                max_attempts = 3
-                for attempt in range(max_attempts):
-                    result = await self.invoke_agent(
-                        prompt=(
-                            f"An outgoing edge of the task has the condition "
-                            f"label '{edge.condition}'. Use the tool `produce_output` with a "
-                            f"single 'yes' or 'no' as decision string depending on whether the "
-                            f"process should go along that edge or not."
-                        ),
-                        output_schema=TaskStatus,
-                        persistent_thread_id=thread_id,
-                    )
-                    edge_decision = result.decision
-                    if edge_decision in ("yes", "no"):
-                        break
-                    _logger.warning(
-                        "Task %s: edge '%s' decision was %r (attempt %d/%d), retrying",
-                        self.task_id, edge.condition, edge_decision,
-                        attempt + 1, max_attempts,
-                    )
+        # 4. If OK, evaluate all outgoing edge conditions in one batch
+        if new_state == TaskState.OK and self._outgoing_edges:
+            edge_list = "\n".join(
+                f"- {edge.to_task_id}: {edge.condition}" for edge in self._outgoing_edges
+            )
+            max_attempts = 3
+            evaluations: list[Any] | None = None
+            retry_prompt_suffix = ""
+            for attempt in range(max_attempts):
+                prompt = (
+                    f"The task reached a 'ready' state and all its outgoing edges need to be evaluated. "
+                    f"The task has the following outgoing edges:\n{edge_list}\n"
+                    f"Evaluate each edge condition and use the `produce_output` tool to return a list of evaluations. "
+                    f"For each edge produce one evaluation with edge_id and met fields (true/false)."
+                    f"{retry_prompt_suffix}"
+                )
+                evaluations = await self.invoke_agent(
+                    prompt=prompt,
+                    output_schema=list[EdgeEvaluation],
+                    persistent_thread_id=thread_id,
+                )
+                valid, error_msg = self._validate_edge_evaluations(evaluations)
+                if valid:
+                    break
+                retry_prompt_suffix = (
+                    f"\n\nYour previous attempt was invalid:\n{error_msg}\n"
+                    f"Please correct the output and try again."
+                )
+                _logger.warning(
+                    "Task %s: invalid edge evaluations (attempt %d/%d), retrying",
+                    self.task_id, attempt + 1, max_attempts,
+                )
 
-                is_met = (edge_decision == "yes")
+            # Apply valid evaluations to edges
+            eval_map: dict[str, bool] = {}
+            if evaluations is not None:
+                for ev in evaluations:
+                    eval_map[ev["edge_id"]] = ev["met"]
+            for edge in self._outgoing_edges:
+                is_met = eval_map.get(edge.to_task_id, False)
                 edge.state = EdgeState.ENABLED if is_met else EdgeState.DISABLED
 
             # 5. Activate ready successor tasks

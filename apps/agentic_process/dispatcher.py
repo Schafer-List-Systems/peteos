@@ -23,15 +23,16 @@ class EmailDispatcher(AgenticObjectBase):
     references an existing process or requires a new one.
 
     Use your `get_email_subject` and `get_email_body` tools to read the
-    email content.
+    email content and FIND THE PROCESS ID!.
 
     Then follow these steps:
 
-    1. Extract any process ID from the email subject or body.
+    1. Extract any process ID (usually a 4-character BASE64 String) from
+       the email subject or body. It is most likely in brackets in the subject.
     2. If you found a process ID, call `process_id_found` with that ID.
        The tool will check the process and return a status. Follow the
        tool's instructions in the return value.
-    3. If you did NOT find a process ID, call `process_id_not_found`.
+    3. ONLY If you could NOT find a process ID, call `process_id_not_found`.
        The tool will create a new process and return a status. Follow
        the tool's instructions in the return value.
     4. If you encounter an error you cannot resolve, call `escalate`.
