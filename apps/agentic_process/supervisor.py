@@ -201,6 +201,11 @@ class ProcessSupervisor(AgenticObjectBase):
         uid = self._get_uid()
         if uid is None:
             return "ERROR: No email UID available."
+        elif task_id in self._seen_emails[uid]:
+            return (
+                f"Task {task_id} has already processed this email (UID {uid}). "
+                "Nothing to do."
+            )
 
         process = self.app_main.find_process(self._process_id)
         assert process is not None, (
@@ -215,8 +220,7 @@ class ProcessSupervisor(AgenticObjectBase):
             )
 
         self._tasks_triggered += 1
-        if uid is not None:
-            self._seen_emails[uid].add(task_id)
+        self._seen_emails[uid].add(task_id)
 
         # Invoke the task agent via proceed
         result_state = await task.proceed(email_uid=uid)
