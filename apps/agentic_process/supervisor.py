@@ -183,35 +183,40 @@ class ProcessSupervisor(AgenticObjectBase):
                 if process.is_denied():
                     outcome_prompt = (
                         f"The process {self._process_id} is finished and has been denied. "
-                        f"Inform the user accordingly!"
-                        f"Escalate to an admin for review!"
+                        f"Inform the user accordingly! "
+                        f"Escalate to an admin for review! "
+                        f"When you are done, call the `produce_output` tool with an empty string."
                     )
                 elif process.is_accepted():
                     if requests is not None:
                         outcome_prompt = (
                             f"The process {self._process_id} has been accepted, "
                             f"but the following tasks still have pending requests:\n{requests}\n"
-                            f"Escalate to an admin for review!"
+                            f"Escalate to an admin for review! "
+                            f"When you are done, call the `produce_output` tool with an empty string."
                         )
                     else:
                         outcome_prompt = (
                             f"The process {self._process_id} is finished and has been accepted. "
-                            f"Inform the user accordingly!"
+                            f"Inform the user accordingly! "
+                            f"When you are done, call the `produce_output` tool with an empty string."
                         )
                 elif requests is not None:
                     outcome_prompt = (
-                        f"The process has paused. The following tasks have pending requests for information:\n"
+                        f"The process is paused due to the task's requests. The following tasks have pending requests for information:\n"
                         f"{requests}\n"
-                        f"Read the original email with your tools, then formulate an appropriate reply "
-                        f"using ``set_reply``. Ignore internal or redundant information. "
-                        f"Use ``set_escalation`` if the requests cannot be resolved or need escalation."
+                        f"Formulate an appropriate reply to the user's email based on the requests. "
+                        f"using the `set_reply` tool. Ignore internal or redundant information. "
+                        f"Use the `set_escalation` tool if the requests cannot be resolved or need escalation. "
+                        f"When you are done, call the `produce_output` tool with an empty string."
                     )
                 else:
                     outcome_prompt = (
                         f"The process {self._process_id} cannot proceed further. "
                         f"There are no active tasks, no pending tasks, "
                         f"and the process is neither denied nor accepted. "
-                        f"Escalate this state to an admin."
+                        f"Escalate this state to an admin. "
+                        f"When you are done, call the `produce_output` tool with an empty string."
                     )
                 if outcome_prompt:
                     await self.invoke_agent(

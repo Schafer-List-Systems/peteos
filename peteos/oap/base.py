@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
 import time
 import uuid
@@ -23,7 +22,7 @@ from peteos.oap.decorators import tool
 _logger = get_logger(__name__)
 
 
-from peteos.oap._schema import cast_produced_data, get_schema_description, validate_produced_data
+from peteos.oap._schema import get_schema_description, parse_data
 
 
 if TYPE_CHECKING:
@@ -166,23 +165,10 @@ class AgenticObjectBase:
         if session is None:
             _logger.debug("_produce_output: session is None")
             return "Error: session not available."
-        # Parse JSON — the LLM always sends a string.
         try:
-            parsed = json.loads(data)
-        except json.JSONDecodeError as e:
-            schema_hint = ""
-            desc = get_schema_description(self._oap_current_output_schema)
-            if desc is not None:
-                json_schema, docstring = desc
-                schema_hint = f"Provide your final answer with the `produce_output` tool with a JSON object matching:\n{json_schema}\nSchema description: {docstring}"
-            return f"Error: invalid JSON: {e}\n{schema_hint}"
-
-        # Validate and cast to schema if set.
-        error = validate_produced_data(parsed, self._oap_current_output_schema)
-        if error:
-            return error
-
-        parsed = cast_produced_data(parsed, self._oap_current_output_schema)
+            parsed = parse_data(data, self._oap_current_output_schema)
+        except ValueError as e:
+            return str(e)
 
         try:
             session.state.create("_oap_produced_data", parsed)
@@ -497,4 +483,3 @@ class AgenticObjectBase:
             output_schema=output_schema,
             timeout=timeout,
         )
-ch habe noch...

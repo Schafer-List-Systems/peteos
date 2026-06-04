@@ -22,7 +22,7 @@ class Task(AgenticObjectBase):
     workflow.
 
     FOLLOW THE INSTRUCTIONS OF YOUR TASK DESCRIPTION THOROUGHLY! READ IT
-    USING THE `get_text` TOOL! Make important notes in the task description via
+    USING THE `get_text` TOOL! Make notes of all progress in the task description via
     the tool `append_text` to PERSIST FACTS AND PROVIDE PROGRESS INFORMATION.
     Avoid appending redundant information! This text is also read by your
     supervisor and used to redirect incoming emails towards you. Therefore,
@@ -128,7 +128,7 @@ class Task(AgenticObjectBase):
         """
         timestamp = self._format_timestamp()
         self.text = self.text + f"\n- {timestamp} {value}"
-        return self.text
+        return f"New text is now:\n{self.text}"
 
     @staticmethod
     def _format_timestamp() -> str:
@@ -339,19 +339,22 @@ class Task(AgenticObjectBase):
             prompt = (
                 f"Process the incoming email (IMAP UID {email_uid}). "
                 f"Use your tools to read and act on the email content."
-            )
-        else:
-            prompt = self.text
-
-        status = await self.invoke_agent(
-            prompt = (
-                f"Process the incoming email (IMAP UID {email_uid}). "
-                f"Use your tools to read and act on the email content."
-                f"When you have analyzed all relevant information, produce one word as output:\n"
+                f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
                 f"- pending: you need more information that you already requested via request()"
-            ),
+            )
+        else:
+            prompt = (
+                f"Proceed executing your task! "
+                f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL:\n"
+                f"- ready: you have everything to evaluate edge conditions\n"
+                f"- deny: you reject the task and the overall process\n"
+                f"- pending: you need more information that you already requested via request()"
+            )
+
+        status = await self.invoke_agent(
+            prompt = prompt,
             output_schema=TaskStatus,
             persistent_thread_id=thread_id,
         )
