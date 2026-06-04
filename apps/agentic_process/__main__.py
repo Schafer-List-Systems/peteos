@@ -32,7 +32,11 @@ async def main() -> None:
 
     # --- Connect to LLM backend ---
     chatbot_manager = ChatBotManager(timeout=300)
-    await chatbot_manager.add_backend("local", backend_url, api_type="anthropic", streaming=False)
+    await chatbot_manager.add_backend("local", backend_url,
+        api_type="anthropic",
+        streaming=False,
+        max_tokens=2048
+    )
 
     app_main = AppMain(workflow_path=workflow_path)
 

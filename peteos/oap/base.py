@@ -174,6 +174,43 @@ class AgenticObjectBase:
             return f"Error: {e}"
         return "OK"
 
+    @tool(
+        name="read_media",
+        description="Read a local media file (image, video, PDF) or fetch one from a URL. The content is provided as user message.",
+    )
+    async def _read_media(self, src: str, session: "Session | None" = None) -> str:
+        """Tool: load a media file and queue it back to the agent's session.
+
+        Reads the file from disk or fetches from a URL, encodes it as a
+        ContentPart (image/video/pdf), and queues a new user message into
+        the session's event queue. The session loop will drain this message
+        and add it to chat history before the next LLM call.
+
+        Args:
+            src: Local file path or HTTP(S) URL to the media file.
+            session: The session (injected by the execution environment).
+
+        Returns:
+            Confirmation message with file info.
+        """
+        from peteos.chatbot import ContentPart, Message
+
+        if session is None:
+            return "Error: session not available."
+
+        media_part = await self._load_content_part(src, timeout=30.0)
+
+        queued_msg = Message(
+            role="user",
+            content=[
+                ContentPart(part_type="text", text=f"Media loaded from {src}."),
+                media_part,
+            ],
+        )
+        await session.queue_message(queued_msg)
+        _logger.debug("_read_media: queued media from %s for session %s", src, session.uuid)
+        return f"OK: media queued from {src}"
+
     @tool(name="produce_error", description="Signal that you could not produce the requested output. Pass an error message explaining why (e.g., missing required data or an invalid state).")
     def _produce_error(self, message: str, session: "Session | None" = None) -> str:
         """Protected tool: signals the agent could not fulfill the task.
