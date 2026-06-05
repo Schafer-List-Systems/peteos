@@ -18,10 +18,10 @@ from pathlib import Path
 
 class Task(AgenticObjectBase):
     """You are a task agent within a user-interaction workflow.
-    Your purpose is to handle or execute a task in that human-in-the-loop
+    Your purpose is to handle or execute a SINGLE TASK in that human-in-the-loop
     workflow.
 
-    FOLLOW THE INSTRUCTIONS OF YOUR TASK DESCRIPTION THOROUGHLY! READ IT
+    FOLLOW THE INSTRUCTIONS OF YOUR TASK DESCRIPTION PRECISELY! READ THE TASK DESCRIPTION
     USING THE `get_text` TOOL! Make notes of all progress in the task description via
     the tool `append_text` to PERSIST FACTS AND PROVIDE PROGRESS INFORMATION.
     Avoid appending redundant information! This text is also read by your
@@ -37,7 +37,7 @@ class Task(AgenticObjectBase):
     activating successive tasks as nodes in the process graph.
 
     You get the information required to evaluate the conditions from the
-    emails. Request information ONLY WHEN THE INFORMATION YOU NEED FOR
+    emails and its attachments. Request information ONLY WHEN THE INFORMATION YOU NEED FOR
     EVALUATION OF THE OUTGOING EDGES IS NOT AVAILABLE. Call `request` AT MOST ONCE
     per incoming email to not spam the user! If your purpose cannot be
     satisfied even after requesting further information, then you deny
@@ -228,17 +228,58 @@ class Task(AgenticObjectBase):
             return f"ERROR: Email with UID {uid} not found in cached inbox."
 
     @tool
-    def read_attachment(self, uid: int, filename: str) -> str:
+    async def read_attachment(self, uid: int, filename: str, session: "Session | None" = None) -> str:
         """Read an attachment from a cached email.
+
+        For text files (.txt, .csv, .md, .json, .xml, .html) returns the
+        content directly. For images and PDFs queues them to the session
+        so the agent can review them via the media ContentPart flow.
 
         Args:
             uid: The IMAP UID of the cached email.
             filename: The name of the attachment file.
+            session: The session (injected by the execution environment).
 
         Returns:
-            The content of the attachment file as a string.
+            File content for text files, or a status message for media.
         """
-        return f"ERROR: read_attachment is not yet implemented."
+        import mimetypes
+
+        safe_name = Path(filename).name
+        if safe_name != filename or not safe_name:
+            return f"ERROR: Invalid filename '{filename}'."
+
+        try:
+            get_cached_email(uid, self._cached_inbox)
+        except FileNotFoundError:
+            return f"ERROR: Email with UID {uid} not found in cached inbox."
+
+        attachment_path = self._cached_inbox / str(uid) / safe_name
+        if not attachment_path.is_file():
+            return f"ERROR: Attachment '{safe_name}' not found for email UID {uid}."
+
+        mime_type, _ = mimetypes.guess_type(safe_name)
+        if mime_type is None:
+            return f"ERROR: Unknown file type for '{safe_name}'."
+
+        # Text files: return content directly
+        if mime_type.startswith("text/") or mime_type == "application/json":
+            try:
+                return attachment_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                return f"ERROR: '{safe_name}' is not a valid text file."
+
+        # Media files (images, PDFs): queue via _read_media
+        if mime_type.startswith("image/") or mime_type == "application/pdf":
+            if session is None:
+                return "ERROR: Session not available."
+            try:
+                await self._read_media(str(attachment_path.resolve()), session=session)
+                return f"OK: '{safe_name}' loaded for review."
+            except Exception as e:
+                return f"ERROR: Failed to load '{safe_name}': {e}"
+
+        return f"ERROR: '{safe_name}' (type: {mime_type}) cannot be read."
 
     @tool
     def get_outgoing_conditions(self) -> str:
