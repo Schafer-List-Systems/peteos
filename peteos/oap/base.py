@@ -43,6 +43,7 @@ class AgenticObjectBase:
         self._register_tools()
         self._register_output_schema_hook()
         self._register_sandbox_tool()
+        self._register_media_tool()
         self._oap_agent: Agent = self._create_agent()
         tool_names = [t.name for t in self._oap_tool_manager.get_tool_list()]
         _logger.debug("Registered tools for %s: %s", self.__class__.__name__, tool_names)
@@ -180,10 +181,6 @@ class AgenticObjectBase:
             return f"Error: {e}"
         return "OK"
 
-    @tool(
-        name="read_media",
-        description="Read a local media file (image, video, PDF) or fetch one from a URL. The content is provided as user message.",
-    )
     async def _read_media(self, src: str, session: "Session | None" = None) -> str:
         """Tool: load a media file and queue it back to the agent's session.
 
