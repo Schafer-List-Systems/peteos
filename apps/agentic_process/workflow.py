@@ -52,7 +52,18 @@ class Workflow:
                 e for e in edge_objs if e.to_task_id == node_d["id"]
             ]
 
-        # Find start task (no incoming edges)
+        # Identify supervisor node: the one node with no incoming AND no outgoing edges
+        supervisor_node_data = None
+        for node_d in json_data.get("nodes", []):
+            task = tasks[node_d["id"]]
+            if not task._incoming_edges and not task._outgoing_edges:
+                supervisor_node_data = node_d
+                break
+
+        if supervisor_node_data:
+            del tasks[supervisor_node_data["id"]]
+
+        # Find start task (no incoming edges, from remaining tasks)
         start_task = next(
             (t for t in tasks.values() if not t._incoming_edges),
             None,
@@ -70,6 +81,7 @@ class Workflow:
         self._edges = edge_objs
         self._start_task = start_task
         self._working_directory = working_directory
+        self._supervisor_node_data = supervisor_node_data
 
         if not self.is_valid():
             raise ValueError("Workflow is not valid")

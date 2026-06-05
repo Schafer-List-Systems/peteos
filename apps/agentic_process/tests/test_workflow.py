@@ -60,13 +60,17 @@ def _cycle_workflow(task_ids: list[str]) -> str:
 
 
 def _disjoint_workflow() -> str:
-    """Create a workflow with an unreachable node."""
+    """Create a workflow with two disconnected components."""
     nodes = [
         {"id": "a", "text": "A", "_task_state": "scheduled"},
         {"id": "b", "text": "B", "_task_state": "scheduled"},
         {"id": "c", "text": "C", "_task_state": "scheduled"},
+        {"id": "d", "text": "D", "_task_state": "scheduled"},
     ]
-    edges = [{"fromNode": "a", "toNode": "b", "label": "Yes"}]
+    edges = [
+        {"fromNode": "a", "toNode": "b", "label": "Yes"},
+        {"fromNode": "c", "toNode": "d", "label": "Yes"},
+    ]
     return _create_workflow_json(nodes, edges)
 
 

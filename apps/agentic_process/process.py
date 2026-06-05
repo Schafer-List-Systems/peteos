@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from ._types import TaskState
+from ._types import TaskState, ProcessState
 from .edge import EdgeState
 from .task import Task
 from .workflow import Workflow
+
+_PROCESS_COLORS: dict[ProcessState, str] = {
+    ProcessState.ACTIVE: "#3498db",
+    ProcessState.PENDING: "#f39c12",
+    ProcessState.OK: "#2ecc71",
+    ProcessState.DENIED: "#e74c3c",
+}
 
 
 class Process(Workflow):
@@ -17,6 +24,25 @@ class Process(Workflow):
         # is created from a workflow in Workflow.create_process()).
         self._process_dir: str = ""
 
+    @property
+    def process_state(self) -> ProcessState:
+        """Get the process state for this workflow instance."""
+        raw = self._supervisor_node_data.get("_task_state") if self._supervisor_node_data else None
+        return ProcessState(raw) if raw is not None else ProcessState.PENDING
+
+    @process_state.setter
+    def process_state(self, value: ProcessState) -> None:
+        """Set the process state, updating color and persisting."""
+        if self._supervisor_node_data is None:
+            return
+        self._supervisor_node_data["_task_state"] = value.value
+        self._supervisor_node_data["color"] = _PROCESS_COLORS[value]
+        self.store()
+
+    @property
+    def supervisor_node_data(self) -> dict | None:
+        return self._supervisor_node_data
+
     def start(self) -> None:
         """Start the process with the start task in ACTIVE state.
 
@@ -24,6 +50,7 @@ class Process(Workflow):
         when it needs more information.
         """
         self._start_task.state = TaskState.ACTIVE
+        self.process_state = ProcessState.ACTIVE
 
     def _activate_ready_tasks(self, completed_task: "Task") -> None:
         """Find all READY successor tasks of the completed task and transition them to ACTIVE."""

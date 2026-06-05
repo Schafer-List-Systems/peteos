@@ -14,12 +14,13 @@ from apps.agentic_process.process import Process
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
 
-from apps.agentic_process._types import TaskState
+from apps.agentic_process._types import TaskState, ProcessState
 from apps.agentic_process.email_client import (
     fetch_email,
     send_email,
 )
 from apps.agentic_process import config
+from apps.agentic_process import utils as _utils
 from pathlib import Path
 
 
@@ -48,9 +49,13 @@ class ProcessSupervisor(AgenticObjectBase):
     THE USER IN THE DARK! When you are done composing your answer,
     then use `produce_output` to finish you turn and wait for the
     next E-Mail!
+
+    TAKE NOTES OF KEY EVENTS, DECISIONS, AND THE INITIAL USER REQUEST
+    USING THE `append_note` TOOL! Read your notes with `get_note`
+    before composing answers to stay informed across dispatch cycles.
     """
 
-    def __init__(self, app_main, process_id: str):
+    def __init__(self, app_main, process_id: str, supervisor_node_data: dict | None = None):
         """Initialize with the AppMain instance and the target process ID.
 
         Args:
@@ -65,6 +70,7 @@ class ProcessSupervisor(AgenticObjectBase):
         self._seen_emails: dict[int, set[str]] = {}
         self._reply_body: str | None = None
         self._escalation: tuple[str, str] | None = None
+        self._supervisor_node_data = supervisor_node_data
         self.app_main = app_main
 
     def _set_uid(self, uid: int) -> None:
@@ -110,7 +116,7 @@ class ProcessSupervisor(AgenticObjectBase):
         )
         feedback: dict[str, str] = {}
         for task in process._tasks.values():
-            fb = task.get_supervisor_feedback()
+            fb = task.get_feedback()
             if fb:
                 feedback[task.task_id] = fb
         return feedback
@@ -150,6 +156,7 @@ class ProcessSupervisor(AgenticObjectBase):
             f"Process {self._process_id} not in registry "
             "when dispatch_email was called"
         )
+        process.process_state = ProcessState.ACTIVE
         cached_inbox = Path(process.process_dir) / "cached_inbox"
         fetch_email(uid, cached_inbox=cached_inbox)
 
@@ -191,16 +198,19 @@ class ProcessSupervisor(AgenticObjectBase):
                         f"The process {self._process_id} is finished and has been denied. "
                         f"Inform the user accordingly! "
                         f"Escalate to an admin for review! "
+                        f"Call `append_note` to save your notes for future dispatch cycles. "
                         f"When you are done, call the `produce_output` tool with an empty string."
                     )
                 elif process.is_accepted():
                     if feedback:
                         outcome_prompt = (
                             f"The process {self._process_id} has been accepted, "
-                            f"but the following tasks still have pending feedback:\n{feedback}\n"
-                            f"Review the feedback! If necessary, escalate to an admin for review! "
+                            f"SOME TASKS HAVE FEEDBACK (See below). USE THAT FEEDBACK!"
+                            f"If necessary, escalate to an admin for review! "
                             f"Reply to the user with the necessary or required information! "
+                            f"Call `append_note` to save your notes for future dispatch cycles. "
                             f"When you are done, call the `produce_output` tool with an empty string."
+                            f"TASK'S FEEDBACK:\n{feedback}\n"
                         )
                     else:
                         outcome_prompt = (
@@ -208,6 +218,7 @@ class ProcessSupervisor(AgenticObjectBase):
                             f"Inform the user accordingly! "
                             f"Escalate to an admin for review! "
                             f"Reply to the user with the necessary or required information! "
+                            f"Call `append_note` to save your notes for future dispatch cycles. "
                             f"When you are done, call the `produce_output` tool with an empty string."
                         )
                 elif feedback:
@@ -216,6 +227,7 @@ class ProcessSupervisor(AgenticObjectBase):
                         f"{feedback}\n"
                         f"Review the task feedback, formulate an appropriate reply to the user's email "
                         f"using the `set_reply` tool, and escalate if needed. "
+                        f"Call `append_note` to save your notes for future dispatch cycles. "
                         f"When you are done, call the `produce_output` tool with an empty string."
                     )
                 else:
@@ -224,19 +236,36 @@ class ProcessSupervisor(AgenticObjectBase):
                         f"There are no active tasks, no pending tasks, "
                         f"and the process is neither denied nor accepted. "
                         f"Escalate this state to an admin. "
+                        f"Call `append_note` to save your notes for future dispatch cycles. "
                         f"When you are done, call the `produce_output` tool with an empty string."
                     )
-                if outcome_prompt:
-                    await self.invoke_agent(
-                        prompt=outcome_prompt,
-                        persistent_thread_id=self._dispatch_thread_id,
-                    )
+
+                # Capture notes text before invoking; loop until supervisor takes notes
+                text_before = self._supervisor_node_data.get("text", "") if self._supervisor_node_data else ""
+                for _note_attempt in range(2):
+                    reminder = "" if _note_attempt == 0 else " Reminder: your notes were not updated. Call `append_note` before producing output!"
+                    if outcome_prompt:
+                        await self.invoke_agent(
+                            prompt=outcome_prompt + reminder,
+                            persistent_thread_id=self._dispatch_thread_id,
+                        )
+                    if self._supervisor_node_data is not None:
+                        new_text = self._supervisor_node_data.get("text", "")
+                        if new_text != text_before:
+                            break
                 break
         finally:
             # Send formulated emails if any were set and clear pending feedback
             self._send_reply()
             self._send_escalation()
             self._clear_feedback()
+            # Set supervisor state based on process outcome
+            if process.is_denied():
+                process.process_state = ProcessState.DENIED
+            elif process.is_accepted():
+                process.process_state = ProcessState.OK
+            else:
+                process.process_state = ProcessState.PENDING
             self._tasks_triggered = 0
             self._seen_emails.clear()
             self._uid = None
@@ -427,3 +456,31 @@ class ProcessSupervisor(AgenticObjectBase):
             body=body,
         )
         self._escalation = None
+
+    @tool
+    def append_note(self, value: str) -> str:
+        """Append a bullet point to the supervisor's notes.
+
+        Use this to track key events, decisions, and results so you
+        can recall them in future dispatch cycles.
+
+        Returns:
+            The updated notes.
+        """
+        if self._supervisor_node_data is None:
+            return "No supervisor node data available."
+        ts = _utils.format_timestamp()
+        self._supervisor_node_data["text"] = (
+            self._supervisor_node_data.get("text", "") + f"\n- {ts} {value}"
+        )
+        process = self.app_main.find_process(self._process_id)
+        if process is not None:
+            process.store()
+        return f"New notes are now:\n{self._supervisor_node_data.get('text', '')}"
+
+    @tool
+    def get_note(self) -> str:
+        """Get the supervisor's notes."""
+        if self._supervisor_node_data is None:
+            return "No supervisor node data available."
+        return self._supervisor_node_data.get("text", "")

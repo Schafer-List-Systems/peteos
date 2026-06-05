@@ -15,6 +15,8 @@ from apps.agentic_process.email_client import (
 )
 from pathlib import Path
 
+from . import utils as _utils
+
 
 class Task(AgenticObjectBase):
     """You are a task agent within a user-interaction workflow.
@@ -24,10 +26,8 @@ class Task(AgenticObjectBase):
     FOLLOW THE INSTRUCTIONS OF YOUR TASK DESCRIPTION PRECISELY! READ THE TASK DESCRIPTION
     USING THE `get_text` TOOL! MAKE NOTES of all progress IN THE TASK DESCRIPTION VIA
     THE TOOL `append_text` TO PERSIST FACTS AND PROVIDE PROGRESS INFORMATION!
-    Avoid appending redundant information! This text is also read by your
-    supervisor and used to redirect incoming emails towards you. Therefore,
-    you must ALSO provide your feedback in the task
-    description!
+    Avoid appending redundant information! PROVIDE FEEDBACK USING THE `set_feedback`
+    TOOL WHEN YOU HAVE INFORMATION FOR THE USER OR THE SUPERVISOR!
 
     When you deny, then the whole process is denied. when you are
     ready for evaluation of the outgoing edges, Call `produce_output`
@@ -37,8 +37,8 @@ class Task(AgenticObjectBase):
     activating successive tasks as nodes in the process graph.
 
     You get the information required to evaluate the conditions from the
-    emails and its attachments. Ask for more information via `set_supervisor_feedback` ONLY WHEN THE INFORMATION YOU NEED FOR
-    EVALUATION OF THE OUTGOING EDGES IS NOT AVAILABLE. Call `set_supervisor_feedback` AT MOST ONCE
+    emails and its attachments. Ask for more information via `set_feedback` ONLY WHEN THE INFORMATION YOU NEED FOR
+    EVALUATION OF THE OUTGOING EDGES IS NOT AVAILABLE. Call `set_feedback` AT MOST ONCE
     per incoming email to not spam the user! If your purpose cannot be
     satisfied even after asking for more information, then you deny
     this task and therefore the whole process you are part of.
@@ -126,16 +126,9 @@ class Task(AgenticObjectBase):
         Returns:
             The updated task text.
         """
-        timestamp = self._format_timestamp()
+        timestamp = _utils.format_timestamp()
         self.text = self.text + f"\n- {timestamp} {value}"
         return f"New text is now:\n{self.text}"
-
-    @staticmethod
-    def _format_timestamp() -> str:
-        """Return the current local time as [YYYY-MM-DD HH:MM:SS]."""
-        from datetime import datetime
-        now = datetime.now()
-        return f"[{now.strftime('%d.%m.%Y %H:%M:%S')}]"
 
     @property
     def metadata(self) -> dict:
@@ -293,14 +286,14 @@ class Task(AgenticObjectBase):
         return "\n".join(f"- {e.to_task_id}: {e.condition}" for e in self._outgoing_edges)
 
     @tool
-    def set_supervisor_feedback(self, body: str) -> str:
+    def set_feedback(self, body: str) -> str:
         """Set feedback for the supervisor (e.g., results, status, or a request for more information).
 
         Each call overwrites any previously set feedback. Use this to
         inform the supervisor so it can plan its next action — reply
         to the user, escalate, or request more information.
 
-        Use ``get_supervisor_feedback`` to recheck what is currently set.
+        Use ``get_feedback`` to recheck what is currently set.
 
         Args:
             body: The body text of the feedback.
@@ -313,7 +306,7 @@ class Task(AgenticObjectBase):
             return "Feedback has been set! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
 
     @tool
-    def get_supervisor_feedback(self) -> str:
+    def get_feedback(self) -> str:
         """Get the currently set feedback for the supervisor, or empty string."""
         if self._feedback is None:
             return ""
@@ -383,7 +376,7 @@ class Task(AgenticObjectBase):
                 f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
-                f"- pending: You used `set_supervisor_feedback()` and you need more information from the user via the supervisor."
+                f"- pending: You used `set_feedback()` and you need more information from the user via the supervisor."
             )
         else:
             prompt = (
@@ -391,22 +384,26 @@ class Task(AgenticObjectBase):
                 f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
-                f"- pending: You used `set_supervisor_feedback()` and you need more information from the user via the supervisor."
+                f"- pending: you need more information from the user via the supervisor (requested via `set_feedback()`)."
             )
 
         # Capture text before invoking; loop until agent calls append_text
         text_before = self.text
-        for attempt in range(2):
-            reminder = "" if attempt == 0 else f" Reminder: your text was not updated. Call `append_text` before producing output!"
+        for attempt in range(3):
+            reminder = "" if attempt == 0 else f" Reminder: your text was not updated or you provided no feedback. You have one last chance to do that before producing output!"
             status = await self.invoke_agent(
                 prompt=prompt + reminder,
                 output_schema=TaskStatus,
                 persistent_thread_id=thread_id,
             )
-            if self.text != text_before:
+            if self.text != text_before and self._feedback is not None:
                 break
 
         decision = status.decision
+
+        # 3a. If the agent provided feedback, append it to the task text
+        if self._feedback is not None:
+            self.text = self.text + f"\n- [FEEDBACK] {self._feedback}"
 
         # 3. Set task state based on decision
         if decision == "deny":

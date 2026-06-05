@@ -70,7 +70,9 @@ class AppMain:
         process.start()
         pid = process.metadata["metadata"]["process_id"]
         self._processes[pid] = process
-        supervisor = ProcessSupervisor(self, pid)
+        supervisor = ProcessSupervisor(
+            self, pid, supervisor_node_data=process._supervisor_node_data
+        )
         self._supervisors[pid] = supervisor
         return pid
 
@@ -122,7 +124,9 @@ class AppMain:
         process = Process(str(process_path))
         self._processes[process_id] = process
 
-        supervisor = ProcessSupervisor(self, process_id)
+        supervisor = ProcessSupervisor(
+            self, process_id, supervisor_node_data=process._supervisor_node_data
+        )
         self._supervisors[process_id] = supervisor
         return supervisor
 

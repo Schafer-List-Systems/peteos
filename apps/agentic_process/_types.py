@@ -12,6 +12,13 @@ class TaskState(Enum):
     DISABLED = "disabled"
 
 
+class ProcessState(Enum):
+    ACTIVE = "active"
+    PENDING = "pending"
+    OK = "ok"
+    DENIED = "denied"
+
+
 class EdgeState(Enum):
     SCHEDULED = "scheduled"
     ENABLED = "enabled"
