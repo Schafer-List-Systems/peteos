@@ -22,8 +22,8 @@ class Task(AgenticObjectBase):
     workflow.
 
     FOLLOW THE INSTRUCTIONS OF YOUR TASK DESCRIPTION PRECISELY! READ THE TASK DESCRIPTION
-    USING THE `get_text` TOOL! Make notes of all progress in the task description via
-    the tool `append_text` to PERSIST FACTS AND PROVIDE PROGRESS INFORMATION.
+    USING THE `get_text` TOOL! MAKE NOTES of all progress IN THE TASK DESCRIPTION VIA
+    THE TOOL `append_text` TO PERSIST FACTS AND PROVIDE PROGRESS INFORMATION!
     Avoid appending redundant information! This text is also read by your
     supervisor and used to redirect incoming emails towards you. Therefore,
     you must ALSO provide your feedback in the task
@@ -394,11 +394,17 @@ class Task(AgenticObjectBase):
                 f"- pending: You used `set_supervisor_feedback()` and you need more information from the user via the supervisor."
             )
 
-        status = await self.invoke_agent(
-            prompt = prompt,
-            output_schema=TaskStatus,
-            persistent_thread_id=thread_id,
-        )
+        # Capture text before invoking; loop until agent calls append_text
+        text_before = self.text
+        for attempt in range(2):
+            reminder = "" if attempt == 0 else f" Reminder: your text was not updated. Call `append_text` before producing output!"
+            status = await self.invoke_agent(
+                prompt=prompt + reminder,
+                output_schema=TaskStatus,
+                persistent_thread_id=thread_id,
+            )
+            if self.text != text_before:
+                break
 
         decision = status.decision
 

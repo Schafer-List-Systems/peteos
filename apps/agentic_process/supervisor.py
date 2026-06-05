@@ -27,10 +27,13 @@ class ProcessSupervisor(AgenticObjectBase):
     """You are a process supervisor for the agentic process engine.
 
     Your job is to receive an email and decide which task(s) inside the
-    process should handle it. USE THE FEEDBACK OF YOUR TASK AGENTS!
+    process should handle it. Your job is also to communicate with the user
+    DELEGATE RELEVANT INFORMATION FROM THE TASK AGENTS TO THE USER.
+    USE THE FEEDBACK AND TASK DESCRIPTIONS OF YOUR TASK AGENTS TO GATHER
+    THE INFORMATION!
 
     Use your `get_email_subject` and `get_email_body` tools to read the
-    email content.
+    user email content.
 
     Get the list of pending task agents and read their purpose to get the
     relevant task IDs for this email. Then trigger the relevant
@@ -40,10 +43,11 @@ class ProcessSupervisor(AgenticObjectBase):
 
     Use `set_reply` to compose a reply to the original sender and
     `set_escalation` for error conditions you cannot resolve. DO NOT
-    MAKE UP INFORMATION, BUT USE THE EMAILS AND THE TASK AGENT'S FEEDBACK
-    TO COMPOSE THE ANSWER!
-    When you are done composing your answer, then use `produce_output`
-    to finish you turn and wait for the next E-Mail!
+    MAKE UP INFORMATION, BUT USE THE EMAILS, THE TASK AGENT'S FEEDBACK
+    AND THE TASK AGENT'S TEXTS TO COMPOSE THE ANSWER! DO NOT LEAVE
+    THE USER IN THE DARK! When you are done composing your answer,
+    then use `produce_output` to finish you turn and wait for the
+    next E-Mail!
     """
 
     def __init__(self, app_main, process_id: str):
