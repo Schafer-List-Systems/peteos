@@ -5,9 +5,10 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObjectBase, Error
 
 
 class PdfTranscriber(AgenticObjectBase):
@@ -134,23 +135,18 @@ class PdfTranscriber(AgenticObjectBase):
         """Run the LLM vision agent for text transcription + image description."""
         prompt = (
             "Transcribe the text content of this PDF page exactly as it appears. "
-            "Also describe any images, tables, charts, or diagrams visible on the page.\n\n"
-            "Return your answer as a JSON object with two fields:\n"
-            "- `text`: the full text transcription\n"
-            "- `image_description`: description of any visual elements (empty string if none)"
+            "Also describe ALL images, tables, charts, or diagrams visible on the page.\n\n"
         )
         output = await self.invoke_agent(
             prompt=prompt,
             image=png_path,
+            output_schema=TranscriptionResult,
             persistent_thread_id=None,
             timeout=120,
         )
-        if hasattr(output, "text") and hasattr(output, "image_description"):
-            return output
-        return TranscriptionResult(
-            text=str(output) if output else "",
-            image_description="",
-        )
+        if isinstance(output, Error):
+            raise RuntimeError(output.message)
+        return output
 
     async def _cross_reference(self, tesseract_text: str, vision_text: str) -> str:
         """Cross-reference tesseract and LLM vision transcriptions.
@@ -167,12 +163,16 @@ class PdfTranscriber(AgenticObjectBase):
         )
         result = await self.invoke_agent(
             prompt=prompt,
+            output_schema=UnifiedText,
             persistent_thread_id=None,
             timeout=120,
         )
-        return str(result) if result else ""
+        if isinstance(result, Error):
+            raise RuntimeError(result.message)
+        return result.text
 
 
+@dataclass
 class TranscriptionResult:
     """Structured output from the vision agent transcription step.
 
@@ -181,6 +181,16 @@ class TranscriptionResult:
         image_description: Description of any visual elements on the page.
     """
 
-    def __init__(self, text: str, image_description: str) -> None:
-        self.text = text
-        self.image_description = image_description
+    text: str
+    image_description: str
+
+
+@dataclass
+class UnifiedText:
+    """Structured output from the cross-reference step.
+
+    Attributes:
+        text: The unified transcription from cross-referencing tesseract and LLM sources.
+    """
+
+    text: str

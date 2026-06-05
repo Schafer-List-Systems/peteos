@@ -1,6 +1,7 @@
 """Output schema parsing, validation, and casting for OAP."""
 
 import json
+import sys
 import types
 
 from dataclasses import dataclass, is_dataclass
@@ -82,7 +83,12 @@ def get_schema_description(schema: type | None) -> tuple[str, str] | None:
     if not is_dataclass(schema):
         return None
     fields = dataclasses.fields(schema)
-    json_schema = "{" + ", ".join(f"'{f.name}': {f.type.__name__}" for f in fields) + "}"
+    globalns = dict(sys.modules[schema.__module__].__dict__)
+    type_names = []
+    for f in fields:
+        resolved = _resolve_type(f.type, globalns)
+        type_names.append(f"'{f.name}': {resolved.__name__}")
+    json_schema = "{" + ", ".join(type_names) + "}"
     docstring = (schema.__doc__ or "").strip()
     return json_schema, docstring
 
