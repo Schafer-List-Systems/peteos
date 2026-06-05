@@ -105,15 +105,15 @@ class AgenticState:
 
         Args:
             name: Variable name.
-            value: Non-empty string value.
+            value: String value (must not be None).
 
         Raises:
-            ValueError: If variable already exists or value is empty.
+            ValueError: If variable already exists or value is None.
         """
         if name in self._data:
             raise ValueError(f"Variable '{name}' already exists in AgenticState")
-        if value is None or value == "":
-            raise ValueError("Value must be a non-empty string")
+        if value is None:
+            raise ValueError("Value must not be None")
         self._data[name] = value
 
     def update(self, name: str, old_value: str, new_value: str) -> None:

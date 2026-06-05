@@ -188,7 +188,7 @@ class ProcessSupervisor(AgenticObjectBase):
                         f"When you are done, call the `produce_output` tool with an empty string."
                     )
                 elif process.is_accepted():
-                    if requests is not None:
+                    if requests:
                         outcome_prompt = (
                             f"The process {self._process_id} has been accepted, "
                             f"but the following tasks still have pending requests:\n{requests}\n"
@@ -199,6 +199,7 @@ class ProcessSupervisor(AgenticObjectBase):
                         outcome_prompt = (
                             f"The process {self._process_id} is finished and has been accepted. "
                             f"Inform the user accordingly! "
+                            f"Escalate to an admin for review! "
                             f"When you are done, call the `produce_output` tool with an empty string."
                         )
                 elif requests is not None:
@@ -225,9 +226,10 @@ class ProcessSupervisor(AgenticObjectBase):
                     )
                 break
         finally:
-            # Send formulated emails if any were set
+            # Send formulated emails if any were set and clear pending requests
             self._send_reply()
             self._send_escalation()
+            self._clear_requests()
             self._tasks_triggered = 0
             self._seen_emails.clear()
             self._uid = None

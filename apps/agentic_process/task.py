@@ -364,7 +364,7 @@ class Task(AgenticObjectBase):
         # 3. Set task state based on decision
         if decision == "deny":
             new_state = TaskState.DENIED
-        elif decision == "ready":
+        elif decision == "ready" and not self._request:
             new_state = TaskState.OK
         else:
             new_state = TaskState.PENDING
