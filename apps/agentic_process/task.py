@@ -26,7 +26,7 @@ class Task(AgenticObjectBase):
     the tool `append_text` to PERSIST FACTS AND PROVIDE PROGRESS INFORMATION.
     Avoid appending redundant information! This text is also read by your
     supervisor and used to redirect incoming emails towards you. Therefore,
-    you must also provide the information about requests in the task
+    you must ALSO provide your feedback in the task
     description!
 
     When you deny, then the whole process is denied. when you are
@@ -37,10 +37,10 @@ class Task(AgenticObjectBase):
     activating successive tasks as nodes in the process graph.
 
     You get the information required to evaluate the conditions from the
-    emails and its attachments. Request information ONLY WHEN THE INFORMATION YOU NEED FOR
-    EVALUATION OF THE OUTGOING EDGES IS NOT AVAILABLE. Call `request` AT MOST ONCE
+    emails and its attachments. Ask for more information via `set_supervisor_feedback` ONLY WHEN THE INFORMATION YOU NEED FOR
+    EVALUATION OF THE OUTGOING EDGES IS NOT AVAILABLE. Call `set_supervisor_feedback` AT MOST ONCE
     per incoming email to not spam the user! If your purpose cannot be
-    satisfied even after requesting further information, then you deny
+    satisfied even after asking for more information, then you deny
     this task and therefore the whole process you are part of.
     """
 
@@ -51,7 +51,7 @@ class Task(AgenticObjectBase):
         self._incoming_edges: list[Edge] = []
         self._process_id = process_id
         self._process: object | None = None
-        self._request: str | None = None
+        self._feedback: str | None = None
 
     def get_outgoing_edges(self) -> list[Edge]:
         return self._outgoing_edges
@@ -293,35 +293,35 @@ class Task(AgenticObjectBase):
         return "\n".join(f"- {e.to_task_id}: {e.condition}" for e in self._outgoing_edges)
 
     @tool
-    def set_request(self, body: str) -> str:
-        """Set a request for information from the sender of the current email.
+    def set_supervisor_feedback(self, body: str) -> str:
+        """Set feedback for the supervisor (e.g., results, status, or a request for more information).
 
-        Each call overwrites any previously set request. The subject
-        and recipient are derived automatically from the incoming email.
-        The request is sent by the supervisor at the end of the dispatch
-        cycle if non-empty. Use ``get_request`` to recheck what is
-        currently set.
+        Each call overwrites any previously set feedback. Use this to
+        inform the supervisor so it can plan its next action — reply
+        to the user, escalate, or request more information.
+
+        Use ``get_supervisor_feedback`` to recheck what is currently set.
 
         Args:
-            body: The body text of the request.
+            body: The body text of the feedback.
         """
-        self._request = body
+        self._feedback = body
 
         if body == "":
-            return "Request has been cleared! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
+            return "Feedback has been cleared! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
         else:
-            return "Request has been set! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
+            return "Feedback has been set! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
 
     @tool
-    def get_request(self) -> str:
-        """Get the currently set request body, or empty string."""
-        if self._request is None:
+    def get_supervisor_feedback(self) -> str:
+        """Get the currently set feedback for the supervisor, or empty string."""
+        if self._feedback is None:
             return ""
-        return self._request
+        return self._feedback
 
-    def _clear_request(self) -> None:
-        """Clear the pending request after the supervisor processes it."""
-        self._request = None
+    def _clear_feedback(self) -> None:
+        """Clear the pending feedback after the supervisor processes it."""
+        self._feedback = None
 
     def _validate_edge_evaluations(
         self, evaluations: list[Any] | None
@@ -383,7 +383,7 @@ class Task(AgenticObjectBase):
                 f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
-                f"- pending: you need more information that you already requested via request()"
+                f"- pending: You used `set_supervisor_feedback()` and you need more information from the user via the supervisor."
             )
         else:
             prompt = (
@@ -391,7 +391,7 @@ class Task(AgenticObjectBase):
                 f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
-                f"- pending: you need more information that you already requested via request()"
+                f"- pending: You used `set_supervisor_feedback()` and you need more information from the user via the supervisor."
             )
 
         status = await self.invoke_agent(
@@ -405,7 +405,7 @@ class Task(AgenticObjectBase):
         # 3. Set task state based on decision
         if decision == "deny":
             new_state = TaskState.DENIED
-        elif decision == "ready" and not self._request:
+        elif decision == "ready":
             new_state = TaskState.OK
         else:
             new_state = TaskState.PENDING

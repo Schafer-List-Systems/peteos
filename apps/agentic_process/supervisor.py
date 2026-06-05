@@ -27,19 +27,21 @@ class ProcessSupervisor(AgenticObjectBase):
     """You are a process supervisor for the agentic process engine.
 
     Your job is to receive an email and decide which task(s) inside the
-    process should handle it.
+    process should handle it. USE THE FEEDBACK OF YOUR TASK AGENTS!
 
     Use your `get_email_subject` and `get_email_body` tools to read the
     email content.
 
-    Get the list of pending tasks and read their purpose to get the
+    Get the list of pending task agents and read their purpose to get the
     relevant task IDs for this email. Then trigger the relevant
-    tasks using `trigger_task`. If no task is relevant then
+    task agents using `trigger_task`. If no task is relevant then
     escalate or reply to the email depending on the email you got and
     the tasks that are pending.
 
     Use `set_reply` to compose a reply to the original sender and
-    `set_escalation` for error conditions you cannot resolve.
+    `set_escalation` for error conditions you cannot resolve. DO NOT
+    MAKE UP INFORMATION, BUT USE THE EMAILS AND THE TASK AGENT'S FEEDBACK
+    TO COMPOSE THE ANSWER!
     When you are done composing your answer, then use `produce_output`
     to finish you turn and wait for the next E-Mail!
     """
@@ -96,27 +98,27 @@ class ProcessSupervisor(AgenticObjectBase):
         """Get the current dispatch thread ID, or None."""
         return self._dispatch_thread_id
 
-    def _gather_requests(self) -> dict[str, str]:
-        """Collect non-empty requests from all tasks in this process."""
+    def _gather_feedback(self) -> dict[str, str]:
+        """Collect non-empty feedback from all tasks in this process."""
         process = self.app_main.find_process(self._process_id)
         assert process is not None, (
             f"Process {self._process_id} not in registry"
         )
-        pending: dict[str, str] = {}
+        feedback: dict[str, str] = {}
         for task in process._tasks.values():
-            req = task.get_request()
-            if req:
-                pending[task.task_id] = req
-        return pending
+            fb = task.get_supervisor_feedback()
+            if fb:
+                feedback[task.task_id] = fb
+        return feedback
 
-    def _clear_requests(self) -> None:
-        """Clear the pending request from all tasks in this process."""
+    def _clear_feedback(self) -> None:
+        """Clear the pending feedback from all tasks in this process."""
         process = self.app_main.find_process(self._process_id)
         assert process is not None, (
             f"Process {self._process_id} not in registry"
         )
         for task in process._tasks.values():
-            task._clear_request()
+            task._clear_feedback()
 
     async def dispatch_email(self, uid: int, max_retries: int = 3) -> None:
         """Dispatch an email to the supervisor agent.
@@ -179,7 +181,7 @@ class ProcessSupervisor(AgenticObjectBase):
 
                 # No active tasks and no pending tasks — process is terminated.
                 # Inform the user of the outcome.
-                requests = self._gather_requests()
+                feedback = self._gather_feedback()
                 if process.is_denied():
                     outcome_prompt = (
                         f"The process {self._process_id} is finished and has been denied. "
@@ -188,11 +190,12 @@ class ProcessSupervisor(AgenticObjectBase):
                         f"When you are done, call the `produce_output` tool with an empty string."
                     )
                 elif process.is_accepted():
-                    if requests:
+                    if feedback:
                         outcome_prompt = (
                             f"The process {self._process_id} has been accepted, "
-                            f"but the following tasks still have pending requests:\n{requests}\n"
-                            f"Escalate to an admin for review! "
+                            f"but the following tasks still have pending feedback:\n{feedback}\n"
+                            f"Review the feedback! If necessary, escalate to an admin for review! "
+                            f"Reply to the user with the necessary or required information! "
                             f"When you are done, call the `produce_output` tool with an empty string."
                         )
                     else:
@@ -200,15 +203,15 @@ class ProcessSupervisor(AgenticObjectBase):
                             f"The process {self._process_id} is finished and has been accepted. "
                             f"Inform the user accordingly! "
                             f"Escalate to an admin for review! "
+                            f"Reply to the user with the necessary or required information! "
                             f"When you are done, call the `produce_output` tool with an empty string."
                         )
-                elif requests is not None:
+                elif feedback:
                     outcome_prompt = (
-                        f"The process is paused due to the task's requests. The following tasks have pending requests for information:\n"
-                        f"{requests}\n"
-                        f"Formulate an appropriate reply to the user's email based on the requests. "
-                        f"using the `set_reply` tool. Ignore internal or redundant information. "
-                        f"Use the `set_escalation` tool if the requests cannot be resolved or need escalation. "
+                        f"The process is paused due to task feedback. The following tasks have feedback:\n"
+                        f"{feedback}\n"
+                        f"Review the task feedback, formulate an appropriate reply to the user's email "
+                        f"using the `set_reply` tool, and escalate if needed. "
                         f"When you are done, call the `produce_output` tool with an empty string."
                     )
                 else:
@@ -226,10 +229,10 @@ class ProcessSupervisor(AgenticObjectBase):
                     )
                 break
         finally:
-            # Send formulated emails if any were set and clear pending requests
+            # Send formulated emails if any were set and clear pending feedback
             self._send_reply()
             self._send_escalation()
-            self._clear_requests()
+            self._clear_feedback()
             self._tasks_triggered = 0
             self._seen_emails.clear()
             self._uid = None
