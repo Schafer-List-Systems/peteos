@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import subprocess
-
 from peteos.logger import get_logger
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
@@ -284,72 +282,36 @@ class Task(AgenticObjectBase):
     async def _read_pdf(
         self,
         pdf_path: Path,
-        session: "Session | None" = None,
+        session: "Session | None" = None,  # session not used — PdfTranscriber handles everything
     ) -> str:
-        """Extract text from a PDF and queue each page as an image.
-
-        Uses pdftotext for text extraction and pdftoppm to convert each
-        page to a PNG image. Returns the extracted text and queues each
-        page image to the session via _read_media.
+        """Transcribe a PDF using tesseract + LLM vision via PdfTranscriber.
 
         Args:
             pdf_path: Path to the PDF file.
-            session: The session (injected by the execution environment).
+            session: Unused (kept for API compatibility).
 
         Returns:
-            A summary of what was extracted and queued.
+            A formatted summary of page transcriptions and image descriptions.
         """
+        from apps.agentic_process.pdf_transcriber import PdfTranscriber
+
         try:
-            result = subprocess.run(
-                ["pdftotext", "-layout", str(pdf_path), "-"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
-            )
-            text_content = result.stdout
+            results = await PdfTranscriber().transcribe(str(pdf_path))
         except FileNotFoundError:
-            return "ERROR: pdftotext not installed."
-        except subprocess.TimeoutExpired:
-            return f"ERROR: PDF text extraction timed out for '{pdf_path.name}'."
+            return f"ERROR: PDF '{pdf_path.name}' not found."
         except Exception as e:
-            return f"ERROR: Failed to extract text from '{pdf_path.name}': {e}"
+            return f"ERROR: Failed to transcribe '{pdf_path.name}': {e}"
+
+        if not results:
+            return f"OK: '{pdf_path.name}' — no pages to transcribe."
 
         lines = []
-        if text_content.strip():
-            lines.append("Extracted text:")
-            lines.append(text_content)
-
-        # Convert each page to an image
-        if session is not None:
-            try:
-                img_result = subprocess.run(
-                    ["pdftoppm", "-png", "-r", "150", str(pdf_path), str(pdf_path.parent / f"{pdf_path.stem}-page")],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=60,
-                )
-                page_files = sorted(
-                    pdf_path.parent.glob(f"{pdf_path.stem}-page*.png")
-                )
-                for i, page_file in enumerate(page_files, 1):
-                    try:
-                        await self._read_media(str(page_file.resolve()), session=session)
-                        lines.append(f"Page {i} image queued for review.")
-                    except Exception as e:
-                        lines.append(f"Page {i}: failed to queue image — {e}")
-                    finally:
-                        page_file.unlink(missing_ok=True)
-            except FileNotFoundError:
-                lines.append("pdftoppm not installed — images not available.")
-            except subprocess.TimeoutExpired:
-                lines.append("PDF page conversion timed out.")
-            except Exception as e:
-                lines.append(f"Failed to convert pages to images: {e}")
-
-        if not lines:
-            return f"OK: '{pdf_path.name}' — no extractable content."
+        for i, (text, img_desc) in enumerate(results, 1):
+            lines.append(f"--- Page {i} ---")
+            if text:
+                lines.append(text)
+            if img_desc:
+                lines.append(f"[Visual elements: {img_desc}]")
         return "\n".join(lines)
 
     @tool

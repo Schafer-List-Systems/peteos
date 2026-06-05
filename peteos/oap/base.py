@@ -469,7 +469,7 @@ class AgenticObjectBase:
             if persistent_thread_id is None:
                 try:
                     await session.stop()
-                    self._oap_agent.destroy_session(session.uuid)
+                    await self._oap_agent.destroy_session(session.uuid)
                 except Exception:
                     pass
             self.release()
