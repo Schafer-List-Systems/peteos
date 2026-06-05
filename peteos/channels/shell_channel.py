@@ -113,13 +113,9 @@ class InteractiveShellChannel(Channel):
         self, src: str, text: str, file_type: str = "auto"
     ) -> None:
         """Queue a file message to the current session."""
-        from peteos.utils.image import create_content_part_async
+        from peteos.utils.image import create_media_content_part_async
 
-        if file_type == "image":
-            from peteos.utils.image import create_image_content_part_async
-            file_part = await create_image_content_part_async(src)
-        else:
-            file_part = await create_content_part_async(src)
+        file_part = await create_media_content_part_async(src)
 
         parts = [ContentPart(part_type="text", text=text)] if text else []
         parts.append(file_part)

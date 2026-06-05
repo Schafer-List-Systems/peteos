@@ -201,8 +201,8 @@ class AgenticObjectBase:
         if session is None:
             return "Error: session not available."
 
-        from peteos.utils.image import create_content_part_async
-        media_part = await create_content_part_async(src, timeout=30.0)
+        from peteos.utils.image import create_media_content_part_async
+        media_part = await create_media_content_part_async(src, timeout=30.0)
 
         queued_msg = Message(
             role="user",
@@ -214,6 +214,38 @@ class AgenticObjectBase:
         await session.queue_message(queued_msg)
         _logger.debug("_read_media: queued media from %s for session %s", src, session.uuid)
         return f"OK: media queued from {src}"
+
+    async def _send_media(self, data: bytes, mime_type: str, session: "Session | None", *, text: str | None = None) -> None:
+        """Send in-memory media bytes as a user message to the session.
+
+        Encodes the bytes as base64, creates a ContentPart, and queues it
+        as a user message in the session's event queue. Useful for passing
+        media captured from cameras, memory, or other non-file sources.
+
+        Args:
+            data: Raw media bytes (e.g. JPEG/PNG file data).
+            mime_type: MIME type of the media (e.g. "image/jpeg", "video/mp4").
+            session: The session (injected by the execution environment).
+            text: Optional text message to include alongside the media.
+        """
+        from peteos.chatbot import ContentPart, Message
+
+        if session is None:
+            return
+
+        from peteos.utils.image import create_media_content_part_async
+        media_part = await create_media_content_part_async(data, mime_type=mime_type)
+
+        msg_text = text or "Media sent."
+        queued_msg = Message(
+            role="user",
+            content=[
+                ContentPart(part_type="text", text=msg_text),
+                media_part,
+            ],
+        )
+        await session.queue_message(queued_msg)
+        _logger.debug("_send_media: queued media (type=%s) for session %s", mime_type, session.uuid)
 
     @tool(name="produce_error", description="Signal that you could not produce the requested output. Pass an error message explaining why (e.g., missing required data or an invalid state).")
     def _produce_error(self, message: str, session: "Session | None" = None) -> str:
@@ -390,8 +422,8 @@ class AgenticObjectBase:
 
             content: list[ContentPart] = [ContentPart(part_type="text", text=prompt)]
             if image is not None:
-                from peteos.utils.image import create_image_content_part_async
-                image_part = await create_image_content_part_async(image, timeout or 30.0)
+                from peteos.utils.image import create_media_content_part_async
+                image_part = await create_media_content_part_async(image, timeout=timeout or 30.0)
                 content.append(image_part)
 
             await session.queue_message(Message(
