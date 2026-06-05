@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 from peteos.logger import get_logger
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
@@ -225,8 +227,9 @@ class Task(AgenticObjectBase):
         """Read an attachment from a cached email.
 
         For text files (.txt, .csv, .md, .json, .xml, .html) returns the
-        content directly. For images and PDFs queues them to the session
-        so the agent can review them via the media ContentPart flow.
+        content directly. For PDFs extracts text and converts pages to
+        images for the agent to review. For images queues them to the
+        session so the agent can review them via the media ContentPart flow.
 
         Args:
             uid: The IMAP UID of the cached email.
@@ -262,8 +265,12 @@ class Task(AgenticObjectBase):
             except UnicodeDecodeError:
                 return f"ERROR: '{safe_name}' is not a valid text file."
 
-        # Media files (images, PDFs): queue via _read_media
-        if mime_type.startswith("image/") or mime_type == "application/pdf":
+        # PDFs: extract text and convert pages to images
+        if mime_type == "application/pdf":
+            return await self._read_pdf(attachment_path, session=session)
+
+        # Images: queue via _read_media
+        if mime_type.startswith("image/"):
             if session is None:
                 return "ERROR: Session not available."
             try:
@@ -273,6 +280,77 @@ class Task(AgenticObjectBase):
                 return f"ERROR: Failed to load '{safe_name}': {e}"
 
         return f"ERROR: '{safe_name}' (type: {mime_type}) cannot be read."
+
+    async def _read_pdf(
+        self,
+        pdf_path: Path,
+        session: "Session | None" = None,
+    ) -> str:
+        """Extract text from a PDF and queue each page as an image.
+
+        Uses pdftotext for text extraction and pdftoppm to convert each
+        page to a PNG image. Returns the extracted text and queues each
+        page image to the session via _read_media.
+
+        Args:
+            pdf_path: Path to the PDF file.
+            session: The session (injected by the execution environment).
+
+        Returns:
+            A summary of what was extracted and queued.
+        """
+        try:
+            result = subprocess.run(
+                ["pdftotext", "-layout", str(pdf_path), "-"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            )
+            text_content = result.stdout
+        except FileNotFoundError:
+            return "ERROR: pdftotext not installed."
+        except subprocess.TimeoutExpired:
+            return f"ERROR: PDF text extraction timed out for '{pdf_path.name}'."
+        except Exception as e:
+            return f"ERROR: Failed to extract text from '{pdf_path.name}': {e}"
+
+        lines = []
+        if text_content.strip():
+            lines.append("Extracted text:")
+            lines.append(text_content)
+
+        # Convert each page to an image
+        if session is not None:
+            try:
+                img_result = subprocess.run(
+                    ["pdftoppm", "-png", "-r", "150", str(pdf_path), str(pdf_path.parent / f"{pdf_path.stem}-page")],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=60,
+                )
+                page_files = sorted(
+                    pdf_path.parent.glob(f"{pdf_path.stem}-page*.png")
+                )
+                for i, page_file in enumerate(page_files, 1):
+                    try:
+                        await self._read_media(str(page_file.resolve()), session=session)
+                        lines.append(f"Page {i} image queued for review.")
+                    except Exception as e:
+                        lines.append(f"Page {i}: failed to queue image — {e}")
+                    finally:
+                        page_file.unlink(missing_ok=True)
+            except FileNotFoundError:
+                lines.append("pdftoppm not installed — images not available.")
+            except subprocess.TimeoutExpired:
+                lines.append("PDF page conversion timed out.")
+            except Exception as e:
+                lines.append(f"Failed to convert pages to images: {e}")
+
+        if not lines:
+            return f"OK: '{pdf_path.name}' — no extractable content."
+        return "\n".join(lines)
 
     @tool
     def get_outgoing_conditions(self) -> str:
