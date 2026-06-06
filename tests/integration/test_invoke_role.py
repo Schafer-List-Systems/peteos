@@ -10,10 +10,9 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from peteos.agent import Agent
-from peteos.chatbot.manager import ChatBotManager
+from peteos.chatbot import ChatBotManager
 from peteos.chatbot import Message, ContentPart, ChatHistory
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 from peteos.session import invoke_agent, _extract_last_assistant_text, ExecStatus, Session
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -78,19 +77,16 @@ async def mock_server(event_loop) -> TestServer:
 @pytest.fixture
 async def mock_agent(mock_server):
     """Create an Agent with mock backend ready to use."""
-    role_manager = RoleManager()
-    role_manager.register_role(
-        Role(name="test", description="Test", model="test-model")
-    )
+    role = Role(name="test", description="Test", model="test-model")
 
-    chatbot_manager = ChatBotManager(timeout=None)
-    await chatbot_manager.add_backend(
+    ChatBotManager.reset()
+    await ChatBotManager.add_backend(
         "mock",
         f"http://{mock_server.host}:{mock_server.port}"
     )
 
     tool_manager = ToolManager()
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    agent = Agent(role, tool_manager)
     return agent
 
 
@@ -104,7 +100,6 @@ class TestInvokeRole:
     async def test_invoke_agent_returns_answer(self, mock_agent, mock_server):
         """Basic invoke_agent returns answer from chatbot."""
         result = await invoke_agent(
-            role_name="test",
             prompt="Hello world",
             agent=mock_agent,
             timeout=10.0,
@@ -121,7 +116,6 @@ class TestInvokeRole:
     async def test_invoke_agent_keep_session(self, mock_agent, mock_server):
         """invoke_agent with keep_session=True returns running session."""
         result = await invoke_agent(
-            role_name="test",
             prompt="Hello",
             agent=mock_agent,
             keep_session=True,
@@ -145,10 +139,9 @@ class TestInvokeRole:
     @pytest.mark.asyncio
     async def test_invoke_agent_existing_session(self, mock_agent, mock_server):
         """invoke_agent with existing_session for continuation."""
-        session = await mock_agent.create_session("test")
+        session = await mock_agent.create_session()
 
         result = await invoke_agent(
-            role_name="test",
             prompt="Continuation",
             existing_session=session,
             keep_session=True,
@@ -168,25 +161,26 @@ class TestInvokeRole:
         async def noop_models(*args, **kwargs):
             return ["test-model"]
 
-        # Create a mock agent with a broken backend
-        chatbot_manager = ChatBotManager(timeout=1.0)
+        # Create a mock agent with a broken backend using class-level ChatBotManager
+        ChatBotManager.reset()
+        ChatBotManager._timeout = 1.0
         with patch.object(
-            chatbot_manager,
+            ChatBotManager,
             "_list_models_for_api_type",
             noop_models,
         ):
-            await chatbot_manager.add_backend(
+            await ChatBotManager.add_backend(
                 "mock",
                 "http://localhost:19999",  # No server listening
                 api_type="openai",
             )
 
-        agent = Agent(mock_agent._role_manager, chatbot_manager, mock_agent._tool_manager)
+        role = Role(name="test", description="Test", model="test-model")
+        agent = Agent(role, mock_agent._tool_manager)
 
         try:
             with pytest.raises(asyncio.TimeoutError):
                 await invoke_agent(
-                    role_name="test",
                     prompt="Hello",
                     agent=agent,
                     timeout=1.0,
@@ -199,17 +193,12 @@ class TestInvokeRole:
     async def test_invoke_agent_no_existing_session_or_agent(self):
         """invoke_agent raises ValueError without agent or existing_session."""
         with pytest.raises(ValueError, match="Either agent or existing_session"):
-            await invoke_agent(role_name="test", prompt="Hello", timeout=10.0)
+            await invoke_agent(prompt="Hello", timeout=10.0)
 
     @pytest.mark.asyncio
     async def test_invoke_agent_existing_session_not_running(self):
         """invoke_agent raises RuntimeError for non-running session."""
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test", model="test-model")
-        )
-        chatbot_manager = ChatBotManager(timeout=None)
-        role = role_manager.get_role("test")
+        role = Role(name="test", description="Test", model="test-model")
         tool_manager = ToolManager()
         mock_env = MagicMock()
         mock_env._hooks = {"before_tool_execution": [], "after_tool_execution": [],
@@ -218,14 +207,13 @@ class TestInvokeRole:
         session = Session(
             role=role,
             tool_manager=tool_manager,
-            chatbot_manager=chatbot_manager,
             execution_environment=mock_env,
         )
         # Session must be started to be "running"
         # This session was never started, so is_running() should return False
 
         with pytest.raises(RuntimeError, match="existing_session is not running"):
-            await invoke_agent(role_name="test", prompt="Hello", existing_session=session, timeout=10.0)
+            await invoke_agent(prompt="Hello", existing_session=session, timeout=10.0)
 
 
 class TestExtractLastAssistantText:

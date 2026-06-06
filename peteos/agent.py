@@ -5,10 +5,9 @@ import uuid
 from typing import Dict, Optional, Set
 
 from peteos.channels.channel import Channel
-from peteos.chatbot import ChatBotManager, Message, ContentPart
+from peteos.chatbot import Message, ContentPart
 from peteos.logger import get_logger
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.session import Session
 from peteos.toolmanager import ToolManager
 
@@ -29,12 +28,10 @@ class Agent:
 
     def __init__(
         self,
-        role_manager: RoleManager,
-        chatbot_manager: ChatBotManager,
+        role: Role,
         tool_manager: ToolManager
     ):
-        self._role_manager = role_manager
-        self._chatbot_manager = chatbot_manager
+        self._role = role
         self._tool_manager = tool_manager
 
         # Session management
@@ -62,29 +59,18 @@ class Agent:
         """List all registered channels."""
         return dict(self._channels)
 
-    async def create_session(self, role_name: str) -> Session:
-        """Create a new session with the specified role.
+    async def create_session(self) -> Session:
+        """Create a new session with this agent's role.
 
         Creates per-session queue and registers hooks for notifications.
         Also starts the session's event loop.
 
-        Args:
-            role_name: The name of the role to use for this session.
-
         Returns:
             A new Session instance.
-
-        Raises:
-            ValueError: If the role is not found in RoleManager.
         """
-        role = self._role_manager.get_role(role_name)
-        if role is None:
-            raise ValueError(f"Role '{role_name}' not found in RoleManager")
-
         session = Session(
-            role=role,
+            role=self._role,
             tool_manager=self._tool_manager,
-            chatbot_manager=self._chatbot_manager
         )
         self._sessions[session.uuid] = session
 
@@ -109,6 +95,78 @@ class Agent:
     def list_sessions(self) -> Dict[uuid.UUID, Session]:
         """List all sessions."""
         return dict(self._sessions)
+
+    @property
+    def role(self) -> Role:
+        """Return this agent's role."""
+        return self._role
+
+    def load_session_from_json(self, json_data: dict, tool_manager: ToolManager) -> Session:
+        """Load a session from JSON data.
+
+        The role in json_data must match this agent's role.
+        Validates that all role.required_tools exist in tool_manager.
+
+        Args:
+            json_data: Dict containing serialized session data.
+            tool_manager: ToolManager for tool validation.
+
+        Returns:
+            A new Session instance.
+
+        Raises:
+            ValueError: If role name mismatch or required tools missing.
+        """
+        role_name = json_data["role"]
+        if role_name != self._role.name:
+            raise ValueError(
+                f"Role mismatch: session has '{role_name}', "
+                f"agent has '{self._role.name}'"
+            )
+
+        for tool_name in self._role.required_tools:
+            if tool_manager.get_tool(tool_name) is None:
+                raise ValueError(
+                    f"Required tool '{tool_name}' not found in tool_manager"
+                )
+
+        chat_history_data = json_data.get("chat_history", {})
+        chat_history = self._import_chat_history(chat_history_data)
+        session_uuid = json_data.get("uuid")
+        if session_uuid and isinstance(session_uuid, str):
+            session_uuid = uuid.UUID(session_uuid)
+
+        session = Session(
+            role=self._role,
+            tool_manager=tool_manager,
+            chat_history=chat_history,
+            session_uuid=session_uuid,
+        )
+        self._sessions[session.uuid] = session
+        return session
+
+    def load_session_from_file(
+        self, file_path: str, tool_manager: ToolManager
+    ) -> Session:
+        """Load a session from a JSON file.
+
+        Args:
+            file_path: Path to the JSON file.
+            tool_manager: ToolManager for tool validation.
+
+        Returns:
+            A new Session instance.
+        """
+        import json
+        with open(file_path, "r") as f:
+            json_data = json.load(f)
+        return self.load_session_from_json(json_data, tool_manager)
+
+    @staticmethod
+    def _import_chat_history(chat_history_data: dict):
+        """Import ChatHistory from dict without circular imports."""
+        from peteos.chatbot import ChatHistory
+        return ChatHistory.from_dict(chat_history_data)
 
     async def destroy_session(self, session_uuid: uuid.UUID) -> bool:
         """Destroy a session by its UUID.

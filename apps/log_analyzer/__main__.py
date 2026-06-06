@@ -25,6 +25,8 @@ Usage:
       --stdout-config /path/to/stdout_config.json
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
@@ -41,23 +43,21 @@ from peteos.role import Role
 from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
-from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_fold_tools, register_approval_tools
+from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_approval_tools
 
 
 async def setup_chatbot_manager(config_file: str = "examples/config/chatbot_config.json"):
     """Setup ChatBotManager from configuration file."""
-    chatbot_manager = ChatBotManager(timeout=None)
-
+    ChatBotManager(timeout=None)  # Set timeout
+    ChatBotManager.reset()
     try:
-        await chatbot_manager.load_from_file(config_file)
+        await ChatBotManager.load_from_file(config_file)
         print(f"Loaded backend configuration from {config_file}")
     except FileNotFoundError:
         print(f"Note: Config file {config_file} not found. Starting without backends.")
     except RuntimeError as e:
         print(f"Error: Backend connection failed: {e}")
         raise
-
-    return chatbot_manager
 
 
 def setup_role_manager() -> RoleManager:
@@ -141,14 +141,22 @@ async def main():
 
     # Setup components
     role_manager = setup_role_manager()
-    chatbot_manager = await setup_chatbot_manager(args.chatbot_config)
+    await setup_chatbot_manager(args.chatbot_config)
     tm = ToolManager()
 
-    # Create the Agent
-    agent = Agent(role_manager, chatbot_manager, tm)
+    # Create the router agent
+    router_role = role_manager.get_role("router")
+    agent = Agent(router_role, tm)
     _state.agent = agent
 
-    role_name = nextcloud_config.get("default_role", "router")
+    # Create the pattern_reviewer sub-agent
+    reviewer_role = role_manager.get_role("pattern_reviewer")
+    if reviewer_role is not None:
+        reviewer_agent = Agent(reviewer_role, tm)
+        _state.reviewer_agent = reviewer_agent
+        print(f"Created pattern_reviewer agent with role: {reviewer_role.name}")
+    else:
+        print("Warning: pattern_reviewer role not found. Sub-agent approval calls will be disabled.")
 
     # Create the stdout channel first so its methods are available for tool registration
     # (tools access the channel via _state.channel, not the tool manager)
@@ -164,11 +172,10 @@ async def main():
     register_approval_tools(tm)
 
     # Create a shared session that both channels attach to
-    session = await agent.create_session(role_name)
+    session = await agent.create_session()
 
-    # Register fold/unfold tools and set session reference
+    # Set session reference for tools
     _state.session = session
-    register_fold_tools(tm)
 
     # Register rolling window discard hook
     try:
@@ -197,7 +204,7 @@ async def main():
         for part in message.content:
             if part.type == "text" and part.text:
                 token_count = message.count_tokens()
-                part.data["text"] = f"[msg:{message.get_id()} ({token_count} tokens)]\n{part.text}"
+                #part.data["text"] = f"[msg:{message.get_id()} ({token_count} tokens)]\n{part.text}"
                 break
 
     session.execution_environment.register_hook("after_message_append", _on_after_message_append)
@@ -215,6 +222,20 @@ async def main():
             msg.add_hook(lambda: f"Context: {_state.last_context_tokens} of {max_tokens} tokens used.\n")
             break
 
+    # Add a persistent back-anchor reminder about updating topics for continuous roles
+    from peteos.chatbot import ContentPart
+    if agent.role.behavior_policy == "continuous":
+        session.chat_history.append_message(
+            Message(
+                role="assistant",
+                content=[ContentPart(
+                    part_type="text",
+                    text="I need to use the update_topic() tool when the discussion no longer belongs to the current topic. I should update it to what the discussion is actually about. I should also use fold_topic() to fold completed topics to save context.",
+                )],
+            ),
+            anchor="back"
+        )
+
     # Register rooms with the session (app owns session lifecycle)
     auto_join_rooms = nextcloud_config.get("auto_join_rooms", [])
     for room_token in auto_join_rooms:
@@ -223,7 +244,7 @@ async def main():
 
     # Callback for dynamic room joins
     async def on_room_joined(room_token: str):
-        new_session = await agent.create_session(role_name)
+        new_session = await agent.create_session()
         await nextcloud.register_room(new_session.uuid, room_token)
         print(f"Registered new room {room_token} with session {new_session.uuid}")
 

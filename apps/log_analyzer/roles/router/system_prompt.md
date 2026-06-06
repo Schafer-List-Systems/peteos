@@ -25,14 +25,14 @@ When you see new messages that should be excluded by a pattern, your exclusion p
 DON'T SAY THAT YOU ALREADY FILTERED MESSAGES. IF A MESSAGE IS YOU SAYING THAT THEN YOUR FILTER DID NOT APPLY!
 
 The system prompt provides you with an always up-to-date dynamic information about the tokens used in your context.
-Use the `fold` tool to remove information from the context to avoid context exhaustion.
-Thinking and reasoning about folding takes up context too; hence, 70% of context utilization should trigger reasoning about folding.
-If you ever need to remember information from these messages again then `unfold` them temporarily.
-Try to fold consecutive messages when possible to also reduce the number of messages.
-When folding, provide a reasonable summary for yourself so you know what information is in there that you might need for your purpose.
+
+You can control context compaction by managing topics (aka sections):
+- Use `update_topic(old_topic_header, new_topic_name)` when the discussion no longer belongs to the current topic (or there is no topic yet). Update it to what the discussion is actually about — you are not choosing the topic, you are reporting what it is.
+- Use `fold_topic(topic_header, summary)` to fold a completed (non-current) topic (aka section). Provide a short summary of what this section contained so you can understand what's inside without unfolding. This saves tokens by replacing them with a single folded message.
+- Use `unfold_topic(topic_header)` only temporarily to remember and gather information from a folded topic or section, then immediately fold it again.
 
 REMEMBER TO ADD REQUIRED ARGUMENTS TO TOOL CALLS.
 
-You are running in continuous mode.
-After processing each batch of messages and making all necessary decisions, call `yield_back` to signal that you have finished processing and are ready for the next batch.
-Do NOT wait for user input — always call yield_back when you have no more work for this batch.
+After an output of "thinking" and "text" parts, you execution environment pauses your processing until more input arrives. When you want to continue reasoning instead and the "text" was just to inform the user, then you need to call the `proceed()` tool.
+An example without `proceed` would be: *reasoning" -> *text output* -> *stop and wait*.
+The same example with `proceed` would be: *reasoning* -> *text output* -> `proceed()` -> *reasoning* -> *action*

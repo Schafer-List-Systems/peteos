@@ -11,7 +11,6 @@ from peteos.toolmanager import ToolManager
 
 class ExecStatus(str, Enum):
     FINISHED = "finished"
-    INTERRUPTED = "interrupted"
     CONTINUE = "continue"
     PENDING = "pending"
     ERROR = "error"
@@ -20,27 +19,49 @@ class ExecStatus(str, Enum):
     TOOL_DENIED = "tool_denied"
 
 
+_EXEC_SEVERITY: dict[ExecStatus | None, int] = {
+    None: -1,
+    ExecStatus.CONTINUE: 0,
+    ExecStatus.FINISHED: 1,
+    ExecStatus.PENDING: 2,
+    ExecStatus.TOOL_NOT_FOUND: 3,
+    ExecStatus.TOOL_DENIED: 4,
+    ExecStatus.TOOL_FAILED: 5,
+    ExecStatus.ERROR: 6,
+}
+
+
+def _merge_exec_status(a: ExecStatus | None, b: ExecStatus | None) -> ExecStatus | None:
+    """Merge two ExecStatus values by severity (worst wins).
+
+    This is commutative and associative — merging in any order yields
+    the same result.  ``None`` acts as the identity element.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if _EXEC_SEVERITY[a] >= _EXEC_SEVERITY[b] else b
+
+
 class ExecutionEnvironment(ABC):
     """Environment for executing agent actions."""
 
     def __init__(
         self,
-        chatbot_manager: ChatBotManager,
         chat_history: ChatHistory,
         tool_manager: ToolManager,
-        role: Role
+        role: Role,
     ):
         """
         Initialize ExecutionEnvironment.
 
         Args:
-            chatbot_manager: The ChatBotManager instance to use.
             chat_history: The ChatHistory instance to use.
             tool_manager: The ToolManager instance to use.
             role: The Role instance to use (for model selection).
         """
-        self._chatbot: ChatBot = ExecutionEnvironment._select_chatbot(chatbot_manager, role)
-        self._interrupt = False
+        self._chatbot: ChatBot = ExecutionEnvironment._select_chatbot(role)
         self._completion_signal: asyncio.Event = asyncio.Event()
         self._completion_signal.set()  # Start as signaled (not running)
         self._hooks: dict[str, list[Callable]] = {
@@ -58,9 +79,9 @@ class ExecutionEnvironment(ABC):
         return self._chatbot
 
     @staticmethod
-    def _select_chatbot(chatbot_manager: ChatBotManager, role: Role) -> ChatBot:
-        """Select a ChatBot from the manager based on role.model."""
-        chatbots = chatbot_manager.list_chatbots(role.model)
+    def _select_chatbot(role: Role) -> ChatBot:
+        """Select a ChatBot from the class-level manager based on role.model."""
+        chatbots = ChatBotManager.list_chatbots(role.model)
         if not chatbots:
             raise ValueError(
                 f"No ChatBot found matching model pattern '{role.model}' "
@@ -72,14 +93,6 @@ class ExecutionEnvironment(ABC):
     def is_running(self) -> bool:
         """Check if the execution environment is currently running."""
         return not self._completion_signal.is_set()
-
-    def set_interrupt(self) -> None:
-        """Request interruption of the execution loop."""
-        self._interrupt = True
-
-    def clear_interrupt(self) -> None:
-        """Clear the interrupt flag."""
-        self._interrupt = False
 
     def get_chat_history(self) -> ChatHistory:
         """Get the internal chat history."""
@@ -164,22 +177,21 @@ class ExecutionEnvironment(ABC):
             raise ValueError(f"Unknown hook point: {hook_point}")
         self._hooks[hook_point].clear()
 
-    def _call_hooks(self, hook_point: str, *args: Any) -> Any | None:
-        """Call all hooks registered for a specific hook point.
+    async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
+        """Call all hooks for *hook_point*, merging results by severity.
 
-        For ``before_tool_execution``, returns the first non-None result
-        from hooks, which can be a tuple ``(allow: bool, message: str)`` to
-        disallow the tool call.  For all other hook points every callback is
-        invoked and the last return value is returned.
+        Every registered hook is invoked unconditionally.  Results that
+        are ``ExecStatus`` are merged by severity (worst wins).  The
+        merge is commutative and associative so the order of hooks does
+        not matter.  ``None`` acts as the identity element — a hook that
+        returns ``None`` simply doesn't vote.
 
         Args:
             hook_point: One of the registered hook points.
             *args: Arguments to pass to each hook callback.
 
         Returns:
-            The return value from the first hook that returns a value for
-            ``before_tool_execution``, or the last hook's return value
-            (which may be ``None``) for other hook points.
+            The merged result (worst ``ExecStatus`` or ``None``).
 
         Raises:
             ValueError: If hook_point is not a valid hook point.
@@ -187,9 +199,43 @@ class ExecutionEnvironment(ABC):
         if hook_point not in self._hooks:
             raise ValueError(f"Unknown hook point: {hook_point}")
 
-        last_result = None
+        merged: ExecStatus | None = None
         for callback in self._hooks[hook_point]:
-            last_result = callback(*args)
-            if hook_point == "before_tool_execution" and last_result is not None:
-                return last_result
-        return last_result
+            result = callback(*args)
+            if asyncio.iscoroutine(result):
+                result = await result
+            if isinstance(result, ExecStatus):
+                merged = _merge_exec_status(merged, result)
+        return merged
+
+    async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
+        """Call all hooks for *hook_point*, collecting results and denying
+        on the first deny.
+
+        Hooks are invoked in registration order.  All hooks are called
+        unconditionally.  The first ``(False, str)`` tuple is recorded
+        and returned **without preventing** the remaining hooks from
+        being called.  Returns ``None`` if no hook denied.
+
+        Args:
+            hook_point: One of the registered hook points.
+            *args: Arguments to pass to each hook callback.
+
+        Returns:
+            The first ``(False, str)`` tuple, or ``None`` if no hook
+            denied.
+
+        Raises:
+            ValueError: If hook_point is not a valid hook point.
+        """
+        if hook_point not in self._hooks:
+            raise ValueError(f"Unknown hook point: {hook_point}")
+
+        first_deny: Any | None = None
+        for callback in self._hooks[hook_point]:
+            result = callback(*args)
+            if asyncio.iscoroutine(result):
+                result = await result
+            if first_deny is None and isinstance(result, tuple) and len(result) == 2 and result[0] is False:
+                first_deny = result
+        return first_deny

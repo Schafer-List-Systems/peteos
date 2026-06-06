@@ -4,16 +4,24 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from peteos.chatbot import ChatHistory
+from peteos.chatbot import ChatHistory, ChatBotManager
 from peteos.role import Role
 from peteos.session import Session, ToolApprovalStatus, ToolExecutionStatus
 from peteos.toolmanager import ToolManager
 
 
+def _make_mock_env():
+    """Create a mock execution environment."""
+    mock = MagicMock()
+    mock._hooks = {"before_tool_execution": [], "after_tool_execution": [],
+                   "before_notification_publish": [], "before_send_to_chatbot": [],
+                   "before_loop_continue": [], "after_step": []}
+    return mock
+
+
 def _make_session(tool_manager: ToolManager, auto_approve: list[str] | None = None) -> Session:
-    chatbot_manager = MagicMock()
     role = Role(name="test", description="A test role", auto_approve_tools=auto_approve or [])
-    return Session(role=role, tool_manager=tool_manager, chatbot_manager=chatbot_manager)
+    return Session(role=role, tool_manager=tool_manager, execution_environment=_make_mock_env())
 
 
 class TestAddToolCallValidation:

@@ -29,16 +29,13 @@ logger = logging.getLogger(__name__)
 
 async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json"):
     """Setup ChatBotManager from configuration file."""
-    chatbot_manager = ChatBotManager()
-
+    ChatBotManager.reset()
     try:
-        await chatbot_manager.load_from_file(config_file)
+        await ChatBotManager.load_from_file(config_file)
         print(f"Loaded backend configuration from {config_file}")
     except FileNotFoundError:
         print(f"Note: Config file {config_file} not found.")
         print("Creating empty ChatBotManager...")
-
-    return chatbot_manager
 
 
 def setup_tool_manager() -> ToolManager:
@@ -71,25 +68,25 @@ async def main():
     print()
 
     # Setup chatbot manager
-    chatbot_manager = await setup_chatbot_manager()
+    await setup_chatbot_manager()
 
     # Get a ChatBot from the first available backend/model
-    if not chatbot_manager._backends:
+    if not ChatBotManager._backends:
         print("No backends configured. Exiting.")
         return
 
     # Get backend - support TEST_BACKEND environment variable to specify which backend to test
     backend_name = os.environ.get("TEST_BACKEND")
-    if backend_name and backend_name in chatbot_manager._backends:
+    if backend_name and backend_name in ChatBotManager._backends:
         print(f"Testing backend: {backend_name}")
     elif not backend_name:
-        backend_name = list(chatbot_manager._backends.keys())[0]
+        backend_name = list(ChatBotManager._backends.keys())[0]
         print(f"No TEST_BACKEND specified, using first backend: {backend_name}")
     else:
-        print(f"Backend '{backend_name}' not found. Available backends: {list(chatbot_manager._backends.keys())}")
+        print(f"Backend '{backend_name}' not found. Available backends: {list(ChatBotManager._backends.keys())}")
         return
 
-    backend_info = chatbot_manager._backends[backend_name]
+    backend_info = ChatBotManager._backends[backend_name]
 
     # Get first model from backend
     model_name = list(backend_info.models.keys())[0]

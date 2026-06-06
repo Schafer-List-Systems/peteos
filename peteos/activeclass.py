@@ -122,6 +122,11 @@ class ActiveClass:
                     timeout=remaining,
                 )
             except asyncio.TimeoutError:
+                _logger.error(
+                    "[ActiveClass:%s] timeout waiting for event after %ss",
+                    type(self).__name__,
+                    timeout if timeout else float("inf"),
+                )
                 return False
 
             if not self.event_queue.empty():

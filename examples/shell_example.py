@@ -8,16 +8,17 @@ with an Agent using the queue-based architecture.
 Usage:
     PYTHONPATH=/home/frygge/projects/private/peteos python examples/shell_example.py
 
-Configure the ChatBotManager in setup_components() by adding your backend(s):
-    await chatbot_manager.add_backend("name", "http://your-backend:port")
+Configure the ChatBotManager by adding your backend(s):
+    await ChatBotManager.add_backend("name", "http://your-backend:port")
 """
+
+from pathlib import Path
 
 from peteos.agent import Agent
 from peteos.channels import InteractiveShellChannel
 from peteos.chatbot.manager import ChatBotManager
 from peteos.logger import setup_logging
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
@@ -27,45 +28,37 @@ async def setup_chatbot_manager(config_file: str = "config/chatbot_config.json")
     Args:
         config_file: Path to JSON configuration file with backend definitions.
 
-    Returns:
-        Configured ChatBotManager with all backends loaded.
-
     Raises:
         FileNotFoundError: If configuration file doesn't exist.
         RuntimeError: If backend connection fails.
     """
-    chatbot_manager = ChatBotManager()
-
+    ChatBotManager.reset()
     try:
-        await chatbot_manager.load_from_file(config_file)
+        await ChatBotManager.load_from_file(config_file)
         print(f"Loaded backend configuration from {config_file}")
     except FileNotFoundError:
         print(f"Note: Config file {config_file} not found. Starting without backends.")
-    except RuntimeError as e:
-        print(f"Error: Backend connection failed: {e}")
-        raise
-
-    return chatbot_manager
 
 
-def setup_role_manager():
-    """Setup RoleManager with available roles.
+def setup_role():
+    """Setup the role for the agent.
 
     Returns:
-        Configured RoleManager with roles loaded from roles/ directory.
+        Role loaded from roles/ directory, or default 'test' role.
     """
-    role_manager = RoleManager()
-
     try:
-        loaded_roles = role_manager.load_from_dir("roles")
-        print(f"Loaded roles: {', '.join(loaded_roles)}")
+        # Load the first role found in the roles directory
+        role_dir = Path("roles")
+        if role_dir.is_dir():
+            for entry in sorted(role_dir.iterdir()):
+                if entry.is_dir():
+                    role = Role.load_from_path(str(entry))
+                    print(f"Loaded role: {role.name}")
+                    return role
     except FileNotFoundError:
-        print("Note: No roles directory found. Creating default 'test' role.")
-        role_manager.register_role(
-            Role(name="test", description="Default test role", model=".*")
-        )
-
-    return role_manager
+        pass
+    print("Note: No roles directory found. Creating default 'test' role.")
+    return Role(name="test", description="Default test role", model=".*")
 
 
 def setup_tool_manager():
@@ -148,12 +141,12 @@ async def main():
     print()
 
     # Setup components
-    role_manager = setup_role_manager()
-    chatbot_manager = await setup_chatbot_manager()
+    role = setup_role()
+    await setup_chatbot_manager()
     tool_manager = setup_tool_manager()
 
     # Create the Agent
-    agent = Agent(role_manager, chatbot_manager, tool_manager)
+    agent = Agent(role, tool_manager)
 
     # Create the shell channel
     shell = InteractiveShellChannel("shell", agent)
@@ -161,11 +154,11 @@ async def main():
     print("-" * 60)
     print()
     print("Available commands:")
-    print("  /new <role>  - Create a new session")
-    print("  /list        - List all sessions")
-    print("  /select <uuid> - Select a session as active")
-    print("  /messages    - Show recent messages")
-    print("  /quit        - Exit the shell")
+    print("  /new      - Create a new session")
+    print("  /list     - List all sessions")
+    print("  /switch <uuid> - Select a session as active")
+    print("  /messages - Show recent messages")
+    print("  /quit     - Exit the shell")
     print()
     print("Type any text (without /) to send a message to the active session.")
     print()

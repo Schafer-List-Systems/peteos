@@ -16,10 +16,9 @@ if TYPE_CHECKING:
     from peteos.channels.channel import Channel
 
 from peteos.activeclass import ActiveClass
-from peteos.chatbot import ChatBotManager, ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
+from peteos.chatbot import ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
 from peteos.logger import get_logger
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
@@ -106,15 +105,15 @@ class AgenticState:
 
         Args:
             name: Variable name.
-            value: Non-empty string value.
+            value: String value (must not be None).
 
         Raises:
-            ValueError: If variable already exists or value is empty.
+            ValueError: If variable already exists or value is None.
         """
         if name in self._data:
             raise ValueError(f"Variable '{name}' already exists in AgenticState")
-        if value is None or value == "":
-            raise ValueError("Value must be a non-empty string")
+        if value is None:
+            raise ValueError("Value must not be None")
         self._data[name] = value
 
     def update(self, name: str, old_value: str, new_value: str) -> None:
@@ -199,17 +198,17 @@ class Session(ActiveClass):
         )
 
         # Continuous roles get a persistent yield_back reminder from the assistant's perspective
-        if role.behavior_policy == "continuous":
-            chat_history.append_message(
-                Message(
-                    role="assistant",
-                    content=[ContentPart(
-                        part_type="text",
-                        text="I need to use the yield_back() tool when I need to wait for further input (e.g. on more data or an answer from the user)",
-                    )],
-                ),
-                anchor="back"
-            )
+        #if role.behavior_policy == "continuous":
+        #    chat_history.append_message(
+        #        Message(
+        #            role="assistant",
+        #            content=[ContentPart(
+        #                part_type="thinking",
+        #                text="I must call the `yield_back()` tool when I want to yield back control to the user.",
+        #            )],
+        #        ),
+        #        anchor="back"
+        #    )
 
         return chat_history
 
@@ -217,7 +216,6 @@ class Session(ActiveClass):
         self,
         role: Role,
         tool_manager: ToolManager,
-        chatbot_manager: ChatBotManager,
         chat_history: Optional[ChatHistory] = None,
         session_uuid: Optional[uuid.UUID] = None,
         execution_environment: Optional[REPLExecutionEnvironment] = None
@@ -228,19 +226,17 @@ class Session(ActiveClass):
         self.tool_manager = tool_manager
         self.auto_approve_tools: list[str] = list(role.auto_approve_tools)
         if role.behavior_policy == "continuous":
-            tool_manager.register_tool(func=_yield_back, name="yield_back", description="Signal that you have finished your task and want to yield control back to the user/channel. Call this when you've completed all your work and no longer need to execute tools.")
+            tool_manager.register_tool(func=_yield_back, name="yield_back", description="Hand back control to the user to wait for further input. Not calling yield_back forces you to create more output!")
             self.auto_approve_tools.append("yield_back")
             if role.tool_filter is None:
                 role.tool_filter = []
             if "yield_back" not in role.tool_filter:
                 role.tool_filter.append("yield_back")
         self.chat_history = chat_history if chat_history is not None else self._initialize_chat_history(role, tool_manager)
-        self.chatbot_manager = chatbot_manager
         self._channels: Set[Channel] = set()
         self._state = AgenticState()
 
         self.execution_environment = execution_environment if execution_environment is not None else REPLExecutionEnvironment(
-            chatbot_manager=chatbot_manager,
             chat_history=self.chat_history,
             tool_manager=tool_manager,
             role=role,
@@ -248,6 +244,21 @@ class Session(ActiveClass):
 
         self._pending_tool_calls: list[ToolCallRecord] = []
         self.tool_failure_policy: str = "continue"
+        self._idle: asyncio.Event = asyncio.Event()
+
+    async def wait_for_idle(self, timeout: float | None = None) -> bool:
+        """Wait until the session becomes idle (waiting for the next event).
+
+        Returns True if the session became idle, False if the timeout expired.
+
+        Args:
+            timeout: Maximum seconds to wait. None = wait indefinitely.
+        """
+        try:
+            await asyncio.wait_for(self._idle.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
 
     @property
     def state(self) -> AgenticState:
@@ -286,6 +297,7 @@ class Session(ActiveClass):
         """
         if not self.is_running():
             await self.start()
+        self._idle.clear()
         self.push_event(message)
 
     async def run(self) -> None:
@@ -301,9 +313,11 @@ class Session(ActiveClass):
 
         while self.is_running():
             if not need_reentry:
+                self._idle.set()
                 # Block until at least one event arrives
                 if not await self._wait_for_event():
                     continue
+                self._idle.clear()
 
             # Drain all accumulated events
             events_processed = 0
@@ -315,7 +329,7 @@ class Session(ActiveClass):
                 events_processed += 1
 
                 if isinstance(event, Message):
-                    self.append_and_notify(event)
+                    await self.append_and_notify(event)
                 elif isinstance(event, ApprovalEvent):
                     self._handle_approval(event)
                 else:
@@ -327,25 +341,23 @@ class Session(ActiveClass):
             need_reentry = False
 
             status, _ = await self.execution_environment.step(self)
-            self.execution_environment._call_hooks("after_step", status)
+            hook_status = await self.execution_environment.call_hooks("after_step", status)
+            hook_return = hook_status if hook_status is not None else status
 
-            if status == ExecStatus.INTERRUPTED:
-                _logger.debug("[session] run(): Execution interrupted, exiting loop.")
-                break
-            if status == ExecStatus.ERROR:
+            if hook_return == ExecStatus.ERROR:
                 _logger.debug("[session] run(): Execution error, exiting loop.")
                 break
-            if status == ExecStatus.FINISHED:
+            if hook_return == ExecStatus.FINISHED:
                 _logger.debug("[session] run(): Step finished, waiting for next events.")
                 continue
-            if status == ExecStatus.PENDING:
+            if hook_return == ExecStatus.PENDING:
                 _logger.debug("[session] run(): Pending tool approval, re-entering step.")
                 continue
-            if status in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
+            if hook_return in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
                 _logger.debug("[session] run(): Tool call failed/denied, re-entering step loop.")
                 need_reentry = True
                 continue
-            if status == ExecStatus.TOOL_FAILED:
+            if hook_return == ExecStatus.TOOL_FAILED:
                 # Abort all remaining pending tool calls
                 for record in self._pending_tool_calls:
                     if record.approval_status == ToolApprovalStatus.PENDING:
@@ -357,8 +369,10 @@ class Session(ActiveClass):
                 _logger.debug("[session] Aborted all pending tool calls due to tool failure")
                 need_reentry = True
                 continue
-            # CONTINUE -> step returned success, re-enter to process tool results
-            need_reentry = True
+            if hook_return == ExecStatus.CONTINUE:
+                need_reentry = True
+                continue
+            need_reentry = False
             continue
 
     def add_tool_call(self, tool_call: dict) -> None:
@@ -468,7 +482,7 @@ class Session(ActiveClass):
             record.approval_status = ToolApprovalStatus.DENIED
             return False
 
-    def append_and_notify(self, message: Message) -> None:
+    async def append_and_notify(self, message: Message) -> None:
         """Append a message to chat history and publish a notification.
 
         Replaces the inline pattern:
@@ -481,68 +495,18 @@ class Session(ActiveClass):
             message: The message to append and notify on.
         """
         self.chat_history.append_message(message)
-        self.execution_environment._call_hooks("after_message_append", self, message)
-        self.publish_notification(message)
+        await self.execution_environment.call_hooks("after_message_append", self, message)
+        await self.publish_notification(message)
 
-    def publish_notification(
+    async def publish_notification(
             self,
             message: Message
     ) -> None:
         """Publish a notification to all subscribed channels."""
         from peteos.channels.channel import NotificationEvent
-        self.execution_environment._call_hooks("before_notification_publish", self, message)
+        await self.execution_environment.call_hooks("before_notification_publish", self, message)
         for channel in self._channels:
             channel.push_event(NotificationEvent(self.uuid, message))
-
-    @staticmethod
-    def load_from_json(
-        json_data: dict,
-        chatbot_manager: ChatBotManager,
-        role_manager: RoleManager,
-        tool_manager: ToolManager
-    ) -> "Session":
-        uuid_str = json_data.get("uuid")
-        role_name = json_data["role"]
-        chat_history_data = json_data.get("chat_history", {})
-
-        role = role_manager.get_role(role_name)
-        if role is None:
-            raise ValueError(f"Role '{role_name}' not found in RoleManager")
-
-        for tool_name in role.required_tools:
-            if tool_manager.get_tool(tool_name) is None:
-                raise ValueError(
-                    f"Role '{role_name}' requires tool '{tool_name}', "
-                    f"but it's not registered in tool_manager"
-                )
-
-        chat_history = ChatHistory.from_dict(chat_history_data)
-        session_uuid = uuid.UUID(uuid_str) if uuid_str else None
-
-        return Session(
-            role=role,
-            tool_manager=tool_manager,
-            chatbot_manager=chatbot_manager,
-            chat_history=chat_history,
-            session_uuid=session_uuid,
-        )
-
-    @staticmethod
-    def load_from_file(
-        file_path: str,
-        chatbot_manager: ChatBotManager,
-        role_manager: RoleManager,
-        tool_manager: ToolManager
-    ) -> "Session":
-        with open(file_path, "r") as f:
-            json_data = json.load(f)
-        return Session.load_from_json(
-            json_data,
-            chatbot_manager,
-            role_manager,
-            tool_manager,
-        )
-
 
 def _extract_last_assistant_text(chat_history: "ChatHistory") -> str:
     """Extract the text of the last assistant message from chat history."""
@@ -554,7 +518,6 @@ def _extract_last_assistant_text(chat_history: "ChatHistory") -> str:
 
 
 async def invoke_agent(
-    role_name: str,
     prompt: str,
     agent: "Agent | None" = None,
     *,
@@ -568,10 +531,9 @@ async def invoke_agent(
     waits for processing to complete, and returns the assistant's answer.
 
     Args:
-        role_name: Name of the role to invoke.
-        prompt: The user message / prompt to send to the agent.
-        agent: Optional Agent with registered role_manager, chatbot_manager,
-               and tool_manager. If provided, creates a new session via
+        prompt: The message / prompt to send to the agent.
+        agent: Optional Agent with an associated role and tool_manager.
+               If provided, creates a new session via
                agent.create_session() with full hook support.
         existing_session: Optional pre-existing Session to reuse for
             continuation. Must already be started.
@@ -587,12 +549,11 @@ async def invoke_agent(
             - history (list[Message]): Full chat history for inspection.
 
     Raises:
-        ValueError: If role_name not found or neither agent nor existing_session provided.
+        ValueError: If neither agent nor existing_session provided.
         asyncio.TimeoutError: If timeout expires before response.
         RuntimeError: If existing_session is not running.
     """
     from peteos.agent import Agent as AgentType
-    from peteos.rolemanager import RoleManager as RM
 
     # --- Session setup ---
     if existing_session is not None:
@@ -603,7 +564,7 @@ async def invoke_agent(
                 "or call session.start()"
             )
     elif agent is not None:
-        session = await agent.create_session(role_name)
+        session = await agent.create_session()
     else:
         raise ValueError(
             "Either agent or existing_session must be provided."
@@ -636,6 +597,13 @@ async def invoke_agent(
         answer = _extract_last_assistant_text(session.chat_history)
         success = True
 
+    except asyncio.TimeoutError:
+        _logger.error(
+            "Session invoke_agent timeout hit: thread=%s after %.1fs",
+            existing_session.uuid if existing_session else "new",
+            timeout,
+        )
+        raise
     except Exception:
         raise
     finally:

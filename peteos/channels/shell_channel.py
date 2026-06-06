@@ -26,11 +26,12 @@ class InteractiveShellChannel(Channel):
     so blocking input() doesn't block session processing.
 
     Example:
-        >>> agent = Agent(role_manager, chatbot_manager, tool_manager)
+        >>> role = Role(name="test", description="Test role")
+        >>> agent = Agent(role, tool_manager)
         >>> await agent.start()
         >>> shell = InteractiveShellChannel("shell", agent)
         >>> await shell.start()
-        >>> # User types: /new test
+        >>> # User types: /new
         >>> # User types: Hello!
         >>> # Agent processes and notifications appear
         >>> await shell.stop()
@@ -112,13 +113,9 @@ class InteractiveShellChannel(Channel):
         self, src: str, text: str, file_type: str = "auto"
     ) -> None:
         """Queue a file message to the current session."""
-        from peteos.utils.image import create_content_part_async
+        from peteos.utils.image import create_media_content_part_async
 
-        if file_type == "image":
-            from peteos.utils.image import create_image_content_part_async
-            file_part = await create_image_content_part_async(src)
-        else:
-            file_part = await create_content_part_async(src)
+        file_part = await create_media_content_part_async(src)
 
         parts = [ContentPart(part_type="text", text=text)] if text else []
         parts.append(file_part)
@@ -186,38 +183,35 @@ class InteractiveShellChannel(Channel):
         args = parts[1] if len(parts) > 1 else ""
 
         if command == "/new":
-            if not args:
-                return (True, "Usage: /new <role>")
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.create_task(
-                        self._handle_new_session(args.strip())
-                    )
+                    asyncio.create_task(self._handle_new_session())
                     return (True, "")
                 else:
                     session = loop.run_until_complete(
-                        self._agent.create_session(args.strip())
+                        self._agent.create_session()
                     )
                     self.select_session(session.uuid)
                     _logger.debug("Session created: %s", session.uuid)
                     return (True, "")
-            except ValueError as e:
+            except Exception as e:
                 return (True, str(e))
 
         elif command == "/list":
             sessions = self._agent.list_sessions()
             if not sessions:
-                return (True, "No sessions available")
-            output = "Sessions:"
+                role_name = self._agent.role.name if hasattr(self._agent, "role") else "??"
+                return (True, f"No sessions available (role: {role_name})")
+            output = f"Sessions ({self._agent.role.name}):"
             for uuid_, session in sessions.items():
                 active_marker = " (active)" if uuid_ == self._active_session_uuid else ""
-                output += f"\n  {uuid_}{active_marker} - Role: {session.role.name}"
+                output += f"\n  {uuid_}{active_marker}"
             return (True, output)
 
-        elif command == "/select":
+        elif command == "/switch":
             if not args:
-                return (True, "Usage: /select <uuid>")
+                return (True, "Usage: /switch <uuid>")
             try:
                 session_uuid = uuid.UUID(args.strip())
                 session = self._agent.get_session(session_uuid)
@@ -288,18 +282,21 @@ class InteractiveShellChannel(Channel):
             self._running = False
             return (False, "Goodbye!")
 
+        elif command == "/select":
+            return (True, "Usage: /switch <uuid>. Note: /select is deprecated, use /switch.")
+
         else:
             return (True, f"Unknown command: {command}. Use /list for available commands.")
 
-    async def _handle_new_session(self, role_name: str) -> None:
+    async def _handle_new_session(self) -> None:
         """Async helper for /new command."""
-        session = await self._agent.create_session(role_name)
+        session = await self._agent.create_session()
         self.select_session(session.uuid)
         _logger.debug("Session created: %s", session.uuid)
 
     async def read_input_loop(self) -> None:
         """Read user input and send events to the channel's queue."""
-        await self.send("Connected. Commands: /new, /list, /select, /quit")
+        await self.send("Connected. Commands: /new, /list, /switch, /quit")
 
         while self.is_running():
             # Print prompt before reading input
@@ -333,7 +330,7 @@ class InteractiveShellChannel(Channel):
                 # we need to forward to the agent's message queue directly
                 # since this is a shell-specific flow.
                 if self._active_session_uuid is None:
-                    await self.send("No session selected. Use /new <role> or /select <uuid>.")
+                    await self.send("No session selected. Use /new or /switch <uuid>.")
                     continue
 
                 try:

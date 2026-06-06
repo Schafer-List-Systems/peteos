@@ -65,11 +65,7 @@ class ChatHistory:
         # Front first (ordered), then unanchored, then remaining anchors, then back
         front = self._anchor_groups.get("front", [])
         back = self._anchor_groups.get("back", [])
-        others = [
-            group for name, group in self._anchor_groups.items()
-            if name not in ("front", "back")
-        ]
-        return front + self._unanchored + others + back
+        return front + self._unanchored + back
 
     def append_message(self, message: Message, anchor: Optional[str] = None) -> None:
         """

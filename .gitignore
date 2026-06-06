@@ -52,6 +52,9 @@ http_client.md
 # Environment variables (local configuration)
 .env
 
+# Workflow canvas files
+*.canvas
+
 # internal TODO list
 TODO.md
 ISSUES.md

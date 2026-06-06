@@ -17,6 +17,7 @@ from peteos.chatbot import (
     HTTPClient,
 )
 from peteos.executionenvironment import ExecutionEnvironment
+from peteos.oap import AgenticObjectBase, Error, agentic_object, tool
 from peteos.replexecutionenvironment import REPLExecutionEnvironment
 from peteos.role import Role
 from peteos.rolemanager import RoleManager
@@ -33,6 +34,7 @@ __all__ = [
     "ChatBotManager",
     "ChatBotResponse",
     "ChatHistory",
+    "Error",
     "ExecutionEnvironment",
     "GenericChatBot",
     "GenericChatBotResponse",
@@ -44,6 +46,9 @@ __all__ = [
     "Role",
     "RoleManager",
     "Session",
+    "AgenticObjectBase",
+    "agentic_object",
+    "tool",
     "_extract_last_assistant_text",
-    "ToolManager"
+    "ToolManager",
 ]

@@ -16,10 +16,9 @@ from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 
 from peteos.agent import Agent
-from peteos.chatbot.manager import ChatBotManager
+from peteos.chatbot import ChatBotManager
 from peteos.chatbot import Message, ContentPart
 from peteos.role import Role
-from peteos.rolemanager import RoleManager
 from peteos.toolmanager import ToolManager
 
 
@@ -77,24 +76,21 @@ class TestAgentE2E(AioHTTPTestCase):
     async def test_agent_question_answer_flow(self):
         """Test complete question -> answer flow."""
         # Setup
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test", model="test-model")
-        )
+        role = Role(name="test", description="Test", model="test-model")
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
         )
 
         tool_manager = ToolManager()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
         try:
             # Create session (now async, auto-starts session event loop)
-            session = await agent.create_session("test")
+            session = await agent.create_session()
 
             # Send question directly to session (agent.post_message removed)
             question = "What is 2 + 2?"
@@ -128,23 +124,20 @@ class TestAgentE2E(AioHTTPTestCase):
     async def test_agent_multiple_messages(self):
         """Test multiple messages in sequence."""
         # Setup
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test", model="test-model")
-        )
+        role = Role(name="test", description="Test", model="test-model")
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
         )
 
         tool_manager = ToolManager()
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
         try:
-            session = await agent.create_session("test")
+            session = await agent.create_session()
 
             # Send first question directly to session
             await session.queue_message(Message(
@@ -175,13 +168,10 @@ class TestAgentE2E(AioHTTPTestCase):
     async def test_agent_tool_call_flow(self):
         """Test agent with tool calls."""
         # Setup
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test", model="test-model")
-        )
+        role = Role(name="test", description="Test", model="test-model")
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
         )
@@ -194,10 +184,10 @@ class TestAgentE2E(AioHTTPTestCase):
 
         tool_manager.register_tool(func=get_weather)
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
         try:
-            session = await agent.create_session("test")
+            session = await agent.create_session()
 
             # Send question directly to session
             await session.queue_message(Message(
@@ -216,13 +206,10 @@ class TestAgentE2E(AioHTTPTestCase):
     @unittest_run_loop
     async def test_session_initializes_with_tools(self):
         """Test that session initializes chat history with tool list."""
-        role_manager = RoleManager()
-        role_manager.register_role(
-            Role(name="test", description="Test", model="test-model")
-        )
+        role = Role(name="test", description="Test", model="test-model")
 
-        chatbot_manager = ChatBotManager(timeout=None)
-        await chatbot_manager.add_backend(
+        ChatBotManager.reset()
+        await ChatBotManager.add_backend(
             "mock",
             f"http://{self.server.host}:{self.server.port}"
         )
@@ -235,10 +222,10 @@ class TestAgentE2E(AioHTTPTestCase):
 
         tool_manager.register_tool(func=get_weather)
 
-        agent = Agent(role_manager, chatbot_manager, tool_manager)
+        agent = Agent(role, tool_manager)
 
         try:
-            session = await agent.create_session("test")
+            session = await agent.create_session()
 
             # Verify chat history has messages
             history = session.chat_history.messages
