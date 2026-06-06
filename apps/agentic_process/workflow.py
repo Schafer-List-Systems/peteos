@@ -76,6 +76,7 @@ class Workflow:
         working_directory = os.path.dirname(json_path) or "."
 
         self._json_path = json_path
+        self._auto_flush: bool = True
         self._json_data = json_data
         self._tasks = tasks
         self._edges = edge_objs
@@ -93,6 +94,21 @@ class Workflow:
         path = json_path or self._json_path
         with open(path, "w") as f:
             json.dump(self._json_data, f, indent=2)
+
+    def refresh(self) -> None:
+        """Rebuild active_tasks and pending_tasks from current task states.
+
+        Calls the Task.state setter on every task to repopulate the
+        _active_tasks and _pending_tasks sets without writing the file N times.
+        Disables auto-flush, re-applies each task's state, then stores once.
+        """
+        had_flush = self._auto_flush
+        self._auto_flush = False
+        for task in self._tasks.values():
+            current = task.state
+            task.state = current
+        self._auto_flush = had_flush
+        self.store()
 
     def get_start(self) -> Task:
         """Return the start task (the one with no incoming edges)."""

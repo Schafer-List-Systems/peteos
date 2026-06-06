@@ -23,6 +23,7 @@ class Process(Workflow):
         # The directory this process instance lives in (set when the process
         # is created from a workflow in Workflow.create_process()).
         self._process_dir: str = ""
+        self.refresh()
 
     @property
     def process_state(self) -> ProcessState:

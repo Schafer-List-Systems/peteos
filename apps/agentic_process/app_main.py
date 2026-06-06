@@ -113,16 +113,20 @@ class AppMain:
         if process_id in self._supervisors:
             return self._supervisors[process_id]
 
-        base = Path(self._workflow_path).parent
-        pattern = str(base / f"*-{process_id}")
-        matches = glob_mod.glob(pattern)
-        if not matches:
-            raise RuntimeError(
-                f"Process {process_id} not found on disk"
-            )
-        process_path = Path(matches[0]) / f"{Path(matches[0]).stem}.canvas"
-        process = Process(str(process_path))
-        self._processes[process_id] = process
+        # Use in-memory process if already loaded (avoids re-parsing from disk)
+        if process_id in self._processes:
+            process = self._processes[process_id]
+        else:
+            base = Path(self._workflow_path).parent
+            pattern = str(base / f"*-{process_id}")
+            matches = glob_mod.glob(pattern)
+            if not matches:
+                raise RuntimeError(
+                    f"Process {process_id} not found on disk"
+                )
+            process_path = Path(matches[0]) / f"{Path(matches[0]).stem}.canvas"
+            process = Process(str(process_path))
+            self._processes[process_id] = process
 
         supervisor = ProcessSupervisor(
             self, process_id, supervisor_node_data=process._supervisor_node_data
@@ -131,7 +135,10 @@ class AppMain:
         return supervisor
 
     def find_process(self, process_id: str) -> Process | None:
-        """Look up a process in the registry cache.
+        """Look up a process in the registry cache, loading from disk if needed.
+
+        If the process is not in memory, falls back to loading it from disk.
+        Returns None if the process is not found anywhere.
 
         Args:
             process_id: The process ID.
@@ -139,4 +146,10 @@ class AppMain:
         Returns:
             The Process instance, or None if not found.
         """
-        return self._processes.get(process_id)
+        if process_id in self._processes:
+            return self._processes[process_id]
+        try:
+            supervisor = self._load_supervisor(process_id)
+            return self._processes[process_id]
+        except RuntimeError:
+            return None

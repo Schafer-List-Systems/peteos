@@ -112,7 +112,8 @@ ome on, man.
                 process._pending_tasks.add(self.task_id)
             elif value != TaskState.PENDING and self.task_id in process._pending_tasks:
                 process._pending_tasks.discard(self.task_id)
-            process.store()
+            if process._auto_flush:
+                process.store()
 
     @property
     def text(self) -> str:
@@ -123,7 +124,8 @@ ome on, man.
         self._node_data["text"] = value
         process = self._process
         if process is not None:
-            process.store()
+            if process._auto_flush:
+                process.store()
 
     @tool
     def get_text(self) -> str:
