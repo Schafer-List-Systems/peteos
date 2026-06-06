@@ -19,29 +19,37 @@ from . import utils as _utils
 
 
 class Task(AgenticObjectBase):
-    """You are a task agent within a user-interaction workflow.
-    Your purpose is to handle or execute a SINGLE TASK in that human-in-the-loop
-    workflow.
+    """You are a task agent within a user-interactiorkflow
+    assisting the process supervisor (user).
 
-    FOLLOW THE INSTRUCTIONS OF YOUR TASK DESCRIPTION PRECISELY! READ THE TASK DESCRIPTION
-    USING THE `get_text` TOOL! MAKE NOTES of all progress IN THE TASK DESCRIPTION VIA
-    THE TOOL `append_text` TO PERSIST FACTS AND PROVIDE PROGRESS INFORMATION!
-    Avoid appending redundant information! PROVIDE FEEDBACK USING THE `set_feedback`
-    TOOL WHEN YOU HAVE INFORMATION FOR THE USER OR THE SUPERVISOR!
+    Your purpose is to handle or accustom a client on a SINGLE
+    TASK in that process. Your job is to make sure, that all
+    conditions in your task description are met by the client. If
+    necessary information is missing to meet the task, and it is
+    not available in the client's E-Mails, request it from the
+    client by calling `set_feedback` with the request.
 
-    When you deny, then the whole process is denied. when you are
-    ready for evaluation of the outgoing edges, Call `produce_output`
-    with the decision string `ready`. The agentic harness will then
-    ask you for an evaluation of each condition of the outgoing edges
-    separately. Your evaluation steers the process, conditionally
-    activating successive tasks as nodes in the process graph.
+    - INITIALLY, READ THE TASK INSTRUCTION USING THE `get_text` TOOL!
+    - FOLLOW THE INSTRUCTIONS OF THE TASK PRECISELY!
+    - RETURN VALUES OF TOOLS MAY GIVE YOU INSTRUCTIONS TOO, WHICH YOU SHOULD CONSIDER!
+    . MAKE NOTES OF ALL PROGRESS IN THE TASK DESCRIPTION VIA THE TOOL `append_text!
+    - Avoid appending redundant information!
+    - USE THE `set_feedback` TOOL FOR PROVIDING RELEVANT INFORMATION TO THE SUPERVISOR AND REQUESTING INFORMATION FROM THE CLIENT!
 
-    You get the information required to evaluate the conditions from the
-    emails and its attachments. Ask for more information via `set_feedback` ONLY WHEN THE INFORMATION YOU NEED FOR
-    EVALUATION OF THE OUTGOING EDGES IS NOT AVAILABLE. Call `set_feedback` AT MOST ONCE
-    per incoming email to not spam the user! If your purpose cannot be
-    satisfied even after asking for more information, then you deny
-    this task and therefore the whole process you are part of.
+    - The client's E-Mails are all available via the `list_emails` tool.
+    - You can read particular E-Mails calling the `read_email` tool.
+    - E-Mails can have attachments (images, texts, PDFs) that you can list via `list_attachments` and `read_attachment`.
+ome on, man.
+    - When you got all information, such that the task is met, accept the task.
+    - When the task can NEVER be met because the client is NOT ABLE to provide the necessary information, deny the task (and therefore the process).
+      bE CAREFUL with denial, as this is terminal for the process! In doubt, request for more information and go into `pending` state!
+    - Use the `produce_output` tool to provide output requested by the supervisor.
+
+    If you are instructed to evaluate the outgoing edges, then
+    decide for each edge if its condition is met regarding your
+    task and the client's information. Your evaluation steers the
+    process, conditionally activating successive tasks as nodes
+    in the process graph.
     """
 
     def __init__(self, node_data: dict, process_id: str | None = None) -> None:
@@ -188,22 +196,26 @@ class Task(AgenticObjectBase):
 
     @tool
     def read_email(self, uid: int) -> str:
-        """Read the body of a cached email by UID.
+        """Read the sender, subject and body of an email by UID.
 
         Args:
             uid: The IMAP UID of the cached email.
 
         Returns:
-            The plain text body of the email.
+            The plain "from" address, subject and text body of the email.
         """
         try:
             info = get_cached_email(uid, self._cached_inbox)
-            return info.body_text
+            return (
+                f"sender: {info.from_addr}\n"
+                f"subject: {info.subject}\n"
+                f"text:\n{info.body_text}"
+            )
         except FileNotFoundError:
             return f"ERROR: Email with UID {uid} not found in cached inbox."
 
     @tool
-    def get_attachments(self, uid: int) -> str:
+    def list_attachments(self, uid: int) -> str:
         """List the attachment filenames for a cached email.
 
         Args:
@@ -327,7 +339,7 @@ class Task(AgenticObjectBase):
 
     @tool
     def set_feedback(self, body: str) -> str:
-        """Set feedback for the supervisor (e.g., results, status, or a request for more information).
+        """Set feedback to the supervisor (e.g., results, status, or a request for more information from the client).
 
         Each call overwrites any previously set feedback. Use this to
         inform the supervisor so it can plan its next action — reply
@@ -430,7 +442,7 @@ class Task(AgenticObjectBase):
         # Capture text before invoking; loop until agent calls append_text
         text_before = self.text
         for attempt in range(3):
-            reminder = "" if attempt == 0 else f" Reminder: your text was not updated or you provided no feedback. You have one last chance to do that before producing output!"
+            reminder = "" if attempt == 0 else f" Reminder: your text was not updated or you provided no feedback. You have one last chance to do that via `append_text` and `set_feedback` before producing output!"
             status = await self.invoke_agent(
                 prompt=prompt + reminder,
                 output_schema=TaskStatus,
@@ -456,45 +468,58 @@ class Task(AgenticObjectBase):
 
         # 4. If OK, evaluate all outgoing edge conditions in one batch
         if new_state == TaskState.OK and self._outgoing_edges:
-            edge_list = "\n".join(
-                f"- {edge.to_task_id}: {edge.condition}" for edge in self._outgoing_edges
-            )
-            max_attempts = 3
-            evaluations: list[Any] | None = None
-            retry_prompt_suffix = ""
-            for attempt in range(max_attempts):
-                prompt = (
-                    f"The task reached a 'ready' state and all its outgoing edges need to be evaluated. "
-                    f"The task has the following outgoing edges:\n{edge_list}\n"
-                    f"Evaluate each edge condition and use the `produce_output` tool to return a list of evaluations. "
-                    f"For each edge produce one evaluation with edge_id and met fields (true/false)."
-                    f"{retry_prompt_suffix}"
-                )
-                evaluations = await self.invoke_agent(
-                    prompt=prompt,
-                    output_schema=list[EdgeEvaluation],
-                    persistent_thread_id=thread_id,
-                )
-                valid, error_msg = self._validate_edge_evaluations(evaluations)
-                if valid:
-                    break
-                retry_prompt_suffix = (
-                    f"\n\nYour previous attempt was invalid:\n{error_msg}\n"
-                    f"Please correct the output and try again."
-                )
-                _logger.warning(
-                    "Task %s: invalid edge evaluations (attempt %d/%d), retrying",
-                    self.task_id, attempt + 1, max_attempts,
-                )
+            # If no outgoing edges have a label, enable all of them without
+            # invoking the agent — the agent is only needed to evaluate
+            # labelled (conditional) edges.
+            has_labelled_edges = any(e.condition for e in self._outgoing_edges)
 
-            # Apply valid evaluations to edges
-            eval_map: dict[str, bool] = {}
-            if evaluations is not None:
-                for ev in evaluations:
-                    eval_map[ev.edge_id] = ev.met
-            for edge in self._outgoing_edges:
-                is_met = eval_map.get(edge.to_task_id, False)
-                edge.state = EdgeState.ENABLED if is_met else EdgeState.DISABLED
+            if not has_labelled_edges:
+                for edge in self._outgoing_edges:
+                    edge.state = EdgeState.ENABLED
+            else:
+                edge_list = "\n".join(
+                    f"- {edge.to_task_id}: {edge.condition}" for edge in self._outgoing_edges
+                )
+                max_attempts = 3
+                evaluations: list[Any] | None = None
+                retry_prompt_suffix = ""
+                for attempt in range(max_attempts):
+                    prompt = (
+                        f"The task reached a 'ready' state and all its outgoing edges need to be evaluated. "
+                        f"The task has the following outgoing edges:\n{edge_list}\n"
+                        f"Evaluate each edge condition and use the `produce_output` tool to return a list of evaluations. "
+                        f"For each edge produce one evaluation with edge_id and met fields (true/false)."
+                        f"{retry_prompt_suffix}"
+                    )
+                    evaluations = await self.invoke_agent(
+                        prompt=prompt,
+                        output_schema=list[EdgeEvaluation],
+                        persistent_thread_id=thread_id,
+                    )
+                    valid, error_msg = self._validate_edge_evaluations(evaluations)
+                    if valid:
+                        break
+                    retry_prompt_suffix = (
+                        f"\n\nYour previous attempt was invalid:\n{error_msg}\n"
+                        f"Please correct the output and try again."
+                    )
+                    _logger.warning(
+                        "Task %s: invalid edge evaluations (attempt %d/%d), retrying",
+                        self.task_id, attempt + 1, max_attempts,
+                    )
+
+                # Apply valid evaluations to edges — non-labeled edges are
+                # always ENABLED regardless of agent output.
+                eval_map: dict[str, bool] = {}
+                if evaluations is not None:
+                    for ev in evaluations:
+                        eval_map[ev.edge_id] = ev.met
+                for edge in self._outgoing_edges:
+                    if edge.condition:
+                        is_met = eval_map.get(edge.to_task_id, True)
+                    else:
+                        is_met = True
+                    edge.state = EdgeState.ENABLED if is_met else EdgeState.DISABLED
 
             # 5. Activate ready successor tasks
             self._process._activate_ready_tasks(self)
