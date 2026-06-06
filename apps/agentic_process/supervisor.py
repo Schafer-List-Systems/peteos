@@ -28,13 +28,12 @@ class ProcessSupervisor(AgenticObjectBase):
     """You are a process supervisor for the agentic process engine.
 
     Your job is to receive an email and decide which task(s) inside the
-    process should handle it. Your job is also to communicate with the user
+    process should handle it. Your job is also to communicate with the client
     DELEGATE RELEVANT INFORMATION FROM THE TASK AGENTS TO THE USER.
     USE THE FEEDBACK AND TASK DESCRIPTIONS OF YOUR TASK AGENTS TO GATHER
     THE INFORMATION!
 
-    Use your `get_email_subject` and `get_email_body` tools to read the
-    user email content.
+    Use your `read_email` tool to read the client email content.
 
     Get the list of pending task agents and read their purpose to get the
     relevant task IDs for this email. Then trigger the relevant
@@ -138,7 +137,7 @@ class ProcessSupervisor(AgenticObjectBase):
            none remain.
         2. If PENDING tasks remain, invoke the agent to reason about them.
         3. If neither ACTIVE nor PENDING tasks remain, the process is
-           terminated — invoke the agent to inform the user of the outcome.
+           terminated — invoke the agent to inform the client of the outcome.
 
         Args:
             uid: The IMAP UID of the email to process.
@@ -191,12 +190,12 @@ class ProcessSupervisor(AgenticObjectBase):
                     continue
 
                 # No active tasks and no pending tasks — process is terminated.
-                # Inform the user of the outcome.
+                # Inform the client of the outcome.
                 feedback = self._gather_feedback()
                 if process.is_denied():
                     outcome_prompt = (
                         f"The process {self._process_id} is finished and has been denied. "
-                        f"Inform the user accordingly! "
+                        f"Inform the client accordingly! "
                         f"Escalate to an admin for review! "
                         f"Call `append_note` to save your notes for future dispatch cycles. "
                         f"When you are done, call the `produce_output` tool with an empty string."
@@ -207,7 +206,7 @@ class ProcessSupervisor(AgenticObjectBase):
                             f"The process {self._process_id} has been accepted, "
                             f"SOME TASKS HAVE FEEDBACK (See below). USE THAT FEEDBACK!"
                             f"If necessary, escalate to an admin for review! "
-                            f"Reply to the user with the necessary or required information! "
+                            f"Reply to the client with the necessary or required information! "
                             f"Call `append_note` to save your notes for future dispatch cycles. "
                             f"When you are done, call the `produce_output` tool with an empty string."
                             f"TASK'S FEEDBACK:\n{feedback}\n"
@@ -215,9 +214,9 @@ class ProcessSupervisor(AgenticObjectBase):
                     else:
                         outcome_prompt = (
                             f"The process {self._process_id} is finished and has been accepted. "
-                            f"Inform the user accordingly! "
+                            f"Inform the client accordingly! "
                             f"Escalate to an admin for review! "
-                            f"Reply to the user with the necessary or required information! "
+                            f"Reply to the client with the necessary or required information! "
                             f"Call `append_note` to save your notes for future dispatch cycles. "
                             f"When you are done, call the `produce_output` tool with an empty string."
                         )
@@ -225,7 +224,7 @@ class ProcessSupervisor(AgenticObjectBase):
                     outcome_prompt = (
                         f"The process is paused due to task feedback. The following tasks have feedback:\n"
                         f"{feedback}\n"
-                        f"Review the task feedback, formulate an appropriate reply to the user's email "
+                        f"Review the task feedback, formulate an appropriate reply to the client's email "
                         f"using the `set_reply` tool, and escalate if needed. "
                         f"Call `append_note` to save your notes for future dispatch cycles. "
                         f"When you are done, call the `produce_output` tool with an empty string."
@@ -274,16 +273,15 @@ class ProcessSupervisor(AgenticObjectBase):
     # --- Tools available to the agent running the supervisor ---
 
     @tool
-    def get_email_subject(self) -> str:
-        """Fetch the subject line of the current email."""
+    def read_email(self) -> str:
+        """Fetch the "from"-address, subject and body text of the current email."""
         uid = self._get_uid()
-        return fetch_email(uid).subject
-
-    @tool
-    def get_email_body(self) -> str:
-        """Fetch the body text of the current email."""
-        uid = self._get_uid()
-        return fetch_email(uid).body_text
+        info = fetch_email(uid)
+        return (
+            f"sender: {info.from_addr}\n"
+            f"subject: {info.subject}\n"
+            f"text:\n{info.body_text}"
+        )
 
     @tool
     async def trigger_task(self, task_id: str) -> str:
