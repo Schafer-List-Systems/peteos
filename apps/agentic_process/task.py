@@ -25,8 +25,8 @@ class Task(AgenticObjectBase):
     Your purpose is to handle or accustom a client on a SINGLE
     TASK in that process. Your job is to make sure, that all
     conditions in your task description are met by the client. If
-    necessary information is missing to meet the task, and it is
-    not available in the client's E-Mails, request it from the
+    necessary information is missing to meet the task's requirements,
+    and it is not available in the E-Mail inbox, request it from the
     client by calling `set_feedback` with the request.
 
     - INITIALLY, READ THE TASK INSTRUCTION USING THE `get_text` TOOL!
@@ -36,14 +36,17 @@ class Task(AgenticObjectBase):
     - Avoid appending redundant information!
     - USE THE `set_feedback` TOOL FOR PROVIDING RELEVANT INFORMATION TO THE SUPERVISOR AND REQUESTING INFORMATION FROM THE CLIENT!
 
-    - The client's E-Mails are all available via the `list_emails` tool.
+    - The client's E-Mails are available in the inbox.
+    - The E-Mail inbox can be listed using the `list_inbox` tool.
+    - The first E-Mail in that inbox is sent by the client.
+    - NOT ALL E-MAILS IN THE INBOX ARE NECESSARILY FROM THE CLIENT! E-MAILS FROM OTHER SENDERS THAN THE CLIENT ARE ONLY RELEVANT IF YOUR TASK DESCRIPTION EXPLICITELY STATES THAT!
     - You can read particular E-Mails calling the `read_email` tool.
     - E-Mails can have attachments (images, texts, PDFs) that you can list via `list_attachments` and `read_attachment`.
 ome on, man.
     - When you got all information, such that the task is met, accept the task.
     - When the task can NEVER be met because the client is NOT ABLE to provide the necessary information, deny the task (and therefore the process).
       bE CAREFUL with denial, as this is terminal for the process! In doubt, request for more information and go into `pending` state!
-    - Use the `produce_output` tool to provide output requested by the supervisor.
+    - USE tHE `produce_output` TOOL TO PROVIDE OUTPUT REQUESTED BY THE SUPERVISOR.
 
     If you are instructed to evaluate the outgoing edges, then
     decide for each edge if its condition is met regarding your
@@ -173,7 +176,7 @@ ome on, man.
         return Path()
 
     @tool
-    def list_emails(self) -> str:
+    def list_inbox(self) -> str:
         """List all cached emails in this task's cached inbox.
 
         Returns:
@@ -216,10 +219,10 @@ ome on, man.
 
     @tool
     def list_attachments(self, uid: int) -> str:
-        """List the attachment filenames for a cached email.
+        """List the attachment filenames for a one particular E-Mail.
 
         Args:
-            uid: The IMAP UID of the cached email.
+            uid: The IMAP UID of the E-Mail.
 
         Returns:
             A newline-separated list of attachment filenames.
@@ -227,8 +230,10 @@ ome on, man.
         try:
             info = get_cached_email(uid, self._cached_inbox)
             if not info.attachments:
-                return "No attachments."
-            return "\n".join(a.name for a in info.attachments)
+                return "E-Mail {uid} has no attachments."
+            return f"E-Mail {uid} has the following attachmentes:\n" + (
+                "\n".join(a.name for a in info.attachments)
+            )
         except FileNotFoundError:
             return f"ERROR: Email with UID {uid} not found in cached inbox."
 
@@ -423,26 +428,28 @@ ome on, man.
 
         if email_uid is not None:
             prompt = (
-                f"Process the incoming email (IMAP UID {email_uid}). "
+                f"Process the incoming E-Mail with UID {email_uid} (and older E-Mails if necessary) according your task description. "
+                f"IF THAT E-MAIL IS IRRELEVANT FOR YOUR TASK, CHECK IF OLDER E-MAILS ARE RELEVANT! "
                 f"Use your tools to read and act on the email content."
-                f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL:\n"
+                f"If NEITHER that E-Mail NOR any other E-Mail is relevant for your task, then call `set_feedback` and `append_text` mentioning what you need!\n"
+                f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL and one of the following arguments:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
-                f"- pending: You used `set_feedback()` and you need more information from the user via the supervisor."
+                f"- pending: You used `set_feedback()` and you need more information from the user via the supervisor OR the E-Mail is irrelevant for your task."
             )
         else:
             prompt = (
                 f"Proceed executing your task! "
-                f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL:\n"
+                f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL and one of the following arguments:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
-                f"- pending: you need more information from the user via the supervisor (requested via `set_feedback()`)."
+                f"- pending: You used `set_feedback()` and you need more information from the user via the supervisor OR the E-Mail is irrelevant for your task."
             )
 
         # Capture text before invoking; loop until agent calls append_text
         text_before = self.text
         for attempt in range(3):
-            reminder = "" if attempt == 0 else f" Reminder: your text was not updated or you provided no feedback. You have one last chance to do that via `append_text` and `set_feedback` before producing output!"
+            reminder = "" if attempt == 0 else f" Reminder: your text was not updated or you provided no feedback. You have one last chance to do that via `append_text` and `set_feedback`. THEN PRODUCE OUTPUT VIA THE `produce_output` TOOL!"
             status = await self.invoke_agent(
                 prompt=prompt + reminder,
                 output_schema=TaskStatus,

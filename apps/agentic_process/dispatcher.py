@@ -36,8 +36,6 @@ class EmailDispatcher(AgenticObjectBase):
        The tool will create a new process and return a status. Follow
        the tool's instructions in the return value.
     4. If you encounter an error you cannot resolve, call `escalate`.
-
-    Use `escalate` for error conditions you cannot resolve.
     """
 
     def __init__(self, app_main):

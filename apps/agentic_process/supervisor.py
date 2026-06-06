@@ -8,6 +8,7 @@ during a single dispatch cycle.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid as uuid_mod
 
 from apps.agentic_process.process import Process
@@ -19,6 +20,8 @@ from apps.agentic_process.email_client import (
     fetch_email,
     send_email,
 )
+
+logger = logging.getLogger(__name__)
 from apps.agentic_process import config
 from apps.agentic_process import utils as _utils
 from pathlib import Path
@@ -157,7 +160,7 @@ class ProcessSupervisor(AgenticObjectBase):
         )
         process.process_state = ProcessState.ACTIVE
         cached_inbox = Path(process.process_dir) / "cached_inbox"
-        fetch_email(uid, cached_inbox=cached_inbox)
+        info = fetch_email(uid, cached_inbox=cached_inbox)
 
         try:
             for attempt in range(max_retries):
@@ -412,7 +415,9 @@ class ProcessSupervisor(AgenticObjectBase):
         uid = self._get_uid()
         info = fetch_email(uid)
         subject = f"[{self._process_id}] Re: {info.subject}"
+        logger.debug("Sending reply to=%s subject=%s", info.from_addr, subject)
         send_email(to=info.from_addr, subject=subject, body=self._reply_body)
+        logger.debug("Reply sent successfully to=%s subject=%s", info.from_addr, subject)
         self._reply_body = None
 
     @tool
@@ -448,11 +453,13 @@ class ProcessSupervisor(AgenticObjectBase):
             return
         subject, body = self._escalation
         full_subject = f"ProcessSupervisor: {subject} [{self._process_id}]"
+        logger.debug("Sending escalation to=%s subject=%s", config.ESCALATION_EMAIL, full_subject)
         send_email(
             to=config.ESCALATION_EMAIL,
             subject=full_subject,
             body=body,
         )
+        logger.debug("Escalation sent successfully to=%s subject=%s", config.ESCALATION_EMAIL, full_subject)
         self._escalation = None
 
     @tool
