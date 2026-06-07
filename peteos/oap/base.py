@@ -61,7 +61,7 @@ class AgenticObjectBase:
                 f"You have tools to read and modify the state of this object. "
                 f"Use those tools and the information you already have to fulfill the user's request. "
                 f"NEVER ask the user for more information or clarification. "
-                f"If you cannot produce the requested output, use produce_output to return an error message explaining why. "
+                f"If you cannot produce the requested output, use the `produce_error` to return an error message explaining why. "
             )
         return Role(
             name=f"oap_{class_name}",
@@ -408,7 +408,7 @@ class AgenticObjectBase:
                         )
                     reminder = (
                         f"It looks like you finished a step without calling `produce_output` or `produce_error`. "
-                        f"If you have your final answer, call `produce_output` with your result!{schema_desc} "
+                        f"If you have your final answer, call `produce_output` with your result in the following schema: {schema_desc} "
                     )
                     await session.queue_message(Message(
                         role="user",
@@ -431,8 +431,8 @@ class AgenticObjectBase:
                 content=content,
             ))
 
-            reminder_msg = f"Please produce your final output using the `produce_output` or `produce_error` tool.\n" \
-                           f"Mind the output schema!"
+            reminder_msg = f"PRODUCE YOUR FINAL OUTPUT USING THE `produce_output` OR `produce_error` TOOL!\n" \
+                           f"MIND THE OUTPUT SCHEMA!"
             start_time = time.time()
 
             while True:
