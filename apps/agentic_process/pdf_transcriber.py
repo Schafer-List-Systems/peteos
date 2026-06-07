@@ -142,7 +142,7 @@ class PdfTranscriber(AgenticObjectBase):
             image=png_path,
             output_schema=TranscriptionResult,
             persistent_thread_id=None,
-            timeout=120,
+            timeout=None,
         )
         if isinstance(output, Error):
             raise RuntimeError(output.message)
@@ -159,13 +159,14 @@ class PdfTranscriber(AgenticObjectBase):
             "Cross-reference both sources and produce a single unified "
             "transcription. Preserve all text that appears in either source. "
             "If the two disagree, prefer the more complete and accurate version. "
-            "Return only the unified text, nothing else."
+            "Return only the unified text, nothing else. "
+            "Use the `produce_output` tool to return your result."
         )
         result = await self.invoke_agent(
             prompt=prompt,
             output_schema=UnifiedText,
             persistent_thread_id=None,
-            timeout=120,
+            timeout=None,
         )
         if isinstance(result, Error):
             raise RuntimeError(result.message)

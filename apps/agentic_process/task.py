@@ -45,8 +45,8 @@ class Task(AgenticObjectBase):
 ome on, man.
     - When you got all information, such that the task is met, accept the task.
     - When the task can NEVER be met because the client is NOT ABLE to provide the necessary information, deny the task (and therefore the process).
-      bE CAREFUL with denial, as this is terminal for the process! In doubt, request for more information and go into `pending` state!
-    - USE tHE `produce_output` TOOL TO PROVIDE OUTPUT REQUESTED BY THE SUPERVISOR.
+      BE CAREFUL with denial, as this is terminal for the process! In doubt, request for more information and go into `pending` state!
+    - ALWAYS CALL THE `produce_output` TOOL TO PRODUCE OUTPUT!
 
     If you are instructed to evaluate the outgoing edges, then
     decide for each edge if its condition is met regarding your
@@ -469,7 +469,7 @@ ome on, man.
         # Capture text before invoking; loop until agent calls append_text
         text_before = self.text
         for attempt in range(3):
-            reminder = "" if attempt == 0 else f" Reminder: your text was not updated or you provided no feedback. You have one last chance to do that via `append_text` and `set_feedback`. THEN PRODUCE OUTPUT VIA THE `produce_output` TOOL!"
+            reminder = "" if attempt == 0 else f" Reminder: your text was not updated or you provided no feedback. You have one last chance to do that via `append_text` and `set_feedback`. PRODUCE OUTPUT VIA A `produce_output` TOOL CALL!"
             status = await self.invoke_agent(
                 prompt=prompt + reminder,
                 output_schema=TaskStatus,
