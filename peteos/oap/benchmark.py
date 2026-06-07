@@ -181,8 +181,7 @@ class BenchmarkRunner:
 
         input_str = ", ".join(f"{k}={self._format_value(v)}" for k, v in input_dims.items())
         output_str = ", ".join(f"{k}={self._format_value(v)}" for k, v in output_dims.items())
-        print(f"    {row_num:>4}/{total}  IN:  {input_str}", flush=True, file=sys.stderr)
-        print(f"             OUT: {output_str} {status}", flush=True, file=sys.stderr)
+        print(f"    {row_num:>4}/{total}  {input_str} → {output_str} {status}", flush=True, file=sys.stderr)
 
     def _print_final_summary(self, rows: list[BenchmarkRow], total: int) -> None:
         """Print final aggregate summary with per-dimension breakdowns."""

@@ -27,7 +27,7 @@ async def test_contains():
         (False, "Photosynthesis converts sunlight into energy", "nuclear energy"),
     ]
 
-    async def test_fn(row: BenchmarkRow) -> None:
+    async def test_fn(row: BenchmarkRow) -> bool:
         expected, text, substring = row.input_dimensions["test_case"]
         result = await comp.contains(text, substring)
         return result == expected
