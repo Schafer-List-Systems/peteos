@@ -305,6 +305,9 @@ ome on, man.
     ) -> str:
         """Transcribe a PDF using tesseract + LLM vision via PdfTranscriber.
 
+        Caches the transcription at ``{pdf_path}.md`` so repeated reads
+        don't re-transcribe the same file.
+
         Args:
             pdf_path: Path to the PDF file.
             session: Unused (kept for API compatibility).
@@ -312,6 +315,14 @@ ome on, man.
         Returns:
             A formatted summary of page transcriptions and image descriptions.
         """
+        cache_path = Path(str(pdf_path) + ".md")
+
+        try:
+            cached = cache_path.read_text(encoding="utf-8")
+            return cached
+        except FileNotFoundError:
+            pass
+
         from apps.agentic_process.pdf_transcriber import PdfTranscriber
 
         try:
@@ -331,7 +342,14 @@ ome on, man.
                 lines.append(text)
             if img_desc:
                 lines.append(f"[Visual elements: {img_desc}]")
-        return "\n".join(lines)
+        output = "\n".join(lines)
+
+        try:
+            cache_path.write_text(output, encoding="utf-8")
+        except OSError:
+            pass  # Cache write failure must not break the caller
+
+        return output
 
     @tool
     def get_outgoing_conditions(self) -> str:
