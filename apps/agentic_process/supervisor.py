@@ -44,7 +44,7 @@ class ProcessSupervisor(AgenticObjectBase):
     escalate or reply to the email depending on the email you got and
     the tasks that are pending.
 
-    Use `set_reply` to compose a reply to the original sender and
+    Use `set_reply` to compose a reply to the client (not necessarily the current E-Mail) and
     `set_escalation` for error conditions you cannot resolve. DO NOT
     MAKE UP INFORMATION, BUT USE THE EMAILS, THE TASK AGENT'S FEEDBACK
     AND THE TASK AGENT'S TEXTS TO COMPOSE THE ANSWER! DO NOT LEAVE
@@ -161,6 +161,12 @@ class ProcessSupervisor(AgenticObjectBase):
         process.process_state = ProcessState.ACTIVE
         cached_inbox = Path(process.process_dir) / "cached_inbox"
         info = fetch_email(uid, cached_inbox=cached_inbox)
+
+        # Capture originating sender on first dispatch only
+        if process._supervisor_node_data is not None:
+            if not process._supervisor_node_data.get("_origin_reply_email"):
+                process._supervisor_node_data["_origin_reply_email"] = info.from_addr
+                process.store()
 
         try:
             for attempt in range(max_retries):
@@ -385,12 +391,14 @@ class ProcessSupervisor(AgenticObjectBase):
 
     @tool
     def set_reply(self, body: str) -> str:
-        """Set the reply email body to send to the original sender.
+        """Set the reply email body to send to the client.
 
-        Each call overwrites any previously set reply. The subject and
-        recipient are derived automatically from the incoming email.
-        The reply is only sent at the end of the dispatch cycle if
-        non-empty. Use ``get_reply`` to recheck what is currently set.
+        Each call overwrites any previously set reply. The subject is
+        derived automatically from the incoming email. The recipient is
+        the client who initiated the process (not necessarily the sender
+        of the E-Mail). The reply is only sent at the end of the
+        dispatch cycle if non-empty. Use ``get_reply`` to recheck what
+        is currently set.
 
         Args:
             body: The body text of the reply.
@@ -412,12 +420,20 @@ class ProcessSupervisor(AgenticObjectBase):
         """Internal: send the formulated reply and reset."""
         if self._reply_body is None:
             return
-        uid = self._get_uid()
-        info = fetch_email(uid)
+        # Use the originating sender stored on first dispatch (persists
+        # across restarts via the process canvas).
+        reply_to = None
+        if self._supervisor_node_data is not None:
+            reply_to = self._supervisor_node_data.get("_origin_reply_email")
+        if reply_to is None:
+            uid = self._get_uid()
+            info = fetch_email(uid)
+            reply_to = info.from_addr
+        info = fetch_email(self._get_uid())
         subject = f"[{self._process_id}] Re: {info.subject}"
-        logger.debug("Sending reply to=%s subject=%s", info.from_addr, subject)
-        send_email(to=info.from_addr, subject=subject, body=self._reply_body)
-        logger.debug("Reply sent successfully to=%s subject=%s", info.from_addr, subject)
+        logger.debug("Sending reply to=%s subject=%s", reply_to, subject)
+        send_email(to=reply_to, subject=subject, body=self._reply_body)
+        logger.debug("Reply sent successfully to=%s subject=%s", reply_to, subject)
         self._reply_body = None
 
     @tool
