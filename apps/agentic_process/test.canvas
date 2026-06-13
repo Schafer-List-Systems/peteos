@@ -1,0 +1,88 @@
+{
+	"nodes":[
+		{
+			"id":"ffbc51f765e51819",
+			"type":"text",
+			"text":"# Kundenanfrage beantworten\n- Wenn die Frage nicht eindeutig ist oder Informationen fehlen, dann frage nach Details!\n- Andernfalls, beantworte die Frage!\n# Anmerkungen",
+			"styleAttributes":{
+				"shape":null
+			},
+			"x":-320,
+			"y":-220,
+			"width":250,
+			"height":670
+		},
+		{
+			"id":"36bf861195b5cec2",
+			"type":"text",
+			"text":"# Auftrag auf Vollständigkeit prüfen\n1. Für wen ist der Auftrag?\n2. Wie hoch ist die Quantität?\n3. Bis wann soll geliefert werden?\n# Anmerkungen",
+			"styleAttributes":{
+				"shape":null
+			},
+			"x":-320,
+			"y":660,
+			"width":250,
+			"height":720
+		},
+		{
+			"id":"0af7f98f6afddfff",
+			"type":"text",
+			"text":"# Produkt vorhanden\nZur Zeit sind folgende Produkte im Angebot:\n- Äpfel\n- Birnen\nFalls es nicht um eines dieser Produkte geht, teile dem Nutzer mit, dass seine Anfrage nicht bearbeitet werden kann und lehne die Anfrage ab.\n# Anmerkungen",
+			"styleAttributes":{
+				"shape":null
+			},
+			"x":340,
+			"y":660,
+			"width":250,
+			"height":720
+		},
+		{
+			"id":"1a06161cb66d7a2b",
+			"type":"text",
+			"text":"# Dienstleistung verhandeln\nLeite die Anfrage an j.p.schaefer@schaeferlist.de weiter.\n# Anmerkungen",
+			"styleAttributes":{
+				"shape":null
+			},
+			"x":20,
+			"y":660,
+			"width":250,
+			"height":720
+		},
+		{"id":"2258cdab9dfbed6b","type":"text","text":"# Ende der Prozesslinie\nDu brauchst nichts tun und kannst den Prozess ohne Weiteres erfolgreich beenden.\n# Anmerkungen","x":340,"y":115,"width":250,"height":335},
+		{"id":"9b79176518253c27","type":"text","text":"# Ende der Prozesslinie\nLEHNE DEN PROZESS AB!!!\n# Anmerkungen","x":340,"y":-220,"width":250,"height":300},
+		{
+			"id":"06a4e6e90f7fca56",
+			"type":"text",
+			"text":"# E-Mail Eingang\n- E-Mail zusammenfassen.\n- Kategoriesiere die E-Mail in GENAU EINE der ausgehenden Kategorien!\n# Anmerkungen",
+			"styleAttributes":{
+				"shape":null
+			},
+			"x":-680,
+			"y":-220,
+			"width":250,
+			"height":1600
+		},
+		{"id":"83e1f61f52428324","x":-960,"y":-220,"width":250,"height":1600,"type":"text","text":"# Prozessbeschreibung\nDies ist ein Test-Prozess, um Anfragen oder Aufträge von Nutzern zu verarbeiten.\n# Anmerkungen\n"}
+	],
+	"edges":[
+		{"id":"e01","fromNode":"ffbc51f765e51819","fromSide":"right","toNode":"2258cdab9dfbed6b","toSide":"left","label":"Anfrage vollständig und bearbeitbar\n"},
+		{
+			"id":"1f112e5e867e256f",
+			"styleAttributes":{},
+			"toFloating":false,
+			"fromNode":"06a4e6e90f7fca56",
+			"fromSide":"right",
+			"toNode":"ffbc51f765e51819",
+			"toSide":"left",
+			"label":"Anfrage"
+		},
+		{"id":"30dab73574359263","fromNode":"06a4e6e90f7fca56","fromSide":"right","toNode":"36bf861195b5cec2","toSide":"left","label":"Auftrag"},
+		{"id":"167e0a4139fe8d0e","fromNode":"36bf861195b5cec2","fromSide":"top","toNode":"1a06161cb66d7a2b","toSide":"top","label":"Dienstleistung"},
+		{"id":"e3faab2b6d1a67a7","fromNode":"36bf861195b5cec2","fromSide":"bottom","toNode":"0af7f98f6afddfff","toSide":"bottom","label":"Produktanfrage"},
+		{"id":"88ce9bff8058de15","fromNode":"ffbc51f765e51819","fromSide":"right","toNode":"9b79176518253c27","toSide":"left","label":"Anfrage nicht bearbeitbar"}
+	],
+	"metadata":{
+		"version":"1.0-1.0",
+		"frontmatter":{}
+	}
+}
