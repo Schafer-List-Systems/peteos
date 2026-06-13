@@ -30,7 +30,7 @@ class PdfTranscriber(AgenticObjectBase):
     and only summarize the visual representation under "description".
     """
 
-    async def transcribe(self, pdf_path: str) -> list[tuple[str, str]]:
+    async def transcribe(self, pdf_path: str, cross_reference = False) -> list[tuple[str, str]]:
         """Transcribe a multi-page PDF.
 
         Splits the PDF into single-page files, then for each page:
@@ -42,6 +42,7 @@ class PdfTranscriber(AgenticObjectBase):
 
         Args:
             pdf_path: Path to the PDF file.
+            cross_reference: cross reference tesseract and LLM output per Page, when true. Otherwise, use tesseract only
 
         Returns:
             A list of (page_text, image_description) pairs, one per page.
@@ -57,15 +58,20 @@ class PdfTranscriber(AgenticObjectBase):
                 page_name = page_pdf.stem  # e.g. page-1
                 png_path = tmpdir_path / f"{page_name}.png"
                 self._render_page(page_pdf, png_path)
-                agent_result = await self._vision_agent_transcribe(str(png_path))
                 tesseract_text = self._tesseract_transcribe(str(png_path))
-                unified_text = await self._cross_reference(
-                    tesseract_text,
-                    agent_result.text,
-                )
+                if cross_reference:
+                    agent_result = await self._vision_agent_transcribe(str(png_path))
+                    image_description = agent_result.image_description
+                    unified_text = await self._cross_reference(
+                        tesseract_text,
+                        agent_result.text,
+                    )
+                else:
+                    unified_text = tesseract_text
+                    image_description = ""
                 page_pdf.unlink(missing_ok=True)
                 png_path.unlink(missing_ok=True)
-                results.append((unified_text, agent_result.image_description))
+                results.append((unified_text, image_description))
             return results
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
