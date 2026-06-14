@@ -13,7 +13,7 @@ from peteos.chatbot import ContentPart, Message
 from peteos.executionenvironment import ExecStatus
 from peteos.logger import get_logger
 from peteos.oap.error import Error
-from peteos.oap.sandbox import create_sandbox_globals
+from peteos.oap.sandbox import build_sandbox_description, create_sandbox_globals
 from peteos.role import Role
 from peteos.toolmanager import Tool, ToolManager
 
@@ -172,19 +172,7 @@ class AgenticObjectBase:
         config = _collect_oap_config(self.__class__)
         if not config.get("allow_code_execution", False):
             return
-        imports = config.get("imports", [])
-        if imports:
-            mods_list = ", ".join(
-                f"{m.__name__}" if hasattr(m, "__name__") else str(m) for m in imports
-            )
-            modules_info = f" Available modules: {mods_list}."
-        else:
-            modules_info = ""
-        description = (
-            f"Execute sandboxed Python code. Access the agentic object via `this`."
-            f" No __builtins__, no __import__, no network, no filesystem."
-            f"{modules_info}"
-        )
+        description = build_sandbox_description(config.get("imports"))
         self._oap_tool_manager.register_tool(
             Tool(
                 name="python_exec",
@@ -209,9 +197,7 @@ class AgenticObjectBase:
     def _python_exec(self, code: str) -> str:
         """Protected tool: executes sandboxed Python code."""
         config = _collect_oap_config(self.__class__)
-        imports = config.get("imports", [])
-        import_aliases = config.get("import_aliases", {})
-        sandbox_globals = create_sandbox_globals(self, imports, import_aliases)
+        sandbox_globals = create_sandbox_globals(self, config)
 
         try:
             exec(code, sandbox_globals)

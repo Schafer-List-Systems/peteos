@@ -46,14 +46,43 @@ _SAFE_BUILTINS: dict[str, Any] = {
 }
 
 
+def build_sandbox_description(imports: list[object] | None = None) -> str:
+    """Build the description string for the python_exec tool.
+
+    Args:
+        imports: List of modules available in the sandbox.
+
+    Returns:
+        Description string listing available modules if any.
+    """
+    if imports:
+        mods_list = ", ".join(
+            m.__name__ if hasattr(m, "__name__") else str(m) for m in imports
+        )
+        return (
+            f"Execute sandboxed Python code. Access the agentic object via `this`."
+            f" No __builtins__, no __import__, no network, no filesystem."
+            f" Available modules: {mods_list}."
+        )
+    return ""
+
+
 def create_sandbox_globals(
     self_obj: AgenticObjectBase,
-    imports: list[object] | None = None,
-    import_aliases: dict[str, str] | None = None,
+    config: dict[str, Any],
 ) -> dict[str, Any]:
-    """Create a restricted globals dict for exec() in the sandbox."""
-    # Per-call registry so each sandbox has its own isolated import whitelist.
+    """Create a restricted globals dict for exec() in the sandbox.
+
+    Args:
+        self_obj: The AgenticObjectBase instance to expose as `this`.
+        config: MRO-merged OAP config dict with 'imports' and 'import_aliases' keys.
+
+    Returns:
+        Globals dict ready for exec().
+    """
     registry: dict[str, Any] = {}
+    imports = config.get("imports", [])
+    import_aliases = config.get("import_aliases", {})
     globals_dict: dict[str, Any] = {
         "__builtins__": {**_SAFE_BUILTINS, "__import__": lambda name, *_a, **_kw: _restricted_import(name, registry)},
         "this": self_obj,
