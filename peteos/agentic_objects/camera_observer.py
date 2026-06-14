@@ -29,7 +29,7 @@ class CameraObserver(AgenticObjectBase):
         self._driver: CameraDriver = driver or CV2CameraDriver()
         self._scaling: int | None = scaling
         self._active_camera_id: int | None = None
-        self._cached_frame: bytes | None = None
+        self._cached_camera_frame: bytes | None = None
         self._cached_shape: tuple[int, int] | None = None
 
     def _encode_frame(self, frame: cv2.Mat) -> tuple[bool, bytes, tuple[int, int]]:
@@ -53,7 +53,7 @@ class CameraObserver(AgenticObjectBase):
     def _clear_state(self) -> None:
         """Clear active camera state and cache."""
         self._active_camera_id = None
-        self._cached_frame = None
+        self._cached_camera_frame = None
         self._cached_shape = None
 
     @tool(description="List all available cameras.")
@@ -110,20 +110,20 @@ class CameraObserver(AgenticObjectBase):
         if not ok:
             return "ERROR: Failed to encode image."
 
-        self._cached_frame = encoded
+        self._cached_camera_frame = encoded
         self._cached_shape = (w, h)
         return f"OK: Image captured ({w}x{h}), cached in memory."
 
     @tool(description="Read the cached image from the last grab_image call and send it to the session.")
     async def read_cached_image(self, session: "Session | None" = None) -> str:
-        if self._cached_frame is None:
+        if self._cached_camera_frame is None:
             return "ERROR: No image has been captured yet. Call grab_image first."
 
         if session is None:
             return "ERROR: Session not available."
 
         await self._send_media(
-            data=self._cached_frame,
+            data=self._cached_camera_frame,
             mime_type="image/png",
             session=session,
         )
