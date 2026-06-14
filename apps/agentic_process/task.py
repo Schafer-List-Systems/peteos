@@ -323,7 +323,7 @@ ome on, man.
         except FileNotFoundError:
             pass
 
-        from apps.agentic_process.pdf_transcriber import PdfTranscriber
+        from peteos.agentic_objects import PdfTranscriber
 
         try:
             results = await PdfTranscriber().transcribe(str(pdf_path))

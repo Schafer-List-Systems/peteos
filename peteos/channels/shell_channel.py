@@ -282,9 +282,6 @@ class InteractiveShellChannel(Channel):
             self._running = False
             return (False, "Goodbye!")
 
-        elif command == "/select":
-            return (True, "Usage: /switch <uuid>. Note: /select is deprecated, use /switch.")
-
         else:
             return (True, f"Unknown command: {command}. Use /list for available commands.")
 
@@ -296,7 +293,7 @@ class InteractiveShellChannel(Channel):
 
     async def read_input_loop(self) -> None:
         """Read user input and send events to the channel's queue."""
-        await self.send("Connected. Commands: /new, /list, /switch, /quit")
+        await self.send("Connected. Commands: /new, /list, /switch, /approve, /deny, /pending, /image (or /file), /quit")
 
         while self.is_running():
             # Print prompt before reading input

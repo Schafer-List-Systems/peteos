@@ -125,7 +125,7 @@ def setup_tool_manager():
         return f"stdout: {stdout!r}\nreturn_value: {return_value!r}"
 
     tool_manager.register_tool(func=read)
-    tool_manager.register_tool(func=eval_python)
+    #tool_manager.register_tool(func=eval_python)
 
     return tool_manager
 
@@ -157,7 +157,10 @@ async def main():
     print("  /new      - Create a new session")
     print("  /list     - List all sessions")
     print("  /switch <uuid> - Select a session as active")
-    print("  /messages - Show recent messages")
+    print("  /approve  - Approve the first pending tool call")
+    print("  /deny     - Deny the first pending tool call")
+    print("  /pending  - List pending tool calls")
+    print("  /image <filepath> [text] - Attach an image or file")
     print("  /quit     - Exit the shell")
     print()
     print("Type any text (without /) to send a message to the active session.")

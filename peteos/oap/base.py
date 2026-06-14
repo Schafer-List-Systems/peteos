@@ -22,6 +22,39 @@ from peteos.oap.decorators import tool
 _logger = get_logger(__name__)
 
 
+def _build_system_prompt(cls: type) -> str:
+    """Build the system prompt for a concrete agentic object class.
+
+    Collects docstrings from classes in the MRO that directly inherit
+    from AgenticObjectBase (concrete agentic objects), ordered from
+    most-derived to base. Prepends standard behaviour directives.
+    """
+    class_name = cls.__name__
+
+    # Collect only concrete agentic objects — classes that directly
+    # inherit from AgenticObjectBase — in MRO order (derived first).
+    doc_parts: list[str] = []
+    for parent in cls.__mro__:
+        if parent in (AgenticObjectBase, object):
+            continue
+        if AgenticObjectBase not in parent.__bases__:
+            continue
+        parent_doc = (parent.__doc__ or "").strip()
+        if parent_doc:
+            doc_parts.append(parent_doc)
+
+    if doc_parts:
+        # Return the combined class descriptions from the inheritance chain.
+        return "\n\n".join(doc_parts)
+    return (
+        f"You are an agent working on a {class_name} object. "
+        f"You have tools to read and modify the state of this object. "
+        f"Use those tools and the information you already have to fulfill the user's request. "
+        f"NEVER ask the user for more information or clarification. "
+        f"If you cannot produce the requested output, use the `produce_error` to return an error message explaining why. "
+    )
+
+
 from peteos.oap._schema import get_schema_description, parse_data
 
 
@@ -35,6 +68,7 @@ class AgenticObjectBase:
     """Base class for all Object-Agentic Programming objects."""
 
     def __init__(self) -> None:
+        super().__init__()
         self._oap_role: Role = self._create_role()
         self._oap_lock: threading.Lock = threading.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
@@ -51,21 +85,10 @@ class AgenticObjectBase:
     def _create_role(self) -> Role:
         """Create the Role for this object."""
         cls = self.__class__
-        class_name = cls.__name__
-        doc = (cls.__doc__ or "").strip() if cls is not AgenticObjectBase else ""
-        if doc:
-            system_prompt = doc
-        else:
-            system_prompt = (
-                f"You are an agent working on a {class_name} object. "
-                f"You have tools to read and modify the state of this object. "
-                f"Use those tools and the information you already have to fulfill the user's request. "
-                f"NEVER ask the user for more information or clarification. "
-                f"If you cannot produce the requested output, use the `produce_error` to return an error message explaining why. "
-            )
+        system_prompt = _build_system_prompt(cls)
         return Role(
-            name=f"oap_{class_name}",
-            description=f"Agent for {class_name}",
+            name=f"oap_{cls.__name__}",
+            description=f"Agent for {cls.__name__}",
             tool_filter=[".*"],
             system_prompt=system_prompt,
         )
