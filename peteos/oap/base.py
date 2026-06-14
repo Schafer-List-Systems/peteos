@@ -55,6 +55,37 @@ def _build_system_prompt(cls: type) -> str:
     )
 
 
+def _collect_oap_config(cls: type) -> dict[str, Any]:
+    """Collect and merge OAP config from all classes in the MRO that directly inherit from AgenticObjectBase.
+
+    Mirrors the MRO iteration in _build_system_prompt. Collects the union of
+    all imports and ORs all boolean flags across the diamond hierarchy so that
+    a class D(B, C) where both B and C define @agentic_object with different
+    imports gets all of them combined.
+    """
+    imports: set[object] = set()
+    allow_code_execution = False
+    allow_media_access = False
+    invoke_sub_agents = False
+    for parent in cls.__mro__:
+        if parent in (AgenticObjectBase, object):
+            continue
+        if AgenticObjectBase not in parent.__bases__:
+            continue
+        cfg = getattr(parent, "_oap_config", None)
+        if cfg:
+            allow_code_execution |= cfg.get("allow_code_execution", False)
+            allow_media_access |= cfg.get("allow_media_access", False)
+            invoke_sub_agents |= cfg.get("invoke_sub_agents", False)
+            imports.update(cfg.get("imports", []))
+    return {
+        "allow_code_execution": allow_code_execution,
+        "allow_media_access": allow_media_access,
+        "invoke_sub_agents": invoke_sub_agents,
+        "imports": list(imports),
+    }
+
+
 from peteos.oap._schema import get_schema_description, parse_data
 
 
@@ -134,8 +165,8 @@ class AgenticObjectBase:
         )
 
     def _register_sandbox_tool(self) -> None:
-        """Register python_exec tool when allow_code_execution is enabled on the class."""
-        config = getattr(self.__class__, "_oap_config", {})
+        """Register python_exec tool when allow_code_execution is enabled on the class or any ancestor."""
+        config = _collect_oap_config(self.__class__)
         if not config.get("allow_code_execution", False):
             return
         self._oap_tool_manager.register_tool(
@@ -147,8 +178,8 @@ class AgenticObjectBase:
         )
 
     def _register_media_tool(self) -> None:
-        """Register read_media tool when allow_media_access is enabled on the class."""
-        config = getattr(self.__class__, "_oap_config", {})
+        """Register read_media tool when allow_media_access is enabled on the class or any ancestor."""
+        config = _collect_oap_config(self.__class__)
         if not config.get("allow_media_access", False):
             return
         self._oap_tool_manager.register_tool(
@@ -161,7 +192,7 @@ class AgenticObjectBase:
 
     def _python_exec(self, code: str) -> str:
         """Protected tool: executes sandboxed Python code."""
-        config = getattr(self.__class__, "_oap_config", {})
+        config = _collect_oap_config(self.__class__)
         imports = config.get("imports", [])
         sandbox_globals = create_sandbox_globals(self, imports)
 
@@ -525,7 +556,7 @@ class AgenticObjectBase:
             TimeoutError: Lock not acquired within timeout.
         """
         # --- Gatekeeper: verify self allows sub-agent invocation ---
-        config = getattr(self, "_oap_config", {})
+        config = _collect_oap_config(self.__class__)
         if not config.get("invoke_sub_agents", False):
             return Error("Sub-agent invocation not enabled")
 

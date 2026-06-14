@@ -196,3 +196,37 @@ class CustomDescToolObj(AgenticObjectBase):
 class NoToolObj(AgenticObjectBase):
     def regular_method(self):
         pass
+
+
+# --- Diamond inheritance test classes ---
+
+import cv2
+import numpy
+
+
+@agentic_object(allow_code_execution=True, imports=[numpy])
+class BBase(AgenticObjectBase):
+    """Branch B with numpy support."""
+
+
+@agentic_object(allow_code_execution=True, imports=[cv2])
+class CBase(AgenticObjectBase):
+    """Branch C with opencv support."""
+
+
+@agentic_object()
+class DiamondChild(BBase, CBase):
+    """Diamond child inheriting from both branches."""
+
+
+class TestDiamondConfigCollection:
+    def test_config_merges_imports_from_both_branches(self):
+        d = DiamondChild()
+        tools = d._oap_tool_manager.get_tool_list()
+        tool_names = {t.name for t in tools}
+        assert "python_exec" in tool_names
+
+    def test_python_exec_sandbox_has_combined_imports(self):
+        d = DiamondChild()
+        result = d._python_exec("x = numpy.array([1, 2, 3]); y = cv2.__name__")
+        assert result == "OK"
