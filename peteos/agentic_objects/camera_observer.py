@@ -15,11 +15,9 @@ if TYPE_CHECKING:
 
 
 class CameraObserver(AgenticObjectBase):
-    """Observer with access to a single camera via a driver.
+    """You are an observer with access to cameras.
 
-    Default driver is CV2CameraDriver (portable OpenCV). Only one camera
-    can be open at a time. Grabbed images can be read using
-    read_cached_image.
+    Only one camera can be open at a time. Grabbed images can be read using read_cached_image.
     """
 
     def __init__(
