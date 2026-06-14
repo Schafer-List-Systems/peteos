@@ -18,6 +18,7 @@ class CameraObserver(AgenticObjectBase):
     """You are an observer with access to cameras.
 
     Only one camera can be open at a time. Grabbed images can be read using read_cached_image.
+    In Python code, you can access the image's raw PNG bytes via this._cached_camera_frame.
     """
 
     def __init__(

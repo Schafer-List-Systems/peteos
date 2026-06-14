@@ -6,16 +6,20 @@ from peteos.oap.sandbox import create_sandbox_globals
 
 
 class TestSandbox:
-    def test_no_builtins(self):
+    def test_safe_builtins(self):
         sandbox = create_sandbox_globals(object())
-        assert sandbox["__builtins__"] == {}
+        assert sandbox["__builtins__"] is not {}
+        assert sandbox["__builtins__"]["print"] is print
+        assert sandbox["__builtins__"]["str"] is str
+        assert sandbox["__builtins__"]["list"] is list
+        # File access should still be blocked
         with pytest.raises((NameError, ImportError)):
             exec("open('/dev/null')", sandbox)
 
     def test_self_is_object(self):
         obj = object()
         sandbox = create_sandbox_globals(obj)
-        assert sandbox["self"] is obj
+        assert sandbox["this"] is obj
 
     def test_imports_injected(self):
         import os

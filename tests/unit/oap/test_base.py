@@ -204,7 +204,7 @@ import cv2
 import numpy
 
 
-@agentic_object(allow_code_execution=True, imports=[numpy])
+@agentic_object(allow_code_execution=True, imports=[numpy], import_aliases={"numpy": "np"})
 class BBase(AgenticObjectBase):
     """Branch B with numpy support."""
 
@@ -229,4 +229,9 @@ class TestDiamondConfigCollection:
     def test_python_exec_sandbox_has_combined_imports(self):
         d = DiamondChild()
         result = d._python_exec("x = numpy.array([1, 2, 3]); y = cv2.__name__")
+        assert result == "OK"
+
+    def test_python_exec_sandbox_has_import_alias(self):
+        d = DiamondChild()
+        result = d._python_exec("x = np.array([1, 2, 3])")
         assert result == "OK"

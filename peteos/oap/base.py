@@ -59,11 +59,12 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     """Collect and merge OAP config from all classes in the MRO that directly inherit from AgenticObjectBase.
 
     Mirrors the MRO iteration in _build_system_prompt. Collects the union of
-    all imports and ORs all boolean flags across the diamond hierarchy so that
-    a class D(B, C) where both B and C define @agentic_object with different
-    imports gets all of them combined.
+    all imports, merges import_aliases, and ORs all boolean flags across the
+    diamond hierarchy so that a class D(B, C) where both B and C define
+    @agentic_object with different imports gets all of them combined.
     """
     imports: set[object] = set()
+    import_aliases: dict[str, str] = {}
     allow_code_execution = False
     allow_media_access = False
     invoke_sub_agents = False
@@ -78,11 +79,13 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
             allow_media_access |= cfg.get("allow_media_access", False)
             invoke_sub_agents |= cfg.get("invoke_sub_agents", False)
             imports.update(cfg.get("imports", []))
+            import_aliases.update(cfg.get("import_aliases", {}))
     return {
         "allow_code_execution": allow_code_execution,
         "allow_media_access": allow_media_access,
         "invoke_sub_agents": invoke_sub_agents,
         "imports": list(imports),
+        "import_aliases": import_aliases,
     }
 
 
@@ -169,10 +172,23 @@ class AgenticObjectBase:
         config = _collect_oap_config(self.__class__)
         if not config.get("allow_code_execution", False):
             return
+        imports = config.get("imports", [])
+        if imports:
+            mods_list = ", ".join(
+                f"{m.__name__}" if hasattr(m, "__name__") else str(m) for m in imports
+            )
+            modules_info = f" Available modules: {mods_list}."
+        else:
+            modules_info = ""
+        description = (
+            f"Execute sandboxed Python code. Access the agentic object via `this`."
+            f" No __builtins__, no __import__, no network, no filesystem."
+            f"{modules_info}"
+        )
         self._oap_tool_manager.register_tool(
             Tool(
                 name="python_exec",
-                description="Execute sandboxed Python code. Access the object graph via `self`. No __builtins__, no __import__, no network, no filesystem.",
+                description=description,
                 func=self._python_exec,
             )
         )
@@ -194,7 +210,8 @@ class AgenticObjectBase:
         """Protected tool: executes sandboxed Python code."""
         config = _collect_oap_config(self.__class__)
         imports = config.get("imports", [])
-        sandbox_globals = create_sandbox_globals(self, imports)
+        import_aliases = config.get("import_aliases", {})
+        sandbox_globals = create_sandbox_globals(self, imports, import_aliases)
 
         try:
             exec(code, sandbox_globals)
