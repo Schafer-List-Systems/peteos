@@ -61,6 +61,7 @@ def build_sandbox_description(imports: list[object] | None = None) -> str:
         )
         return (
             f"Execute sandboxed Python code. Access the agentic object via `this`."
+            f" Agentic tools can also be called on this (e.g. `this.produce_output`). "
             f" No __builtins__, no __import__, no network, no filesystem."
             f" Available modules: {mods_list}."
         )
