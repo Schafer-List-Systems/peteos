@@ -6,9 +6,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from peteos.conversation.message import Message
+from peteos.logger import get_logger
 
 if TYPE_CHECKING:
     from peteos.conversation.system_prompt_message import SystemPromptMessage
+    from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
+
+_logger = get_logger(__name__)
 
 
 class Context:
@@ -22,9 +26,10 @@ class Context:
     Supports forked contexts with inherited content maps,
     and dynamic message resolution via content hashes.
 
-    System prompt messages are only handled in factory methods
-    (``create`` / ``fork``), never in ``__init__`` which is used for
-    deserialization.
+    System prompt messages and tool definitions messages are only handled in
+    factory methods (``create`` / ``fork``), never in ``__init__`` which is
+    used for deserialization. System prompt is always at index 0; tool
+    definitions message is always at index 1 (or index 0 if no system prompt).
 
     Example:
         >>> ctx = Context({"messages": [
@@ -35,23 +40,25 @@ class Context:
     """
 
     # ------------------------------------------------------------------ #
-    # Factory methods (where system_prompt_message is injected)
+    # Factory methods (where special messages are injected)
     # ------------------------------------------------------------------ #
 
     @classmethod
     def create(
         cls,
         system_prompt_message: SystemPromptMessage | None = None,
+        tool_definitions_message: ToolDefinitionsMessage | None = None,
         parent_context: Context | None = None,
     ) -> "Context":
         """Create a new empty context.
 
-        The system prompt message (if provided) is placed at index 0.
-        If a parent context is provided, the content map is inherited
-        from it.
+        The system prompt message and the tool definitions message are
+        placed in the first slots in that order (if present).
+        If a parent context is provided, the content map is inherited from it.
 
         Args:
             system_prompt_message: Optional system prompt for this context.
+            tool_definitions_message: Optional tool definitions for this context.
             parent_context: Optional parent to inherit the content map from.
 
         Returns:
@@ -60,6 +67,10 @@ class Context:
         ctx = cls({}, parent_context=parent_context)
         if system_prompt_message is not None:
             ctx.append(system_prompt_message)
+            ctx.raw_dict["system_prompt_message_id"] = system_prompt_message.id
+        if tool_definitions_message is not None:
+            ctx.append(tool_definitions_message)
+            ctx.raw_dict["tool_definitions_message_id"] = tool_definitions_message.id
         return ctx
 
     @staticmethod
@@ -146,6 +157,44 @@ class Context:
         """Return the hook ID → messages index."""
         return self._hook_index
 
+    @property
+    def system_prompt_message(self) -> SystemPromptMessage | None:
+        """Return the system prompt message if present."""
+        message_id = self._json_dict.get("system_prompt_message_id")
+        if not message_id:
+            return None
+        if not self._messages:
+            _logger.error("system_prompt_message_id set but no messages found")
+            return None
+        msg = self._messages[0]
+        if msg.id != message_id:
+            _logger.error(f"Expected SystemPromptMessage with id {message_id}, got {msg.id}")
+            return None
+        if not isinstance(msg, SystemPromptMessage):
+            _logger.error(f"Expected SystemPromptMessage with id {message_id}, got {msg.__class__.__name__}")
+            return None
+        return msg
+
+    @property
+    def tool_definitions_message(self) -> ToolDefinitionsMessage | None:
+        """Return the tool definitions message if present."""
+        message_id = self._json_dict.get("tool_definitions_message_id")
+        if not message_id:
+            return None
+
+        msg = None
+        for candidate in self.messages[:2]:
+            if candidate.id == message_id:
+                msg = candidate
+                break
+        if msg is None:
+            _logger.error(f"Expected ToolDefinitionsMessage with id {message_id}, not found in first 2 messages")
+            return None
+        if not isinstance(msg, ToolDefinitionsMessage):
+            _logger.error(f"Expected ToolDefinitionsMessage with id {message_id}, got {msg.__class__.__name__}")
+            return None
+        return msg
+
     def append(self, message: Message) -> None:
         """Append a Message to the context, keeping JSON and object lists in sync.
 
@@ -177,6 +226,7 @@ class Context:
         self,
         *,
         system_prompt_message: SystemPromptMessage | None = None,
+        tool_definitions_message: ToolDefinitionsMessage | None = None,
         count: int | None = None,
         ids: list[str] | None = None,
     ) -> Context:
@@ -190,6 +240,7 @@ class Context:
 
         Args:
             system_prompt_message: Optional new system prompt for the fork.
+            tool_definitions_message: Optional new tool definitions message.
             count: If set, fork the last n messages from the origin.
             ids: If set, fork only the messages whose IDs are in this list.
             Both omitted to copy all messages.
@@ -212,9 +263,12 @@ class Context:
             selected = list(self.messages)
 
         ctx = Context.create(
-            system_prompt_message=system_prompt_message,
+            system_prompt_message=system_prompt_message or self.system_prompt_message,
+            tool_definitions_message=tool_definitions_message or self.tool_definitions_message,
             parent_context=self,
         )
+        # Remove special messages from selected to avoid duplicating them
+        selected = [m for m in selected if m != self.system_prompt_message and m != self.tool_definitions_message]
         for msg in selected:
             ctx.append(msg)
         return ctx
