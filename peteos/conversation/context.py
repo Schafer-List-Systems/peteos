@@ -63,7 +63,7 @@ class Context:
         return ctx
 
     @staticmethod
-    def load_from_file(path: str) -> "Context":
+    def load(path: str) -> "Context":
         """Load a context from a file."""
         with open(path, "r") as f:
             json_dict = json.load(f)
@@ -78,15 +78,15 @@ class Context:
         """
         return Context(json_dict)
 
-    def save_to_file(self, session_directory: str) -> None:
+    def save(self, session_dir: str | Path) -> None:
         """Save the context to a JSON file in the session directory.
 
         The file is named ``{context_id}.json``.
 
         Args:
-            session_directory: Path to the session directory on disk.
+            session_dir: Path to the session directory on disk.
         """
-        path = Path(session_directory) / f"{self.id}.json"
+        path = Path(session_dir) / f"{self.id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(self._json_dict, f, indent=2)

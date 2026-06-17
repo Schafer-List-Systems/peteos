@@ -14,25 +14,30 @@ class Session:
     Wraps a JSON dict as the source of truth.
     """
 
-    def __init__(self, directory_path: str, json_dict: dict) -> None:
+    def __init__(self, parent_dir: str, json_dict: dict) -> None:
         """
         Args:
-            directory_path: Path to the session directory on disk.
+            parent_dir: The agent directory (parent of the session subdirectory).
             json_dict: The raw serialized session dict.
         """
-        self._directory_path = directory_path
+        self._parent_dir = parent_dir
         self._json_dict = json_dict
         self._json_dict.setdefault("uuid", str(uuid.uuid4()))
         self._json_dict.setdefault("active_context_id", None)
+        self._json_dict.setdefault("auto_approve_tools", [])
         self._hooks: dict[str, Callable[[], str]] = {}
 
         if self._json_dict.get("active_context_id"):
-            context_path = Path(directory_path) / (self._json_dict["active_context_id"] + ".json")
-            with open(context_path, "r") as f:
-                self._active_context = Context.load_from_dict(json.load(f))
+            context_path = self.session_dir / (self._json_dict["active_context_id"] + ".json")
+            self._active_context = Context.load(context_path)
         else:
             self._active_context = Context.create()
             self._json_dict["active_context_id"] = self._active_context.id
+
+    @property
+    def session_dir(self) -> Path:
+        """Return the session directory path (parent_dir / uuid)."""
+        return Path(self._parent_dir) / self.uuid
 
     def register_hook(self, message: Message, name: str, callback: Callable[[], str]) -> str:
         """Register a hook on a message in the active context."""
@@ -77,12 +82,12 @@ class Session:
     @property
     def uuid(self) -> str:
         """Return the session UUID."""
-        return self._json_dict["uuid"]
+        return self.raw_dict["uuid"]
 
     def set_active_context(self, context: Context) -> None:
         """Set the active context, synchronizing both the JSON dict ID and the Python object reference."""
         self._active_context = context
-        self._json_dict["active_context_id"] = context.id
+        self.raw_dict["active_context_id"] = context.id
 
     @property
     def active_context(self) -> Context | None:
@@ -92,51 +97,56 @@ class Session:
     @property
     def active_context_id(self) -> str | None:
         """Return the active context ID from the JSON dict."""
-        return self._json_dict.get("active_context_id")
+        return self.raw_dict["active_context_id"]
+
+    @property
+    def auto_approve_tools(self) -> list[str]:
+        """Return the list of tool names auto-approved by this session."""
+        return self.raw_dict["auto_approve_tools"]
 
     @classmethod
-    def create(cls, directory_path: str) -> "Session":
+    def create(cls, parent_dir: str) -> "Session":
         """Create a new empty session.
 
-        The session directory is created (or reused) but nothing is
+        The parent directory is created (or reused) but nothing is
         written to disk until ``save_to_file()`` is called.
 
         Args:
-            directory_path: Path to the session directory on disk.
+            parent_dir: The agent directory (parent of the session subdirectory).
 
         Returns:
             A new empty Session instance.
         """
-        return cls(directory_path, {})
+        return cls(parent_dir, {})
 
     @classmethod
-    def load_from_file(cls, directory_path: str) -> "Session":
+    def load(cls, parent_dir: str, session_uuid: str) -> "Session":
         """Load a session from a directory containing session.json.
 
+        The session directory is ``parent_dir / session_uuid``.
+
         Args:
-            directory_path: Path to the session directory.
+            parent_dir: The agent directory.
+            session_uuid: The session's UUID (also the subdirectory name).
 
         Raises:
             FileNotFoundError: If session.json does not exist in the directory.
         """
-        session_path = Path(directory_path) / "session.json"
+        session_path = Path(parent_dir) / session_uuid / "session.json"
         if not session_path.exists():
-            raise FileNotFoundError(f"session.json not found in {directory_path}")
+            raise FileNotFoundError(f"session.json not found in {session_path}")
 
         with open(session_path, "r") as f:
             json_dict = json.load(f)
 
-        return cls(directory_path, json_dict)
+        return cls(parent_dir, json_dict)
 
-    def save_to_file(self) -> None:
-        """Save the session and its active context to disk.
-
-        Writes ``session.json`` and the active context file.
-        """
-        session_path = Path(self._directory_path) / "session.json"
+    def save(self) -> None:
+        """Save the session and its active context to disk."""
+        session_path = self.session_dir / "session.json"
         session_path.parent.mkdir(parents=True, exist_ok=True)
         with open(session_path, "w") as f:
             json.dump(self._json_dict, f, indent=2)
 
         if self._active_context is not None:
-            self._active_context.save_to_file(self._directory_path)
+            self._active_context.save(self.session_dir)
