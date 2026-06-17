@@ -17,6 +17,7 @@ class ContentPart:
         {"type": "thinking", "text": str}
         {"type": "tool_use", "call_id": str, "name": str, "arguments": str}
         {"type": "tool_result", "call_id": str, "content": str}
+        {"type": "tool", "name": str, "description": str, "parameters": dict}
 
     Example:
         >>> part = ContentPart({"type": "text", "text": "Hello"})
@@ -94,6 +95,17 @@ class ContentPart:
         """
         return ContentPart({"type": "tool_result", "call_id": call_id, "content": content})
 
+    @staticmethod
+    def create_tool(name: str, description: str, parameters: dict) -> "ContentPart":
+        """Create a tool definition content part.
+
+        Args:
+            name: The tool name.
+            description: The tool description.
+            parameters: JSON schema dict for tool parameters.
+        """
+        return ContentPart({"type": "tool", "name": name, "description": description, "parameters": parameters})
+
     @property
     def raw_dict(self) -> dict:
         """Return the wrapped serialized dict."""
@@ -133,6 +145,16 @@ class ContentPart:
     def content(self) -> str | None:
         """Return the result content string (for tool_result parts)."""
         return self._json_dict.get("content")
+
+    @property
+    def description(self) -> str | None:
+        """Return the tool description (for tool definition parts)."""
+        return self._json_dict.get("description")
+
+    @property
+    def parameters(self) -> dict | None:
+        """Return the tool parameters schema (for tool definition parts)."""
+        return self._json_dict.get("parameters")
 
 
 class Message:
@@ -272,6 +294,9 @@ class Message:
             elif t == "tool_result":
                 content = part.content or ""
                 parts.append(f"[ToolResult of {part.call_id or 'unknown'}: {len(content)} chars]")
+            elif t == "tool":
+                params = part.parameters or {}
+                parts.append(f"[ToolDef: {part.name} params={len(params)} fields]")
             else:
                 parts.append(f"[Unknown: {t}]")
         return "\n".join(parts)
