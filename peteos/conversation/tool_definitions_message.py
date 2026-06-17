@@ -27,7 +27,7 @@ class ToolDefinitionsMessage(Message):
     TOOL_LIST_HOOK_NAME: str = "tool_list"
     TOOL_FILTER_HOOK_NAME: str = "tool_filter"
 
-    def __init__(self, json_dict: dict) -> None:
+    def __init__(self, json_dict: dict = {}) -> None:
         json_dict.setdefault("role", "tool")
         super().__init__(json_dict)
 
@@ -48,7 +48,8 @@ class ToolDefinitionsMessage(Message):
         filter_patterns = self._materialize_tool_filter(materialized_hooks, content_map)
         tool_list = self._materialize_tool_list(materialized_hooks, content_map)
 
-        self._json_dict["content"] = self._filter_tool_list(tool_list, filter_patterns)
+        filtered = self._filter_tool_list(tool_list, filter_patterns)
+        self._json_dict["content"] = self._format_tool_list(filtered)
 
     def _materialize_tool_list(
         self,
@@ -127,6 +128,30 @@ class ToolDefinitionsMessage(Message):
             tool for tool in tool_list
             if not any(re.fullmatch(pattern, tool.get("name", "")) for pattern in filter_patterns)
         ]
+
+    @staticmethod
+    def _format_tool_list(tool_list: list[dict]) -> list[dict]:
+        """Normalize the tool list to the expected content format.
+
+        Ensures each tool dict has ``type="tool"`` with ``name``,
+        ``description``, and ``parameters`` keys.
+
+        Args:
+            tool_list: The filtered list of tool definition dicts.
+
+        Returns:
+            The formatted tool list.
+        """
+        result = []
+        for tool in tool_list:
+            formatted: dict = {
+                "type": "tool",
+                "name": tool.get("name", ""),
+                "description": tool.get("description", ""),
+                "parameters": tool.get("parameters", {}),
+            }
+            result.append(formatted)
+        return result
 
     @property
     def _tool_filter_hook_id(self) -> str:

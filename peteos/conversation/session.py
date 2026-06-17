@@ -2,10 +2,14 @@ import hashlib
 import json
 import uuid
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from peteos.conversation.context import Context
 from peteos.conversation.message import Message
+
+if TYPE_CHECKING:
+    from peteos.conversation.system_prompt_message import SystemPromptMessage
+    from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 
 
 class Session:
@@ -14,7 +18,7 @@ class Session:
     Wraps a JSON dict as the source of truth.
     """
 
-    def __init__(self, parent_dir: str, json_dict: dict) -> None:
+    def __init__(self, parent_dir: str, json_dict: dict = {}) -> None:
         """
         Args:
             parent_dir: The agent directory (parent of the session subdirectory).
@@ -26,13 +30,7 @@ class Session:
         self._json_dict.setdefault("active_context_id", None)
         self._json_dict.setdefault("auto_approve_tools", [])
         self._hooks: dict[str, Callable[[], str]] = {}
-
-        if self._json_dict.get("active_context_id"):
-            context_path = self.session_dir / (self._json_dict["active_context_id"] + ".json")
-            self._active_context = Context.load(context_path)
-        else:
-            self._active_context = Context.create()
-            self._json_dict["active_context_id"] = self._active_context.id
+        self._active_context: Context | None = None
 
     @property
     def session_dir(self) -> Path:
@@ -105,19 +103,29 @@ class Session:
         return self.raw_dict["auto_approve_tools"]
 
     @classmethod
-    def create(cls, parent_dir: str) -> "Session":
-        """Create a new empty session.
-
-        The parent directory is created (or reused) but nothing is
-        written to disk until ``save_to_file()`` is called.
+    def create(
+        cls,
+        parent_dir: str,
+        system_prompt_message: "SystemPromptMessage | None" = None,
+        tool_definitions_message: "ToolDefinitionsMessage | None" = None,
+    ) -> "Session":
+        """Create a new session with a freshly created context.
 
         Args:
-            parent_dir: The agent directory (parent of the session subdirectory).
+            parent_dir: The agent directory.
+            system_prompt_message: Optional system prompt for this session.
+            tool_definitions_message: Optional tool definitions for this session.
 
         Returns:
-            A new empty Session instance.
+            A new Session instance with the active context set.
         """
-        return cls(parent_dir, {})
+        session = cls(parent_dir)
+        session._active_context = Context.create(
+            system_prompt_message=system_prompt_message,
+            tool_definitions_message=tool_definitions_message,
+        )
+        session.raw_dict["active_context_id"] = session._active_context.id
+        return session
 
     @classmethod
     def load(cls, parent_dir: str, session_uuid: str) -> "Session":
@@ -139,7 +147,11 @@ class Session:
         with open(session_path, "r") as f:
             json_dict = json.load(f)
 
-        return cls(parent_dir, json_dict)
+        session = cls(parent_dir, json_dict)
+        if json_dict.get("active_context_id"):
+            context_path = session.session_dir / (json_dict["active_context_id"] + ".json")
+            session._active_context = Context.load(context_path)
+        return session
 
     def save(self) -> None:
         """Save the session and its active context to disk."""
