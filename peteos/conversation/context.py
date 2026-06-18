@@ -26,6 +26,12 @@ class Context:
     Supports forked contexts with inherited content maps,
     and dynamic message resolution via content hashes.
 
+    Anchor points partition the messages array. Each anchor stores a ``(name,
+    index)`` pair where *index* is a non-negative absolute position acting as
+    an **end iterator** — it points to the first element *after* the partition.
+    Appending at an anchor inserts at that position and shifts all subsequent
+    messages and anchor indices by one.
+
     System prompt messages and tool definitions messages are only handled in
     factory methods (``create`` / ``fork``), never in ``__init__`` which is
     used for deserialization. System prompt is always at index 0; tool
@@ -120,6 +126,8 @@ class Context:
         self._json_dict.setdefault("messages", [])
         self._json_dict.setdefault("id", str(uuid.uuid4()))
         self._json_dict.setdefault("content_map", {})
+        self._json_dict.setdefault("anchor_points", [])
+        self._json_dict.setdefault("message_sequence", 0)
 
         self._messages: list[Message] = [
             Message.from_dict(msg) for msg in self._json_dict["messages"]
@@ -146,6 +154,11 @@ class Context:
     def messages(self) -> list[Message]:
         """Return the list of messages in this context."""
         return self._messages
+
+    @property
+    def message_count(self) -> int:
+        """Return the number of messages in this context (same as the sequence counter)."""
+        return self._json_dict["message_sequence"]
 
     @property
     def content_map(self) -> dict[str, str]:
@@ -195,16 +208,6 @@ class Context:
             return None
         return msg
 
-    def append(self, message: Message) -> None:
-        """Append a Message to the context, keeping JSON and object lists in sync.
-
-        Args:
-            message: The Message to append.
-        """
-        self._messages.append(message)
-        self.raw_dict["messages"].append(message.raw_dict)
-        self._add_message_to_hook_index(message)
-
     def _add_message_to_hook_index(self, message: Message) -> None:
         """Add a single message's hook IDs to the hook index.
 
@@ -221,6 +224,82 @@ class Context:
         self._hook_index.clear()
         for msg in self._messages:
             self._add_message_to_hook_index(msg)
+
+    @property
+    def anchor_points(self) -> list[tuple[str, int]]:
+        """Return the ordered list of (name, index) anchor points.
+
+        Each index is a non-negative absolute position into the messages
+        array, acting as an **end iterator** — it points to the first
+        element *after* the partition.
+        """
+        return list(self._json_dict["anchor_points"])
+
+    def get_anchor_index(self, name: str) -> int:
+        """Return the position of *name* in the anchor point list."""
+        return next(i for i, (n, _) in enumerate(self._json_dict["anchor_points"]) if n == name)
+
+    def add_anchor(self, name: str, msg_index: int) -> None:
+        """Register a new anchor point.
+
+        The index is a non-negative absolute position into the messages
+        array.  Negative input indices are resolved via standard Python
+        negative indexing (``len(messages) + index``).
+
+        Args:
+            name: The anchor point name.
+            msg_index: Initial index (positive or negative).
+
+        Raises:
+            ValueError: If *name* already exists.
+        """
+        if any(n == name for n, _ in self._json_dict["anchor_points"]):
+            raise ValueError(f"Anchor point already exists: {name}")
+
+        if msg_index < 0:
+            abs_idx = len(self._messages) + msg_index
+        else:
+            abs_idx = msg_index
+
+        if msg_index < 0:
+            for pos, (_, existing_idx) in enumerate(self._json_dict["anchor_points"]):
+                if existing_idx >= abs_idx:
+                    self._json_dict["anchor_points"].insert(pos, (name, abs_idx))
+                    return
+        else:
+            for pos, (_, existing_idx) in enumerate(self._json_dict["anchor_points"]):
+                if existing_idx > abs_idx:
+                    self._json_dict["anchor_points"].insert(pos, (name, abs_idx))
+                    return
+        self._json_dict["anchor_points"].append((name, abs_idx))
+
+    def _shift_anchors_after_insert(self, anchor_list_index: int) -> None:
+        """Increment stored indices for all anchors at or after *anchor_list_index* in the list."""
+        for i in range(anchor_list_index, len(self._json_dict["anchor_points"])):
+            n, idx = self._json_dict["anchor_points"][i]
+            self._json_dict["anchor_points"][i] = (n, idx + 1)
+
+    def append(self, message: Message, anchor_point: str = "messages") -> None:
+        """Insert a Message at the anchor point's end-iterator position.
+
+        All messages from that position onward are shifted one slot to the
+        right. Every anchor that appears at or after the target anchor in the
+        list and whose stored index is at or past the insertion point is
+        incremented by 1.
+
+        Args:
+            message: The Message to append.
+            anchor_point: Name of the anchor point. Defaults to "messages".
+        """
+        anchor_list_index = self.get_anchor_index(anchor_point)
+        msg_index = self.raw_dict["anchor_points"][anchor_list_index][1]
+
+        self._messages.insert(msg_index, message)
+        self.raw_dict["messages"].insert(msg_index, message.raw_dict)
+        self._json_dict["message_sequence"] += 1
+        message.raw_dict["_sequence_number"] = self._json_dict["message_sequence"]
+        self._shift_anchors_after_insert(anchor_list_index)
+        self._add_message_to_hook_index(message)
 
     def fork(
         self,
@@ -267,10 +346,14 @@ class Context:
             tool_definitions_message=tool_definitions_message or self.tool_definitions_message,
             parent_context=self,
         )
+        ctx._json_dict["anchor_points"] = list(self._json_dict["anchor_points"])
+        ctx._json_dict["message_sequence"] = self._json_dict["message_sequence"]
         # Remove special messages from selected to avoid duplicating them
         selected = [m for m in selected if m != self.system_prompt_message and m != self.tool_definitions_message]
-        for msg in selected:
-            ctx.append(msg)
+        # Recreate new Message objects from raw dicts so the fork has independent copies
+        selected_dicts = [msg.raw_dict for msg in selected]
+        for raw_dict in selected_dicts:
+            ctx.append(Message.from_dict(dict(raw_dict)))
         return ctx
 
     def _gather_dynamic_messages(self) -> list[Message]:
