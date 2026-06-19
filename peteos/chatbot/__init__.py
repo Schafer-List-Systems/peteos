@@ -1,17 +1,15 @@
 from peteos.chatbot.manager import ChatBotManager, BackendInfo
-from peteos.chatbot.chatbot import ChatBot, GenericChatBot
+from peteos.chatbot.chatbot import ChatBot
 from peteos.chatbot.openaichatbot import OpenAIChatBot, OpenAIChatBotResponse
 from peteos.chatbot.anthropicchatbot import AnthropicChatBot, AnthropicChatBotResponse
 from peteos.chatbot.chatbotresponse import ChatBotResponse, GenericChatBotResponse
-from peteos.chatbot.chathistory import ChatHistory
-from peteos.chatbot.message import Message, SystemPromptMessage, ToolDefinitionsMessage, FoldedMessage
-from peteos.chatbot.contentpart import ContentPart
 from peteos.chatbot.httpclient import HTTPClient
+from peteos.conversation import ContentPart, Message, MessageRegistry, SystemPromptMessage, ToolDefinitionsMessage
 
 __all__ = [
     "ChatBotManager", "BackendInfo",
-    "ChatBot", "GenericChatBot", "OpenAIChatBot", "AnthropicChatBot",
+    "ChatBot", "OpenAIChatBot", "AnthropicChatBot",
     "OpenAIChatBotResponse",
     "ChatBotResponse", "GenericChatBotResponse", "AnthropicChatBotResponse",
-    "ChatHistory", "Message", "SystemPromptMessage", "ToolDefinitionsMessage", "FoldedMessage", "ContentPart", "HTTPClient",
+    "ContentPart", "Message", "MessageRegistry", "SystemPromptMessage", "ToolDefinitionsMessage", "HTTPClient",
 ]

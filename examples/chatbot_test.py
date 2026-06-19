@@ -15,7 +15,7 @@ import logging
 import os
 import random
 from peteos.chatbot.manager import ChatBotManager
-from peteos.chatbot.chatbot import GenericChatBot
+# GenericChatBot removed - subclasses derive from ChatBot directly
 from peteos.chatbot.chathistory import ChatHistory
 from peteos.chatbot.message import Message
 from peteos.chatbot.contentpart import ContentPart

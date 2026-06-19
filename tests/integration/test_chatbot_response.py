@@ -9,7 +9,7 @@ import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 from aiohttp import web
 
-from peteos.chatbot import OpenAIChatBot, AnthropicChatBot, GenericChatBotResponse, ChatHistory, GenericChatBot
+from peteos.chatbot import OpenAIChatBot, AnthropicChatBot, GenericChatBotResponse, ChatHistory
 from peteos.chatbot.httpclient import HTTPClient
 from peteos.chatbot.chatbotconfig import ChatBotConfig
 
@@ -144,48 +144,6 @@ class TestAnthropicChatBotResponse:
             assert "content" in response.data
             assert response.data["content"][0]["type"] == "text"
             assert response.data["content"][0]["content"] == "World"
-
-
-class TestGenericChatBotResponse:
-    """Tests for GenericChatBotResponse structure."""
-
-    @pytest.mark.asyncio
-    async def test_response_data_structure_unified_format(self):
-        """Test that response.data has correct unified format with content array."""
-        http_client = HTTPClient(timeout=5.0)
-        config = ChatBotConfig(
-            name="test",
-            url="http://test:8000",
-            model="test-model",
-            chat_endpoint="/v1/chat/completions",
-            models_endpoint="/v1/models",
-            response_translations={
-                "choices[*].delta.content": "content[0].content",
-                "choices[*].delta.role": "role"
-            }
-        )
-        chatbot = GenericChatBot(http_client, config)
-        chat_history = ChatHistory()
-
-        mock_sse_data = [
-            'data: {"choices": [{"delta": {"role": "assistant", "content": "Test"}}]}\n',
-            'data: [DONE]\n'
-        ]
-
-        async def mock_stream():
-            for line in mock_sse_data:
-                yield line
-
-        with patch.object(http_client, 'stream_post', return_value=mock_stream()):
-            response = await chatbot.send_message(chat_history=chat_history, streaming=True)
-            async for _ in response:
-                pass
-
-            # Verify unified format: content array, no flat text
-            assert "role" in response.data
-            assert response.data["role"] == "assistant"
-            assert "content" in response.data
-            assert response.data["content"][0]["content"] == "Test"
 
 
 class TestChatBotResponseIntegration:

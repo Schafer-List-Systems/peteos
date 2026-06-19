@@ -5,18 +5,17 @@ from dataclasses import asdict
 from typing import Dict, Any, List, Optional, AsyncGenerator, AsyncIterator
 
 from peteos.logger import get_logger
-from .chatbot import GenericChatBot
+from .chatbot import ChatBot
 from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .httpclient import HTTPClient
-from .chathistory import ChatHistory
-from .message import Message
+from peteos.conversation.context import Context
 from peteos.utils.delta_merge import merge_delta_into_target
 
 _logger = get_logger(__name__)
 
 
-class OpenAIChatBot(GenericChatBot):
+class OpenAIChatBot(ChatBot):
     """ChatBot implementation for OpenAI-compatible API."""
 
     DEFAULT_CHAT_ENDPOINT = "/v1/chat/completions"
@@ -113,15 +112,23 @@ class OpenAIChatBot(GenericChatBot):
         if bot_cfg.get("request_translations") is None:
             bot_cfg["request_translations"] = self.REQUEST_TRANSLATIONS
         super().__init__(http_client, ChatBotConfig.from_dict(bot_cfg))
+        self._models: List[str] = []
 
-    async def send_message(
+    def list_available_models(self) -> List[str]:
+        """List available models from the models endpoint or return [model]."""
+        if self._models:
+            return self._models
+        return [self._config.model]
+
+    async def send_context(
         self,
-        chat_history: ChatHistory,
+        context: Context,
+        generation_config: Optional[Dict[str, Any]] = None,
         streaming: bool | None = None,
     ) -> ChatBotResponse:
-        """Send a chat history to the LLM and receive a response."""
+        """Send a context to the LLM and receive a response."""
         streaming_mode = self._config.streaming if streaming is None else streaming
-        body = self._build_body(chat_history, streaming)
+        body = self._build_body(context, generation_config, streaming)
 
         _logger.debug("OpenAI request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
 
@@ -132,7 +139,7 @@ class OpenAIChatBot(GenericChatBot):
             response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body)
             return OpenAIChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
-    def _build_body(self, chat_history: ChatHistory, streaming: bool | None = None) -> Dict[str, Any]:
+    def _build_body(self, context: Context, generation_config: Optional[Dict[str, Any]] = None, streaming: bool | None = None) -> Dict[str, Any]:
         """Build OpenAI-specific request body.
 
         OpenAI format:
@@ -140,30 +147,35 @@ class OpenAIChatBot(GenericChatBot):
         - tools from tool messages
         - tool_choice from generation_config
         """
-        body = {}
+        body: Dict[str, Any] = {}
         body["model"] = self._config.model
         body["stream"] = self._config.streaming if streaming is None else streaming
+
+        if generation_config:
+            for key, value in generation_config.items():
+                if key not in body:
+                    body[key] = value
 
         messages = []
         tools = []
 
-        for msg in chat_history.messages:
-            role = msg.get_role()
+        for msg in context.messages:
+            role = msg.role
 
             if role == "tool":
                 # Extract tool definitions and translate parameters to OpenAI format
                 for part in msg.content:
                     if part.type == "tool":
-                        # part.data: {name, description, parameters}
+                        raw = part.raw_dict
                         # Translate parameters to JSON Schema
                         params = self._translate_tool_params_to_openai(
-                            part.data.get("parameters", {})
+                            raw.get("parameters", {})
                         )
                         tool_def = {
                             "type": "function",
                             "function": {
-                                "name": part.data.get("name"),
-                                "description": part.data.get("description", ""),
+                                "name": raw.get("name"),
+                                "description": raw.get("description", ""),
                                 "parameters": params
                             }
                         }
@@ -172,12 +184,10 @@ class OpenAIChatBot(GenericChatBot):
                 # Tool result messages - build tool_result dict for API
                 for part in msg.content:
                     if part.type == "tool_result":
-                        tool_name = part.data.get("name", "unknown")
-                        tool_content = part.data.get("content", "")
                         msg_dict = {
                             "role": "tool",
-                            "name": tool_name,
-                            "content": tool_content
+                            "name": part.name or "unknown",
+                            "content": part.content or ""
                         }
                         messages.append(msg_dict)
                         break
@@ -187,10 +197,10 @@ class OpenAIChatBot(GenericChatBot):
                 tool_calls = []
                 content_parts: List[Dict[str, Any]] = []
 
-                serialized = msg.serialize_content()
-                for item in serialized:
-                    if item.get("type") == "tool_calls":
-                        for tool_call in item.get("tool_calls", []):
+                for part in msg.content:
+                    raw = part.raw_dict
+                    if raw.get("type") == "tool_calls":
+                        for tool_call in raw.get("tool_calls", []):
                             tool_calls.append({
                                 "type": "function",
                                 "id": tool_call.get("id"),
@@ -199,58 +209,58 @@ class OpenAIChatBot(GenericChatBot):
                                     "arguments": tool_call.get("arguments", "")
                                 }
                             })
-                    elif item.get("type") == "image":
+                    elif raw.get("type") == "image":
                         # Transform Anthropic image format to OpenAI image_url format
-                        source = item.get("source", {})
-                        if source.get("type") == "base64":
+                        source = raw.get("source", {})
+                        if source and source.get("type") == "base64":
                             b64_data = source.get("data", "")
                             media_type = source.get("media_type", "image/png")
                             img_url = f"data:{media_type};base64,{b64_data}"
                             content_parts.append({"type": "image_url", "image_url": {"url": img_url}})
-                        elif source.get("type") == "url":
+                        elif source and source.get("type") == "url":
                             content_parts.append({
                                 "type": "image_url",
                                 "image_url": {"url": source["url"]}
                             })
                         else:
                             # Unknown source type - include as-is
-                            content_parts.append(item)
-                    elif item.get("type") == "video":
+                            content_parts.append(raw)
+                    elif raw.get("type") == "video":
                         # Transform video to OpenAI media format
-                        source = item.get("source", {})
-                        if source.get("type") == "base64":
+                        source = raw.get("source", {})
+                        if source and source.get("type") == "base64":
                             b64_data = source.get("data", "")
                             media_type = source.get("media_type", "video/mp4")
                             media_url = f"data:{media_type};base64,{b64_data}"
                             content_parts.append({"type": "media", "source": {"type": "base64", "media_type": media_type, "data": b64_data}})
-                        elif source.get("type") == "url":
+                        elif source and source.get("type") == "url":
                             content_parts.append({"type": "media", "source": {"type": "url", "url": source["url"]}})
                         else:
-                            content_parts.append(item)
-                    elif item.get("type") == "pdf":
+                            content_parts.append(raw)
+                    elif raw.get("type") == "pdf":
                         # Transform PDF to OpenAI input_file format
-                        source = item.get("source", {})
-                        if source.get("type") == "base64":
+                        source = raw.get("source", {})
+                        if source and source.get("type") == "base64":
                             b64_data = source.get("data", "")
                             media_type = source.get("media_type", "application/pdf")
                             content_parts.append({
                                 "type": "input_file",
                                 "file_url": f"data:{media_type};base64,{b64_data}"
                             })
-                        elif source.get("type") == "url":
+                        elif source and source.get("type") == "url":
                             content_parts.append({
                                 "type": "input_file",
                                 "file_url": source["url"]
                             })
                         else:
-                            content_parts.append(item)
-                    elif item.get("type") == "reasoning":
+                            content_parts.append(raw)
+                    elif raw.get("type") == "reasoning":
                         # Translate reasoning to OpenAI reasoning field
-                        msg_dict["reasoning"] = item.get("reasoning", "")
+                        msg_dict["reasoning"] = raw.get("reasoning", "")
                     else:
                         # Text or other content part - apply key translation
                         translated = {}
-                        for key, value in item.items():
+                        for key, value in raw.items():
                             if key in (self._config.request_translations or {}):
                                 api_key = self._config.request_translations[key]
                             else:
@@ -278,7 +288,7 @@ class OpenAIChatBot(GenericChatBot):
             body["tools"] = tools
 
         # Copy generation config (includes tool_choice)
-        for key, value in chat_history.generation_config.items():
+        for key, value in context.generation_config.items():
             if key not in body:
                 body[key] = value
 

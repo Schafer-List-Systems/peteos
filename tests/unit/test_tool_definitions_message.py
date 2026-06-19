@@ -71,7 +71,7 @@ class TestToolDefinitionsMessage:
         assert d["content"] == []
 
     def test_serialize_content_works(self):
-        """Verify GenericChatBot._build_body can iterate the content."""
+        """Verify that content iteration works for chatbot _build_body."""
         tm = ToolManager()
         tm.register_tool(Tool.from_callable(_fn("my_tool", "desc")))
         msg = ToolDefinitionsMessage(tool_manager=tm)
@@ -91,7 +91,7 @@ class TestToolDefinitionsMessage:
         serialized = msg.serialize_content()
         assert len(serialized) == 2
 
-        # GenericChatBot._build_body extracts tools like this:
+        # ChatBot._build_body extracts tools like this:
         tools_list = []
         for part in msg.content:
             if part.type == "tool":

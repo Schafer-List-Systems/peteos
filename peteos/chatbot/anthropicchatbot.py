@@ -2,16 +2,15 @@
 
 import json
 from dataclasses import asdict
-from typing import Any, Dict, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from peteos.logger import get_logger
-from .chatbot import GenericChatBot
+from .chatbot import ChatBot
 from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
-from .chathistory import ChatHistory
+from peteos.conversation.context import Context
 from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
 from .httpclient import HTTPClient
-from .message import Message
 
 _logger = get_logger(__name__)
 
@@ -22,7 +21,7 @@ async def augmented_yield():
     yield
 
 
-class AnthropicChatBot(GenericChatBot):
+class AnthropicChatBot(ChatBot):
     """ChatBot implementation for Anthropic-compatible API."""
 
     DEFAULT_CHAT_ENDPOINT = "/v1/messages"
@@ -149,16 +148,24 @@ class AnthropicChatBot(GenericChatBot):
         if bot_cfg.get("request_translations") is None:
             bot_cfg["request_translations"] = self.REQUEST_TRANSLATIONS
         super().__init__(http_client, ChatBotConfig.from_dict(bot_cfg))
+        self._models: List[str] = []
 
-    async def send_message(
+    def list_available_models(self) -> List[str]:
+        """List available models from the models endpoint or return [model]."""
+        if self._models:
+            return self._models
+        return [self._config.model]
+
+    async def send_context(
         self,
-        chat_history: ChatHistory,
+        context: Context,
+        generation_config: Optional[Dict[str, Any]] = None,
         streaming: bool | None = None,
         **kwargs
     ) -> ChatBotResponse:
-        """Send a chat history to Anthropic-compatible API."""
+        """Send a context to the LLM and receive a response."""
         streaming_mode = self._config.streaming if streaming is None else streaming
-        body = self._build_body(chat_history, streaming)
+        body = self._build_body(context, generation_config, streaming)
         body.update(kwargs)
 
         _logger.debug("Anthropic request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
@@ -171,7 +178,7 @@ class AnthropicChatBot(GenericChatBot):
             return AnthropicChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(
-        self, chat_history: ChatHistory, streaming: bool | None = None
+        self, context: Context, generation_config: Optional[Dict[str, Any]] = None, streaming: bool | None = None
     ) -> Dict[str, Any]:
         """Build Anthropic-specific request body.
 
@@ -181,59 +188,65 @@ class AnthropicChatBot(GenericChatBot):
         - tools use 'input_schema' instead of 'parameters'
         - tool_choice in Anthropic format
         """
-        body = {}
+        body: Dict[str, Any] = {}
         body["model"] = self._config.model
         body["stream"] = self._config.streaming if streaming is None else streaming
         body["max_tokens"] = self._config.max_tokens
+
+        if generation_config:
+            for key, value in generation_config.items():
+                if key not in body and key != "tool_choice":
+                    body[key] = value
 
         messages = []
         system_parts = []
         tools = []
 
-        for msg in chat_history.messages:
-            role = msg.get_role()
+        for msg in context.messages:
+            role = msg.role
 
             if role == "system":
                 # Collect system parts
-                system_parts.extend(msg.serialize_content())
+                system_parts.extend(part.raw_dict for part in msg.content)
             elif role == "tool":
                 # Extract tool definitions and translate parameters to Anthropic format
                 for part in msg.content:
                     if part.type == "tool":
-                        # part.data: {name, description, parameters}
+                        raw = part.raw_dict
                         # Anthropic expects "input_schema" instead of "parameters"
-                        tool_def = dict(part.data)
+                        tool_def = dict(raw)
                         if "parameters" in tool_def:
                             tool_def["input_schema"] = self._translate_tool_params_to_anthropic(
-                                part.data.get("parameters", {})
+                                tool_def.get("parameters", {})
                             )
                         del tool_def["parameters"]
                         tools.append(tool_def)
             elif role in ("user", "assistant"):
                 # Conversation messages
                 content = []
-                for item in msg.serialize_content():
-                    if item.get("type") == "tool_calls":
+                for part in msg.content:
+                    raw = part.raw_dict
+                    if raw.get("type") == "tool_calls":
                         # Expand uniform tool_calls format to individual content items
-                        for tool_call in item.get("tool_calls", []):
+                        for tool_call in raw.get("tool_calls", []):
                             content_item = dict(tool_call)
                             if "arguments" in content_item:
                                 content_item["input"] = json.loads(content_item["arguments"])
                                 del content_item["arguments"]
                             content.append(content_item)
-                    elif item.get("type") == "reasoning":
+                    elif raw.get("type") == "reasoning":
                         content.append({
                             "type": "thinking",
-                            "thinking": item.get("reasoning", "")
+                            "thinking": raw.get("reasoning", "")
                         })
                     else:
-                        content.append(item)
+                        content.append(raw)
                 messages.append({
                     "role": role,
                     "content": content
                 })
             elif role == "tool_result":
-                # Extract tool_use_id from the preceding assistant message in chat history
+                # Extract tool_use_id from the preceding assistant message
                 tool_use_id = None
                 for prev_msg in reversed(messages):
                     if prev_msg["role"] == "assistant":
@@ -245,12 +258,13 @@ class AnthropicChatBot(GenericChatBot):
                             break
                 content = []
                 for part in msg.content:
-                    content_item = {
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": part.data.get("content", ""),
-                    }
-                    content.append(content_item)
+                    if part.type == "tool_result":
+                        content_item = {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": part.content or "",
+                        }
+                        content.append(content_item)
                 if content:
                     messages.append({
                         "role": "user",
@@ -272,15 +286,11 @@ class AnthropicChatBot(GenericChatBot):
         if tools:
             body["tools"] = tools
 
-        # Copy generation config (excluding tool_choice for now)
-        for key, value in chat_history.generation_config.items():
-            if key not in body and key != "tool_choice":
-                body[key] = value
-
         # Add tool_choice if present
-        tool_choice = chat_history.generation_config.get("tool_choice")
-        if tool_choice:
-            body["tool_choice"] = tool_choice
+        if generation_config:
+            tool_choice = generation_config.get("tool_choice")
+            if tool_choice:
+                body["tool_choice"] = tool_choice
 
         return body
 
