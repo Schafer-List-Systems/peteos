@@ -27,7 +27,9 @@ class ToolDefinitionsMessage(Message):
     TOOL_LIST_HOOK_NAME: str = "tool_list"
     TOOL_FILTER_HOOK_NAME: str = "tool_filter"
 
-    def __init__(self, json_dict: dict = {}) -> None:
+    def __init__(self, json_dict: dict | None = None) -> None:
+        if json_dict is None:
+            json_dict = {}
         json_dict.setdefault("role", "tool")
         super().__init__(json_dict)
 
@@ -86,9 +88,9 @@ class ToolDefinitionsMessage(Message):
         content_map: dict[str, str],
     ) -> set[str]:
         """Resolve the tool filter hook and return excluded tool name patterns."""
-        if self.TOOL_FILTER_HOOK_NAME not in materialized_hooks:
+        if self._tool_filter_hook_id not in materialized_hooks:
             return set()
-        content_hash = materialized_hooks[self.TOOL_FILTER_HOOK_NAME]
+        content_hash = materialized_hooks[self._tool_filter_hook_id]
         filter_text = content_map.get(content_hash)
         if not filter_text:
             return set()

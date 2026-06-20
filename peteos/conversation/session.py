@@ -18,12 +18,15 @@ class Session:
     Wraps a JSON dict as the source of truth.
     """
 
-    def __init__(self, parent_dir: str, json_dict: dict = {}) -> None:
+    def __init__(self, parent_dir: str, json_dict: dict | None = None) -> None:
         """
         Args:
             parent_dir: The agent directory (parent of the session subdirectory).
             json_dict: The raw serialized session dict.
         """
+        if json_dict is None:
+            json_dict = {}
+
         self._parent_dir = parent_dir
         self._json_dict = json_dict
         self._json_dict.setdefault("uuid", str(uuid.uuid4()))
@@ -51,12 +54,19 @@ class Session:
         return hashlib.sha256(name.encode("utf-8")).hexdigest()
 
     def _materialize_hooks(self) -> dict[str, str]:
-        """Materialize all hooks and return a map from hook ID to content hash."""
+        """Materialize all hooks and return a map from hook ID to content hash.
+
+        Side effect: populates the active context's content_map with hash →
+        content_text so messages can resolve hook outputs during materialize().
+        """
         hook_to_hash: dict[str, str] = {}
         for hook_id, callback in self._hooks.items():
             content = callback()
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             hook_to_hash[hook_id] = content_hash
+            active = self._active_context
+            if active:
+                active.content_map[content_hash] = content
         return hook_to_hash
 
     def materialize(self) -> None:

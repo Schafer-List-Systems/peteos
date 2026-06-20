@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from peteos.conversation.message_registry import MessageRegistry
@@ -181,6 +182,8 @@ class Message:
         """
         if "_type" not in json_dict:
             json_dict["_type"] = self.__class__.__name__
+        if "id" not in json_dict:
+            json_dict["id"] = str(uuid.uuid4())
         json_dict.setdefault("_hook_ids", [])
         if "creation_timestamp" not in json_dict:
             json_dict["creation_timestamp"] = datetime.now().isoformat()
@@ -335,3 +338,7 @@ class Message:
         token_count = self._compute_token_count(encoding)
         self._json_dict["token_count"] = token_count
         return token_count
+
+
+# Register the base Message class itself (only subclasses get auto-registered via __init_subclass__)
+MessageRegistry.register(Message)

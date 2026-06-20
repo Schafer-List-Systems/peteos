@@ -42,5 +42,11 @@ class MessageRegistry:
 
     @classmethod
     def clear(cls) -> None:
-        """Clear the registry. Useful for testing."""
+        """Clear the registry. Useful for testing.
+
+        Preserves the base ``Message`` class which is always needed.
+        """
         cls._registry.clear()
+        # Re-register the base Message class after clearing
+        from peteos.conversation.message import Message
+        cls.register(Message)

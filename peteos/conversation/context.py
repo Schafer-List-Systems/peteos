@@ -8,9 +8,8 @@ from typing import TYPE_CHECKING
 from peteos.conversation.message import Message
 from peteos.logger import get_logger
 
-if TYPE_CHECKING:
-    from peteos.conversation.system_prompt_message import SystemPromptMessage
-    from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
+from peteos.conversation.system_prompt_message import SystemPromptMessage
+from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 
 _logger = get_logger(__name__)
 
@@ -137,6 +136,13 @@ class Context:
             self._json_dict["content_map"] = dict(parent_context._json_dict["content_map"])
             self._json_dict["origin_context_id"] = parent_context.id
         # Map hook_id → list of messages that reference this hook
+        # Default anchor points: system_prompt, tools, messages
+        if not any(n == "system_prompt" for n, _ in self._json_dict["anchor_points"]):
+            self._json_dict["anchor_points"].append(("system_prompt", 0))
+        if not any(n == "tools" for n, _ in self._json_dict["anchor_points"]):
+            self._json_dict["anchor_points"].append(("tools", 1))
+        if not any(n == "messages" for n, _ in self._json_dict["anchor_points"]):
+            self._json_dict["anchor_points"].append(("messages", 2))
         self._hook_index: dict[str, list[Message]] = {}
         self._update_hook_index()
 
