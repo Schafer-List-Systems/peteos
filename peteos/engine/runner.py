@@ -123,7 +123,6 @@ class Runner(ActiveClass):
         if self._session is None:
             raise ValueError(f"Session {session_uuid} not found in agent")
 
-        self._role: "Role" = self._session.role
         self._execution_environment = ExecutionEnvironment(
             tool_manager=self._session.tool_manager,
             role=self._session.role,
@@ -149,7 +148,7 @@ class Runner(ActiveClass):
     @property
     def role(self) -> "Role":
         """Return the role for this runner's session."""
-        return self._role
+        return self._session.role
 
     @property
     def execution_environment(self) -> ExecutionEnvironment:
@@ -167,11 +166,11 @@ class Runner(ActiveClass):
 
     def _select_chatbot(self) -> ChatBot:
         """Select a ChatBot from the class-level manager based on role.model."""
-        chatbots = ChatBotManager.list_chatbots(self._role.model)
+        chatbots = ChatBotManager.list_chatbots(self._session.role.model)
         if not chatbots:
             raise ValueError(
-                f"No ChatBot found matching model pattern '{self._role.model}' "
-                f"for role '{self._role.name}'"
+                f"No ChatBot found matching model pattern '{self._session.role.model}' "
+                f"for role '{self._session.role.name}'"
             )
         return chatbots[0][1]
 
@@ -401,7 +400,7 @@ class Runner(ActiveClass):
             return (ExecStatus.CONTINUE, None)
 
         if has_text_part and not self._execution_environment.has_pending_tool_call():
-            if self._role.behavior_policy == "continuous":
+            if self._session.role.behavior_policy == "continuous":
                 _logger.debug("[runner] step(): Continuous agent produced text, keeping loop active.")
                 return (ExecStatus.CONTINUE, None)
             _logger.debug("[runner] step(): Had final answer.")
