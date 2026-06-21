@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict
 from typing import Dict, Any, List, Optional, AsyncGenerator, AsyncIterator
 
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 from .chatbot import ChatBot
 from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse, GenericChatBotResponse

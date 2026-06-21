@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 import uuid
 
 if TYPE_CHECKING:
-    from peteos.channels.channel import Channel
+    from peteos.persona.channel import Channel
 
 from peteos.utils.activeclass import ActiveClass
 from peteos.chatbot import ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
 
@@ -503,7 +503,7 @@ class Session(ActiveClass):
             message: Message
     ) -> None:
         """Publish a notification to all subscribed channels."""
-        from peteos.channels.channel import NotificationEvent
+        from peteos.persona.channel import NotificationEvent
         await self.execution_environment.call_hooks("before_notification_publish", self, message)
         for channel in self._channels:
             channel.push_event(NotificationEvent(self.uuid, message))

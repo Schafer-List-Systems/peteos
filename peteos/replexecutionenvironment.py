@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from peteos.chatbot import ChatHistory, Message, ContentPart
 from peteos.executionenvironment import ExecutionEnvironment, ExecStatus
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
 

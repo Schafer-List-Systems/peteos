@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .message import ContentPart, Message
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 
 _logger = get_logger(__name__)
 

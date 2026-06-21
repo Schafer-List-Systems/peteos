@@ -7,8 +7,8 @@ import uuid
 from typing import Optional
 
 from peteos.chatbot import Message, ContentPart
-from peteos.channels.channel import Channel
-from peteos.logger import get_logger, truncate
+from peteos.utils import get_logger, truncate
+from peteos.persona.channel import Channel
 
 _logger = get_logger(__name__)
 

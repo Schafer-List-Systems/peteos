@@ -5,10 +5,10 @@ import sys
 import uuid
 from typing import Optional
 
-from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
-from peteos.logger import get_logger
-from peteos.session import ApprovalEvent
+from peteos.utils import get_logger
+from peteos.engine.executionenvironment import ApprovalEvent
+from peteos.persona.channel import Channel
 
 _logger = get_logger(__name__)
 

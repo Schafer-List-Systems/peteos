@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .message import Message
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 
 from .system_prompt_message import SystemPromptMessage
 from .tool_definitions_message import ToolDefinitionsMessage

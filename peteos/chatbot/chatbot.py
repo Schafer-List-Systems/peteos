@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 from .httpclient import HTTPClient
 from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse

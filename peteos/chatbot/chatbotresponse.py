@@ -5,7 +5,7 @@ from typing import Any, Dict, AsyncGenerator, AsyncIterator
 
 from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
 from peteos.utils.delta_merge import translate_delta_event as _translate_delta_event
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 
 _logger = get_logger(__name__)
 

@@ -10,15 +10,13 @@ from typing import Optional
 
 from aiohttp import web
 
-from peteos.channels.channel import Channel
 from peteos.chatbot import Message, ContentPart
-from peteos.session import (
+from peteos.engine.executionenvironment import (
     ApprovalEvent,
-    Session,
     ToolApprovalStatus,
-    ToolCallRecord,
     ToolExecutionStatus,
 )
+from peteos.persona.channel import Channel
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 
 if TYPE_CHECKING:
     from peteos.persona.role import Role

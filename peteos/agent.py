@@ -4,9 +4,9 @@ import asyncio
 import uuid
 from typing import Dict, Optional, Set
 
-from peteos.channels.channel import Channel
+from peteos.persona.channel import Channel
 from peteos.chatbot import Message, ContentPart
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 from peteos.role import Role
 from peteos.session import Session
 from peteos.toolmanager import ToolManager

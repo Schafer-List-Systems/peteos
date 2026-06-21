@@ -6,8 +6,8 @@ import uuid
 from pathlib import Path
 from typing import Dict, Optional, Set
 
-from peteos.channels.channel import Channel
-from peteos.logger import get_logger
+from peteos.persona.channel import Channel
+from peteos.utils import get_logger
 
 from peteos.conversation.system_prompt_message import SystemPromptMessage
 from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from peteos.chatbot import ContentPart, Message
 from peteos.executionenvironment import ExecStatus
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 from peteos.oap.error import Error
 from peteos.oap.sandbox import build_sandbox_description, create_sandbox_globals
 from peteos.role import Role

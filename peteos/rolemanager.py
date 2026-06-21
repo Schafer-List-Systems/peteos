@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 from peteos.role import Role
 
 _logger = get_logger(__name__)
