@@ -254,9 +254,9 @@ class OpenAIChatBot(ChatBot):
                             })
                         else:
                             content_parts.append(raw)
-                    elif raw.get("type") == "reasoning":
-                        # Translate reasoning to OpenAI reasoning field
-                        msg_dict["reasoning"] = raw.get("reasoning", "")
+                    elif raw.get("type") == "thinking":
+                        # Translate thinking to OpenAI reasoning field
+                        msg_dict["reasoning"] = raw.get("text", "")
                     else:
                         # Text or other content part - apply key translation
                         translated = {}
@@ -288,9 +288,10 @@ class OpenAIChatBot(ChatBot):
             body["tools"] = tools
 
         # Copy generation config (includes tool_choice)
-        for key, value in context.generation_config.items():
-            if key not in body:
-                body[key] = value
+        if generation_config:
+            for key, value in generation_config.items():
+                if key not in body:
+                    body[key] = value
 
         return body
 

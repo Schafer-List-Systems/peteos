@@ -234,10 +234,10 @@ class AnthropicChatBot(ChatBot):
                                 content_item["input"] = json.loads(content_item["arguments"])
                                 del content_item["arguments"]
                             content.append(content_item)
-                    elif raw.get("type") == "reasoning":
+                    elif raw.get("type") == "thinking":
                         content.append({
                             "type": "thinking",
-                            "thinking": raw.get("reasoning", "")
+                            "thinking": raw.get("text", "")
                         })
                     else:
                         content.append(raw)

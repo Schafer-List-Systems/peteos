@@ -18,6 +18,7 @@ from peteos.role import Role
 from peteos.toolmanager import Tool, ToolManager
 
 from peteos.oap.decorators import tool
+from peteos.oap.agentic_registry import AgenticObjectRegistry
 
 _logger = get_logger(__name__)
 
@@ -99,7 +100,14 @@ from peteos.agent import Agent
 
 
 class AgenticObjectBase:
-    """Base class for all Object-Agentic Programming objects."""
+    """Base class for all Object-Agentic Programming objects.
+
+    All subclasses are auto-registered in AgenticObjectRegistry.
+    """
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        AgenticObjectRegistry.register(cls)
 
     def __init__(self) -> None:
         super().__init__()
