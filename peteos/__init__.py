@@ -1,6 +1,6 @@
 # Peteos - Agentic application framework
 
-from peteos.activeclass import ActiveClass
+from peteos.utils.activeclass import ActiveClass
 from peteos.chatbot import (
     ChatBot,
     OpenAIChatBot,

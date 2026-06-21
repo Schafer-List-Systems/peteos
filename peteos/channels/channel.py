@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import AsyncIterator, Awaitable, Dict, Optional, Set
 
-from peteos.activeclass import ActiveClass
+from peteos.utils.activeclass import ActiveClass
 from peteos.chatbot import Message
 
 

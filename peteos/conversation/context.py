@@ -5,11 +5,11 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from peteos.conversation.message import Message
+from .message import Message
 from peteos.logger import get_logger
 
-from peteos.conversation.system_prompt_message import SystemPromptMessage
-from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
+from .system_prompt_message import SystemPromptMessage
+from .tool_definitions_message import ToolDefinitionsMessage
 
 _logger = get_logger(__name__)
 

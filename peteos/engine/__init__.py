@@ -6,7 +6,7 @@ environment that drive agents to act.  Wraps a conversation.Session
 executing tools, and producing output.
 """
 
-from peteos.engine.activeclass import ActiveClass
+from peteos.utils.activeclass import ActiveClass
 from peteos.engine.executionenvironment import ExecutionEnvironment
 from peteos.engine.exec_status import ExecStatus
 from peteos.engine.runner import (

@@ -113,7 +113,7 @@ class InteractiveShellChannel(Channel):
         self, src: str, text: str, file_type: str = "auto"
     ) -> None:
         """Queue a file message to the current session."""
-        from peteos.utils.image import create_media_content_part_async
+        from peteos.conversation.media import create_media_content_part_async
 
         file_part = await create_media_content_part_async(src)
 

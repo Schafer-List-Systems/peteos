@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from peteos.conversation.message_registry import MessageRegistry
+from .message_registry import MessageRegistry
 
 
 class ContentPart:

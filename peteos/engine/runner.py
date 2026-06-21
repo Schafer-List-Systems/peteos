@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from peteos.chatbot import ChatBot, ChatBotManager, ContentPart, Message
 
-from peteos.activeclass import ActiveClass
+from peteos.utils.activeclass import ActiveClass
 from peteos.engine.exec_status import ExecStatus
 from peteos.engine.executionenvironment import (
     ApprovalEvent,

@@ -9,7 +9,7 @@ import logging
 import mimetypes
 from typing import Optional, Union
 
-from peteos.chatbot import ContentPart
+from peteos.conversation.message import ContentPart
 
 logger = logging.getLogger(__name__)
 

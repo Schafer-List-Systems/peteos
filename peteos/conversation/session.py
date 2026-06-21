@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, Callable
 from peteos.conversation.context import Context
 from peteos.conversation.message import Message
 
-if TYPE_CHECKING:
-    from peteos.conversation.system_prompt_message import SystemPromptMessage
-    from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
+from .system_prompt_message import SystemPromptMessage
+from .tool_definitions_message import ToolDefinitionsMessage
 
 
 class Session:
@@ -116,8 +115,8 @@ class Session:
     def create(
         cls,
         parent_dir: str,
-        system_prompt_message: "SystemPromptMessage | None" = None,
-        tool_definitions_message: "ToolDefinitionsMessage | None" = None,
+        system_prompt_message: SystemPromptMessage | None = None,
+        tool_definitions_message: ToolDefinitionsMessage | None = None,
     ) -> "Session":
         """Create a new session with a freshly created context.
 

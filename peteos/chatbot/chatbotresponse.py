@@ -3,7 +3,6 @@
 import json
 from typing import Any, Dict, AsyncGenerator, AsyncIterator
 
-from peteos.utils import get_value_at_path as _get_value_at_path
 from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
 from peteos.utils.delta_merge import translate_delta_event as _translate_delta_event
 from peteos.logger import get_logger

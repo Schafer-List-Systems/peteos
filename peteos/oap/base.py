@@ -266,7 +266,7 @@ class AgenticObjectBase:
         if session is None:
             return "Error: session not available."
 
-        from peteos.utils.image import create_media_content_part_async
+        from peteos.conversation.media import create_media_content_part_async
         media_part = await create_media_content_part_async(src, timeout=30.0)
 
         queued_msg = Message(
@@ -298,7 +298,7 @@ class AgenticObjectBase:
         if session is None:
             return
 
-        from peteos.utils.image import create_media_content_part_async
+        from peteos.conversation.media import create_media_content_part_async
         media_part = await create_media_content_part_async(data, mime_type=mime_type)
 
         msg_text = text or "Media sent."
@@ -487,7 +487,7 @@ class AgenticObjectBase:
 
             content: list[ContentPart] = [ContentPart(part_type="text", text=prompt)]
             if image is not None:
-                from peteos.utils.image import create_media_content_part_async
+                from peteos.conversation.media import create_media_content_part_async
                 image_part = await create_media_content_part_async(image, timeout=timeout or 30.0)
                 content.append(image_part)
 

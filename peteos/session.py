@@ -15,7 +15,7 @@ import uuid
 if TYPE_CHECKING:
     from peteos.channels.channel import Channel
 
-from peteos.activeclass import ActiveClass
+from peteos.utils.activeclass import ActiveClass
 from peteos.chatbot import ChatHistory, Message, ContentPart, SystemPromptMessage, ToolDefinitionsMessage
 from peteos.logger import get_logger
 from peteos.role import Role
