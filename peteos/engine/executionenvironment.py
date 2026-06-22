@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from peteos.utils import get_logger
 
+from peteos.conversation.context import Context as ConversationContext
 from peteos.conversation.message import ContentPart, Message
 from peteos.persona.role import Role
 from peteos.toolmanager import ToolManager
@@ -43,10 +44,6 @@ class ToolCallRecord:
     execution_result: Optional[str] = None
     execution_success: Optional[bool] = None
     denied_reason: Optional[str] = None
-
-
-if TYPE_CHECKING:
-    from peteos.conversation.message import Message
 
 
 @dataclass
@@ -126,6 +123,10 @@ class ExecutionEnvironment:
         self._groups: dict[str, ToolCallGroup] = {}  # group_id -> ToolCallGroup
         self._tool_to_group: dict[str, str] = {}  # tool_call_id -> group_id
         self._hooks: dict[str, list[Callable]] = {
+            "before_send_to_chatbot": [],
+            "after_step": [],
+            "after_message_append": [],
+            "before_notification_publish": [],
             "before_tool_execution": [],
             "after_tool_execution": [],
         }
@@ -209,15 +210,7 @@ class ExecutionEnvironment:
         group = self._groups[group_id]
         tool_name = tool_call.get("name", "")
 
-        if not self._tool_manager:
-            tool_call["denied_reason"] = f"Tool '{tool_name}' is not available for this agent"
-            record = ToolCallRecord(
-                tool_call_id=tc_id,
-                tool_call=tool_call,
-                approval_status=ToolApprovalStatus.DENIED,
-                execution_status=ToolExecutionStatus.DENIED,
-            )
-        elif not self._tool_manager.get_tool(tool_name):
+        if not self._tool_manager or not self._tool_manager.get_tool(tool_name):
             tool_call["denied_reason"] = f"Tool '{tool_name}' is not available for this agent"
             record = ToolCallRecord(
                 tool_call_id=tc_id,
@@ -262,8 +255,10 @@ class ExecutionEnvironment:
 
     def has_pending_tool_call(self, group_id: Optional[str] = None) -> bool:
         """Check if any tool call needs user approval (approval status is PENDING)."""
-        groups = [self._groups[group_id]] if group_id else list(self._groups.values())
-        return any(g.has_pending() for g in groups)
+        if group_id:
+            group = self._groups.get(group_id)
+            return group.has_pending() if group else False
+        return any(g.has_pending() for g in self._groups.values())
 
     def has_unfinished_tool_call(self, group_id: Optional[str] = None) -> bool:
         """Check if any tool call is not yet fully executed."""
@@ -333,37 +328,40 @@ class ExecutionEnvironment:
             return False, group_id
 
     # ------------------------------------------------------------------ #
-    # Result injection — runner creates and passes the result message,
-    # then EE owns the reference and injects ContentParts.
+    # Result injection — EE owns result message and ContentPart injection.
     # ------------------------------------------------------------------ #
 
-    def set_result_message(self, group_id: str, message: "Message") -> None:
-        """Pass the result message from the runner. EE stores reference."""
+    def _ensure_result_message(self, group_id: str) -> Message:
+        """Ensure a result message exists for this group, creating it if needed."""
         group = self._groups.get(group_id)
         if group is None:
             raise ValueError(f"Unknown tool call group: {group_id}")
-        group.set_result_message(message)
+        if group.result_message is None:
+            group.set_result_message(Message({"role": "tool_result", "content": []}))
+        return group.result_message
 
-    def get_result_message(self, group_id: str) -> Optional["Message"]:
-        """Return the result message for a group, or None if not yet created."""
-        group = self._groups.get(group_id)
-        return group.get_result_message() if group else None
+    async def execute_and_inject(self, tool_call: dict, group_id: str) -> tuple[str, bool]:
+        """Execute a tool and inject the result ContentPart into the group's result message.
 
-    def inject_result(self, group_id: str, content_part: ContentPart) -> None:
-        """Append a tool result ContentPart into the result message for this group.
-
-        The message must have been set via set_result_message() first.
+        Creates the result message if needed. The runner is responsible
+        for appending and notifying the result message.
+        Returns (result_string, success) — same as ``execute_tool``.
         """
         group = self._groups.get(group_id)
         if group is None:
             raise ValueError(f"Unknown tool call group: {group_id}")
-        msg = group.result_message
-        if msg is None:
-            raise RuntimeError(f"No result message set for group: {group_id}")
-        msg.raw_dict["content"].append(content_part.raw_dict)
+
+        result_msg = self._ensure_result_message(group_id)
+        result_str, success = await self.execute_tool(tool_call)
+
+        cp = ContentPart.create_tool_result(tool_call.get("id", ""), result_str)
+        cp.raw_dict["name"] = tool_call.get("name", "")
+        result_msg.raw_dict["content"].append(cp.raw_dict)
+
+        return result_str, success
 
     # ------------------------------------------------------------------ #
-    # Tool execution
+    # Tool execution — standalone
     # ------------------------------------------------------------------ #
 
     async def execute_tool(self, tool_call: dict) -> tuple[str, bool]:

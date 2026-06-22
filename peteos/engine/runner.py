@@ -296,19 +296,17 @@ class Runner(ActiveClass):
                     continue
                 item_type = item["type"]
                 if item_type == "tool_use":
-                    content_parts.append(ContentPart(part_type="tool_use", **item))
+                    content_parts.append(ContentPart(dict(item)))
                 elif item_type == "texttool_use":
-                    content_parts.append(ContentPart(part_type="text", text=item["content"]))
-                    content_parts.append(ContentPart(part_type="tool_use", **item))
+                    content_parts.append(ContentPart.create_text(item["content"]))
+                    content_parts.append(ContentPart(dict(item)))
                 elif item_type == "text":
                     content_value = item["content"]
-                    content_parts.append(ContentPart(part_type="text", text=content_value))
+                    content_parts.append(ContentPart.create_text(content_value))
                     has_text_part = True
                 elif item_type == "thinking":
                     content_value = item["content"]
-                    content_parts.append(
-                        ContentPart(part_type="reasoning", reasoning=content_value)
-                    )
+                    content_parts.append(ContentPart.create_thinking(content_value))
                 else:
                     _logger.debug("Unknown item type: %s", item_type)
                     return (ExecStatus.ERROR, None)
@@ -316,7 +314,7 @@ class Runner(ActiveClass):
             # --- Phase 4: Append assistant message ---
             _logger.debug("ChatBot response: role=%s, content_types=%s", response.data.get("role"), [item.get("type") for item in content_array] if isinstance(content_array, list) else "N/A")
             _logger.debug("ChatBot full response data: %s", json.dumps(response.data, indent=2, default=str))
-            response_msg = Message(role=response.data["role"], content=content_parts)
+            response_msg = Message.create(role=response.data["role"], content_parts=content_parts)
             await self.append_and_notify(response_msg)
 
             # --- Phase 4b: Create tool groups and result anchors ---
@@ -348,73 +346,30 @@ class Runner(ActiveClass):
             tool_call = record.tool_call
             tool_name = tool_call["name"]
 
+            # --- Deferred result message creation ---
+            # First execution in group: create message, append to anchor,
+            # notify. Result message is in context, EE injects into it.
+            if group.get_result_message() is None:
+                result_msg = Message.create(role="tool_result", content_parts=[])
+                self._session.active_context.append(result_msg, anchor_point=group.anchor_name)
+                await self.append_and_notify(result_msg)
+                group.set_result_message(result_msg)
+
             # Handle denied tool calls (status set by _handle_approval)
             if record.approval_status == ToolApprovalStatus.DENIED:
                 denial_msg = tool_call.get("denied_reason", "Tool call was denied by user.")
-                tool_call_id = tool_call.get("id", "")
-                denial_msg_obj = Message(
-                    role="tool_result",
-                    content=[ContentPart(
-                        part_type="tool_result",
-                        name=tool_name,
-                        content=denial_msg,
-                        tool_use_id=tool_call_id,
-                    )],
-                )
-                # If result message doesn't exist yet, create and append it
-                if group.get_result_message() is None:
-                    group.set_result_message(denial_msg_obj)
-                    await self.append_and_notify(denial_msg_obj)
-                else:
-                    result_msg = group.get_result_message()
-                    result_msg.raw_dict["content"].append(ContentPart(
-                        part_type="tool_result",
-                        name=tool_name,
-                        content=denial_msg,
-                        tool_use_id=tool_call_id,
-                    ).raw_dict)
-
                 await self._call_hooks("after_tool_execution", self, tool_call, denial_msg, False)
                 _logger.debug("[runner] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
 
-            # --- Deferred result message creation ---
-            # First execution in group: create message, append to anchor,
-            # pass to group for ownership.
-            if group.get_result_message() is None:
-                result_msg = Message(role="tool_result", content=[])
-                anchor_name = group.anchor_name
-                self._session.active_context.append(result_msg, anchor_point=anchor_name)
-                await self.append_and_notify(result_msg)
-                group.set_result_message(result_msg)
-
-            tool_call_id = tool_call.get("id", "")
-            result_str, success = await self._execution_environment.execute_tool(tool_call)
+            result_str, success = await self._execution_environment.execute_and_inject(tool_call, group_id)
             if not success and result_str.startswith("Error: Tool '"):
-                group.inject_result(group_id, ContentPart(
-                    part_type="tool_result",
-                    name=tool_name,
-                    content=result_str,
-                    tool_use_id=tool_call_id,
-                ))
                 _logger.debug("[runner] step(): Tool %s not found", tool_name)
                 return (ExecStatus.TOOL_NOT_FOUND, None)
             if not success:
-                group.inject_result(group_id, ContentPart(
-                    part_type="tool_result",
-                    name=tool_name,
-                    content=result_str,
-                    tool_use_id=tool_call_id,
-                ))
                 await self._call_hooks("after_tool_execution", self, tool_call, result_str, False)
                 _logger.debug("[runner] step(): Tool %s failed", tool_name)
                 return (ExecStatus.TOOL_FAILED, None)
-            group.inject_result(group_id, ContentPart(
-                part_type="tool_result",
-                name=tool_name,
-                content=result_str,
-                tool_use_id=tool_call_id,
-            ))
             await self._call_hooks("after_tool_execution", self, tool_call, result_str, True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
 
