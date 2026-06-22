@@ -5,7 +5,7 @@ import pytest
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.error import Error
-from peteos.toolmanager import ToolManager
+from peteos.persona.toolmanager import ToolManager
 
 
 class TestAgenticObjectBaseInit:
