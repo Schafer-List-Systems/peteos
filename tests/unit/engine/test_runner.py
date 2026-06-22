@@ -170,6 +170,8 @@ def _make_mock_session(
 def _make_mock_agent(session: MagicMock) -> MagicMock:
     agent = MagicMock()
     agent.get_session.return_value = session
+    agent._tool_manager = session.tool_manager
+    agent.role = session.role
     return agent
 
 
@@ -422,7 +424,7 @@ class TestRunnerEventHandling:
         agent = _make_mock_agent(session)
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
         msg = MagicMock()
-        runner.queue_message(msg)
+        await runner.queue_message(msg)
         assert not runner.event_queue.empty()
 
     async def test_approval_event_processed(self, chatbot_manager_mock):
@@ -438,7 +440,7 @@ class TestRunnerEventHandling:
         )
 
         evt = ApprovalEvent(tool_call_id="tc1", approved=True)
-        runner.queue_message(evt)
+        await runner.queue_message(evt)
 
         assert not runner.event_queue.empty()
 

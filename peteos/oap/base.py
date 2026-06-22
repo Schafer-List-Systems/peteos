@@ -273,10 +273,10 @@ class AgenticObjectBase:
         from peteos.conversation.media import create_media_content_part_async
         media_part = await create_media_content_part_async(src, timeout=30.0)
 
-        queued_msg = Message(
+        queued_msg = Message.create(
             role="user",
-            content=[
-                ContentPart(part_type="text", text=f"Media loaded from {src}."),
+            content_parts=[
+                ContentPart.create_text(f"Media loaded from {src}."),
                 media_part,
             ],
         )
@@ -306,10 +306,10 @@ class AgenticObjectBase:
         media_part = await create_media_content_part_async(data, mime_type=mime_type)
 
         msg_text = text or "Media sent."
-        queued_msg = Message(
+        queued_msg = Message.create(
             role="user",
-            content=[
-                ContentPart(part_type="text", text=msg_text),
+            content_parts=[
+                ContentPart.create_text(msg_text),
                 media_part,
             ],
         )
@@ -485,9 +485,9 @@ class AgenticObjectBase:
                         f"It looks like you finished a step without calling `produce_output` or `produce_error`. "
                         f"If you have your final answer, call `produce_output` with your result in the following schema: {schema_desc} "
                     )
-                    await r.queue_message(Message(
+                    await r.queue_message(Message.create(
                         role="user",
-                        content=[ContentPart(part_type="text", text=reminder)],
+                        content_parts=[ContentPart.create_text(reminder)],
                     ))
                     return None
 
@@ -495,15 +495,15 @@ class AgenticObjectBase:
                 "after_step", _on_step_done, runner
             )
 
-            content: list[ContentPart] = [ContentPart(part_type="text", text=prompt)]
+            content: list[ContentPart] = [ContentPart.create_text(prompt)]
             if image is not None:
                 from peteos.conversation.media import create_media_content_part_async
                 image_part = await create_media_content_part_async(image, timeout=timeout or 30.0)
                 content.append(image_part)
 
-            await runner.queue_message(Message(
+            await runner.queue_message(Message.create(
                 role="user",
-                content=content,
+                content_parts=content,
             ))
 
             reminder_msg = f"PRODUCE YOUR FINAL OUTPUT USING THE `produce_output` OR `produce_error` TOOL!\n" \
@@ -529,20 +529,24 @@ class AgenticObjectBase:
                     )
                     return Error(f"Agent did not produce output within {timeout}s timeout")
 
-                await runner.queue_message(Message(
+                await runner.queue_message(Message.create(
                     role="user",
-                    content=[ContentPart(part_type="text", text=reminder_msg)],
+                    content_parts=[ContentPart.create_text(reminder_msg)],
                 ))
         finally:
             # Clear OAP state variables so the next invocation starts fresh
             if runner is not None:
                 try:
-                    runner.state.delete("_oap_produced_data")
-                except ValueError:
+                    produced = runner.state.get("_oap_produced_data")
+                    if produced is not None:
+                        runner.state.delete("_oap_produced_data")
+                except KeyError:
                     pass
                 try:
-                    runner.state.delete("_oap_error")
-                except ValueError:
+                    error = runner.state.get("_oap_error")
+                    if error is not None:
+                        runner.state.delete("_oap_error")
+                except KeyError:
                     pass
             if persistent_thread_id is None:
                 try:

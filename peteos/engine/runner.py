@@ -102,7 +102,7 @@ class Runner(ActiveClass):
     def __init__(self, agent: "Agent", session_uuid: "uuid.UUID", chatbot: "ChatBot | None" = None) -> None:
         """Initialize the runner for a specific session.
 
-        Grabs role, tool manager from the agent's session.
+        Grabs role, tool manager from the agent.
         Selects the chatbot from the ChatBotManager based on role.model.
 
         Args:
@@ -118,16 +118,16 @@ class Runner(ActiveClass):
         self._channels: set[Channel] = set()
         self._idle: asyncio.Event = asyncio.Event()
 
-        # Pull configuration from the agent's session
+        # Pull configuration from the agent (not the session data model)
         self._session: Session = agent.get_session(session_uuid)
         if self._session is None:
             raise ValueError(f"Session {session_uuid} not found in agent")
 
         self._execution_environment = ExecutionEnvironment(
-            tool_manager=self._session.tool_manager,
-            role=self._session.role,
-            auto_approve_tools=list(self._session.auto_approve_tools),
-            tool_failure_policy=self._session.tool_failure_policy,
+            tool_manager=agent._tool_manager,
+            role=agent.role,
+            auto_approve_tools=list(agent.role.auto_approve_tools),
+            tool_failure_policy="continue",
         )
         self._chatbot: ChatBot = chatbot or self._select_chatbot()
 
@@ -166,11 +166,11 @@ class Runner(ActiveClass):
 
     def _select_chatbot(self) -> ChatBot:
         """Select a ChatBot from the class-level manager based on role.model."""
-        chatbots = ChatBotManager.list_chatbots(self._session.role.model)
+        chatbots = ChatBotManager.list_chatbots(self._agent.role.model)
         if not chatbots:
             raise ValueError(
-                f"No ChatBot found matching model pattern '{self._session.role.model}' "
-                f"for role '{self._session.role.name}'"
+                f"No ChatBot found matching model pattern '{self._agent.role.model}' "
+                f"for role '{self._agent.role.name}'"
             )
         return chatbots[0][1]
 
@@ -178,13 +178,18 @@ class Runner(ActiveClass):
     # Message queue
     # ------------------------------------------------------------------ #
 
-    def queue_message(self, message: Message) -> None:
+    async def queue_message(self, message: Message) -> None:
         """Queue a message for processing.
 
-        Non-blocking. Pushes to event_queue. If the runner is not yet
-        running, the caller should call ``await start()`` before the
-        first ``queue_message``.
+        Non-blocking. Pushes to event_queue and starts the event loop if not running.
+        The Runner.run() loop processes the message and runs the
+        execution environment.
+
+        Args:
+            message: The message to queue.
         """
+        if not self.is_running():
+            await self.start()
         self._idle.clear()
         self.push_event(message)
 

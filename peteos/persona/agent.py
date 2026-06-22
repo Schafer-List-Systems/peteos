@@ -99,6 +99,11 @@ class Agent:
         """Return this agent's role."""
         return self._role
 
+    @property
+    def tool_manager(self) -> ToolManager:
+        """Return this agent's tool manager."""
+        return self._tool_manager
+
     def _tool_list_hook(self) -> str:
         """Hook callback that returns the tool list as a JSON string."""
         return json.dumps([
