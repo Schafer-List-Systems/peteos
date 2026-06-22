@@ -7,12 +7,11 @@ executing tools, and producing output.
 """
 
 from peteos.utils.activeclass import ActiveClass
-from peteos.engine.executionenvironment import ExecutionEnvironment
+from peteos.engine.executionenvironment import ExecutionEnvironment, ToolCallGroup
 from peteos.engine.exec_status import ExecStatus
 from peteos.engine.runner import (
     AgenticState,
     ApprovalEvent,
-    Driver,
     Runner,
     ToolApprovalStatus,
     ToolCallRecord,
@@ -30,6 +29,7 @@ __all__ = [
     "ExecStatus",
     "ExecutionEnvironment",
     "Runner",
+    "ToolCallGroup",
     "ToolApprovalStatus",
     "ToolCallRecord",
     "ToolExecutionStatus",

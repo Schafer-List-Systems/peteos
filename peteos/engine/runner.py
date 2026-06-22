@@ -258,8 +258,10 @@ class Runner(ActiveClass):
         """Execute one loop iteration: chatbot -> tools -> continue/exit.
 
         1. Call chatbot (skip on re-entry after tool_pending)
-        2. Append assistant response to active_context
-        3. For each tool call: delegate to execution_environment -> append result
+        2. Append assistant response to active_context; create tool groups
+           and anchors for tool calls
+        3. For each tool call: execute via execution_environment, inject
+           result into deferred result message at group anchor
         4. Return a status telling the loop whether to continue, exit, or
            wait for tool approval.
 
@@ -295,11 +297,9 @@ class Runner(ActiveClass):
                 item_type = item["type"]
                 if item_type == "tool_use":
                     content_parts.append(ContentPart(part_type="tool_use", **item))
-                    self._execution_environment.add_tool_call(item)
                 elif item_type == "texttool_use":
                     content_parts.append(ContentPart(part_type="text", text=item["content"]))
                     content_parts.append(ContentPart(part_type="tool_use", **item))
-                    self._execution_environment.add_tool_call(item)
                 elif item_type == "text":
                     content_value = item["content"]
                     content_parts.append(ContentPart(part_type="text", text=content_value))
@@ -319,11 +319,32 @@ class Runner(ActiveClass):
             response_msg = Message(role=response.data["role"], content=content_parts)
             await self.append_and_notify(response_msg)
 
+            # --- Phase 4b: Create tool groups and result anchors ---
+            if any(cp.type == "tool_use" for cp in content_parts):
+                group_id = response_msg.id
+                anchor_name = f"{group_id}:tool_result"
+                self._execution_environment.create_tool_group(group_id, anchor_name)
+                # msg_index is the end-iterator position after the assistant message
+                msg_index = len(self._session.active_context.messages)
+                self._session.active_context.add_anchor(anchor_name, msg_index - len(self._session.active_context.messages))
+
         # --- Phase 5: Execute tool calls (delegate to ExecutionEnvironment) ---
         did_tool_calls = self._execution_environment.has_reviewed_tool_call()
         yielded = False
         while self._execution_environment.has_reviewed_tool_call():
-            record = self._execution_environment.pop_pending_tool_call()
+            group = self._execution_environment.get_group(group_id := "")
+            # Find a group that has a reviewed tool call
+            found_group = None
+            for g in self._execution_environment._groups.values():
+                if g.has_reviewed():
+                    found_group = g
+                    break
+            if found_group is None:
+                break
+            group = found_group
+            group_id = group.id
+
+            record = group.pop_first_reviewed()
             tool_call = record.tool_call
             tool_name = tool_call["name"]
 
@@ -331,7 +352,7 @@ class Runner(ActiveClass):
             if record.approval_status == ToolApprovalStatus.DENIED:
                 denial_msg = tool_call.get("denied_reason", "Tool call was denied by user.")
                 tool_call_id = tool_call.get("id", "")
-                msg = Message(
+                denial_msg_obj = Message(
                     role="tool_result",
                     content=[ContentPart(
                         part_type="tool_result",
@@ -340,50 +361,60 @@ class Runner(ActiveClass):
                         tool_use_id=tool_call_id,
                     )],
                 )
-                await self.append_and_notify(msg)
+                # If result message doesn't exist yet, create and append it
+                if group.get_result_message() is None:
+                    group.set_result_message(denial_msg_obj)
+                    await self.append_and_notify(denial_msg_obj)
+                else:
+                    result_msg = group.get_result_message()
+                    result_msg.raw_dict["content"].append(ContentPart(
+                        part_type="tool_result",
+                        name=tool_name,
+                        content=denial_msg,
+                        tool_use_id=tool_call_id,
+                    ).raw_dict)
+
                 await self._call_hooks("after_tool_execution", self, tool_call, denial_msg, False)
                 _logger.debug("[runner] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
 
+            # --- Deferred result message creation ---
+            # First execution in group: create message, append to anchor,
+            # pass to group for ownership.
+            if group.get_result_message() is None:
+                result_msg = Message(role="tool_result", content=[])
+                anchor_name = group.anchor_name
+                self._session.active_context.append(result_msg, anchor_point=anchor_name)
+                await self.append_and_notify(result_msg)
+                group.set_result_message(result_msg)
+
             tool_call_id = tool_call.get("id", "")
             result_str, success = await self._execution_environment.execute_tool(tool_call)
             if not success and result_str.startswith("Error: Tool '"):
-                msg = Message(
-                    role="tool_result",
-                    content=[ContentPart(
-                        part_type="tool_result",
-                        name=tool_name,
-                        content=result_str,
-                        tool_use_id=tool_call_id,
-                    )],
-                )
-                await self.append_and_notify(msg)
-                _logger.debug("[runner] step(): Tool %s not found", tool_name)
-                return (ExecStatus.TOOL_NOT_FOUND, None)
-            if not success:
-                msg = Message(
-                    role="tool_result",
-                    content=[ContentPart(
-                        part_type="tool_result",
-                        name=tool_name,
-                        content=result_str,
-                        tool_use_id=tool_call_id,
-                    )],
-                )
-                await self.append_and_notify(msg)
-                await self._call_hooks("after_tool_execution", self, tool_call, result_str, False)
-                _logger.debug("[runner] step(): Tool %s failed", tool_name)
-                return (ExecStatus.TOOL_FAILED, None)
-            msg = Message(
-                role="tool_result",
-                content=[ContentPart(
+                group.inject_result(group_id, ContentPart(
                     part_type="tool_result",
                     name=tool_name,
                     content=result_str,
                     tool_use_id=tool_call_id,
-                )],
-            )
-            await self.append_and_notify(msg)
+                ))
+                _logger.debug("[runner] step(): Tool %s not found", tool_name)
+                return (ExecStatus.TOOL_NOT_FOUND, None)
+            if not success:
+                group.inject_result(group_id, ContentPart(
+                    part_type="tool_result",
+                    name=tool_name,
+                    content=result_str,
+                    tool_use_id=tool_call_id,
+                ))
+                await self._call_hooks("after_tool_execution", self, tool_call, result_str, False)
+                _logger.debug("[runner] step(): Tool %s failed", tool_name)
+                return (ExecStatus.TOOL_FAILED, None)
+            group.inject_result(group_id, ContentPart(
+                part_type="tool_result",
+                name=tool_name,
+                content=result_str,
+                tool_use_id=tool_call_id,
+            ))
             await self._call_hooks("after_tool_execution", self, tool_call, result_str, True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
 

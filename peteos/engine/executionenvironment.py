@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 from peteos.utils import get_logger
 
 if TYPE_CHECKING:
+    from peteos.conversation.message import Message
     from peteos.persona.role import Role
     from peteos.toolmanager import ToolManager
 
@@ -43,6 +44,52 @@ class ToolCallRecord:
     execution_result: Optional[str] = None
     execution_success: Optional[bool] = None
     denied_reason: Optional[str] = None
+
+
+if TYPE_CHECKING:
+    from peteos.conversation.message import Message
+
+
+@dataclass
+class ToolCallGroup:
+    """Encapsulates the tool call lifecycle for one assistant message.
+
+    Owns the record list, result message reference, and the anchor name.
+    Provides group-level queries and result injection.
+    """
+
+    id: str
+    anchor_name: str
+    records: list[ToolCallRecord] = field(default_factory=list)
+    result_message: Optional[Message] = None
+
+    def add_tool_call(self, record: ToolCallRecord) -> None:
+        self.records.append(record)
+
+    def has_pending(self) -> bool:
+        return any(r.approval_status == ToolApprovalStatus.PENDING for r in self.records)
+
+    def has_reviewed(self) -> bool:
+        for r in self.records:
+            if r.approval_status == ToolApprovalStatus.PENDING:
+                return False
+            return True
+        return False
+
+    def has_unfinished(self) -> bool:
+        return any(r.execution_status != ToolExecutionStatus.EXECUTED for r in self.records)
+
+    def pop_first_reviewed(self) -> Optional[ToolCallRecord]:
+        for i, r in enumerate(self.records):
+            if r.approval_status != ToolApprovalStatus.PENDING:
+                return self.records.pop(i)
+        return None
+
+    def set_result_message(self, message: Message) -> None:
+        self.result_message = message
+
+    def get_result_message(self) -> Optional[Message]:
+        return self.result_message
 
 
 @dataclass
@@ -77,7 +124,8 @@ class ExecutionEnvironment:
         self._role = role
         self.auto_approve_tools = auto_approve_tools
         self.tool_failure_policy = tool_failure_policy
-        self._pending_tool_calls: list[ToolCallRecord] = []
+        self._groups: dict[str, ToolCallGroup] = {}  # group_id -> ToolCallGroup
+        self._tool_to_group: dict[str, str] = {}  # tool_call_id -> group_id
         self._hooks: dict[str, list[Callable]] = {
             "before_tool_execution": [],
             "after_tool_execution": [],
@@ -140,116 +188,182 @@ class ExecutionEnvironment:
         return first_deny
 
     # ------------------------------------------------------------------ #
-    # Tool call queue management
+    # Tool call queue management — group-based
     # ------------------------------------------------------------------ #
 
-    def add_tool_call(self, tool_call: dict) -> None:
-        """Add a tool call to the pending list, auto-approving if applicable."""
+    def create_tool_group(self, group_id: str, anchor_name: str) -> None:
+        """Create a new tool call group. Anchor already exists in Context."""
+        if group_id in self._groups:
+            raise ValueError(f"Tool call group already exists: {group_id}")
+        self._groups[group_id] = ToolCallGroup(id=group_id, anchor_name=anchor_name)
+
+    def add_tool_call(self, tool_call: dict, group_id: str) -> ToolCallRecord:
+        """Add a tool call to the specified group. Returns the created record."""
         tc_id = tool_call.get("id")
         if tc_id is None:
             raise ValueError("Tool call missing required 'id' field")
-        for record in self._pending_tool_calls:
-            if record.tool_call_id == tc_id:
-                raise ValueError(f"Duplicate tool call id: {tc_id}")
+        if tc_id in self._tool_to_group:
+            raise ValueError(f"Duplicate tool call id: {tc_id}")
+        if group_id not in self._groups:
+            raise ValueError(f"Unknown tool call group: {group_id}")
+
+        group = self._groups[group_id]
         tool_name = tool_call.get("name", "")
 
         if not self._tool_manager:
             tool_call["denied_reason"] = f"Tool '{tool_name}' is not available for this agent"
-            self._pending_tool_calls.append(ToolCallRecord(
+            record = ToolCallRecord(
                 tool_call_id=tc_id,
                 tool_call=tool_call,
                 approval_status=ToolApprovalStatus.DENIED,
                 execution_status=ToolExecutionStatus.DENIED,
-            ))
-            return
-
-        if not self._tool_manager.get_tool(tool_name):
+            )
+        elif not self._tool_manager.get_tool(tool_name):
             tool_call["denied_reason"] = f"Tool '{tool_name}' is not available for this agent"
-            self._pending_tool_calls.append(ToolCallRecord(
+            record = ToolCallRecord(
                 tool_call_id=tc_id,
                 tool_call=tool_call,
                 approval_status=ToolApprovalStatus.DENIED,
                 execution_status=ToolExecutionStatus.DENIED,
-            ))
-            return
-
-        if tool_name in self.auto_approve_tools:
-            self._pending_tool_calls.append(ToolCallRecord(
+            )
+        elif tool_name in self.auto_approve_tools:
+            record = ToolCallRecord(
                 tool_call_id=tc_id,
                 tool_call=tool_call,
                 approval_status=ToolApprovalStatus.APPROVED,
                 execution_status=ToolExecutionStatus.EXECUTING,
-            ))
+            )
         else:
-            self._pending_tool_calls.append(ToolCallRecord(
+            record = ToolCallRecord(
                 tool_call_id=tc_id,
                 tool_call=tool_call,
                 approval_status=ToolApprovalStatus.PENDING,
                 execution_status=ToolExecutionStatus.WAITING_FOR_APPROVAL,
-            ))
+            )
+        group.add_tool_call(record)
+        self._tool_to_group[tc_id] = group_id
+        return record
 
-    def has_pending_tool_call(self) -> bool:
+    # ------------------------------------------------------------------ #
+    # Group-aware queries (group_id=None aggregates across all groups)
+    # ------------------------------------------------------------------ #
+
+    def get_group(self, group_id: str) -> Optional[ToolCallGroup]:
+        """Return a tool call group by ID."""
+        return self._groups.get(group_id)
+
+    def get_tool_calls_in_group(self, group_id: str) -> list[ToolCallRecord]:
+        """Return all tool call records for a specific group."""
+        group = self._groups.get(group_id)
+        return list(group.records) if group else []
+
+    def get_group_id(self, tool_call_id: str) -> Optional[str]:
+        """Return the group ID for a given tool call ID."""
+        return self._tool_to_group.get(tool_call_id)
+
+    def has_pending_tool_call(self, group_id: Optional[str] = None) -> bool:
         """Check if any tool call needs user approval (approval status is PENDING)."""
-        for record in self._pending_tool_calls:
-            if record.approval_status == ToolApprovalStatus.PENDING:
-                return True
-        return False
+        groups = [self._groups[group_id]] if group_id else list(self._groups.values())
+        return any(g.has_pending() for g in groups)
 
-    def has_unfinished_tool_call(self) -> bool:
+    def has_unfinished_tool_call(self, group_id: Optional[str] = None) -> bool:
         """Check if any tool call is not yet fully executed."""
-        for record in self._pending_tool_calls:
-            if record.execution_status != ToolExecutionStatus.EXECUTED:
-                return True
-        return False
+        groups = [self._groups[group_id]] if group_id else list(self._groups.values())
+        return any(g.has_unfinished() for g in groups)
 
-    def has_reviewed_tool_call(self) -> bool:
-        """Check if the first pending tool call has been approved (no longer PENDING)."""
-        for record in self._pending_tool_calls:
-            if record.approval_status != ToolApprovalStatus.PENDING:
-                return True
-            return False
-        return False
+    def has_reviewed_tool_call(self, group_id: Optional[str] = None) -> bool:
+        """Check if the first tool call in a group has been approved (no longer PENDING)."""
+        groups = [self._groups[group_id]] if group_id else list(self._groups.values())
+        return any(g.has_reviewed() for g in groups)
 
     def get_pending_tool_calls(self) -> list[ToolCallRecord]:
-        """Return all currently pending tool calls."""
-        return list(self._pending_tool_calls)
+        """Return all currently pending tool calls across all groups."""
+        result = []
+        for group in self._groups.values():
+            result.extend(group.records)
+        return result
 
-    def pop_pending_tool_call(self) -> ToolCallRecord:
-        """Remove and return the first tool call from the pending list."""
-        if not self._pending_tool_calls:
-            raise RuntimeError("No pending tool calls")
-        return self._pending_tool_calls.pop(0)
+    def pop_pending_tool_call(self, group_id: str) -> ToolCallRecord:
+        """Remove and return the first approved tool call from a group."""
+        group = self._groups.get(group_id)
+        if group is None:
+            raise RuntimeError(f"Unknown tool call group: {group_id}")
+        record = group.pop_first_reviewed()
+        if record is None:
+            raise RuntimeError(f"No reviewed tool calls in group: {group_id}")
+        return record
 
     def is_tool_call_pending(self, tool_call_id: str) -> bool:
         """Check if a tool call needs user approval."""
-        for record in self._pending_tool_calls:
+        group_id = self._tool_to_group.get(tool_call_id)
+        group = self._groups.get(group_id)
+        if group is None:
+            return False
+        for record in group.records:
             if record.tool_call_id == tool_call_id:
                 return record.approval_status == ToolApprovalStatus.PENDING
         return False
 
     def _find_pending_record(self, tool_call_id: str) -> Optional[ToolCallRecord]:
         """Find a pending tool call record by its tool_call_id."""
-        for record in self._pending_tool_calls:
+        group_id = self._tool_to_group.get(tool_call_id)
+        group = self._groups.get(group_id)
+        if group is None:
+            return None
+        for record in group.records:
             if record.tool_call_id == tool_call_id:
                 return record
         return None
 
-    def _handle_approval(self, event: Any) -> bool:
+    def _handle_approval(self, event: Any) -> tuple[bool, Optional[str]]:
         """Handle an approval/denial event for a pending tool call.
 
-        Returns True if the tool was approved (keep draining queue),
-        False if the tool was denied (stop draining).
+        Returns (True, group_id) if approved, (False, group_id) if denied,
+        (False, None) if tool call not found.
         """
         record = self._find_pending_record(event.tool_call_id)
+        group_id = self._tool_to_group.get(event.tool_call_id)
         if record is None:
-            return False
+            return False, None
 
         if event.approved:
             record.approval_status = ToolApprovalStatus.APPROVED
-            return True
+            return True, group_id
         else:
             record.approval_status = ToolApprovalStatus.DENIED
-            return False
+            return False, group_id
+
+    # ------------------------------------------------------------------ #
+    # Result injection — runner creates and passes the result message,
+    # then EE owns the reference and injects ContentParts.
+    # ------------------------------------------------------------------ #
+
+    def set_result_message(self, group_id: str, message: "Message") -> None:
+        """Pass the result message from the runner. EE stores reference."""
+        group = self._groups.get(group_id)
+        if group is None:
+            raise ValueError(f"Unknown tool call group: {group_id}")
+        group.set_result_message(message)
+
+    def get_result_message(self, group_id: str) -> Optional["Message"]:
+        """Return the result message for a group, or None if not yet created."""
+        group = self._groups.get(group_id)
+        return group.get_result_message() if group else None
+
+    def inject_result(self, group_id: str, content_part: "ContentPart") -> None:
+        """Append a tool result ContentPart into the result message for this group.
+
+        The message must have been set via set_result_message() first.
+        """
+        from peteos.conversation.message import Message
+
+        group = self._groups.get(group_id)
+        if group is None:
+            raise ValueError(f"Unknown tool call group: {group_id}")
+        msg = group.result_message
+        if msg is None:
+            raise RuntimeError(f"No result message set for group: {group_id}")
+        msg.raw_dict["content"].append(content_part.raw_dict)
 
     # ------------------------------------------------------------------ #
     # Tool execution
