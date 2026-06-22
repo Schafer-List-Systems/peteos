@@ -11,10 +11,9 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from peteos.utils import get_logger
 
-if TYPE_CHECKING:
-    from peteos.conversation.message import Message
-    from peteos.persona.role import Role
-    from peteos.toolmanager import ToolManager
+from peteos.conversation.message import ContentPart, Message
+from peteos.persona.role import Role
+from peteos.toolmanager import ToolManager
 
 _logger = get_logger(__name__)
 
@@ -350,13 +349,11 @@ class ExecutionEnvironment:
         group = self._groups.get(group_id)
         return group.get_result_message() if group else None
 
-    def inject_result(self, group_id: str, content_part: "ContentPart") -> None:
+    def inject_result(self, group_id: str, content_part: ContentPart) -> None:
         """Append a tool result ContentPart into the result message for this group.
 
         The message must have been set via set_result_message() first.
         """
-        from peteos.conversation.message import Message
-
         group = self._groups.get(group_id)
         if group is None:
             raise ValueError(f"Unknown tool call group: {group_id}")
