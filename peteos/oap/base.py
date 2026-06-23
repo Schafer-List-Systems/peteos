@@ -435,9 +435,11 @@ class AgenticObjectBase:
         # --- Gatekeeper checks ---
         if self._oap_agent is None:
             raise ValueError("No Agent available")
+        _logger.debug("invoke_agent[%s]: gatekeeper passed", self.__class__.__name__)
 
         # --- Acquire lock with timeout ---
         self.acquire(timeout)
+        _logger.debug("invoke_agent[%s]: lock acquired", self.__class__.__name__)
 
         # --- Update output schema (serialized by lock) ---
         self._oap_current_output_schema = output_schema
@@ -448,13 +450,17 @@ class AgenticObjectBase:
         if persistent_thread_id is not None:
             stored_uuid = self._oap_thread_store.get(persistent_thread_id)
             if stored_uuid is not None:
+                _logger.debug("invoke_agent[%s]: reusing thread %s", self.__class__.__name__, persistent_thread_id)
                 session = self._oap_agent.get_session(stored_uuid)
                 if session is not None:
                     runner = Runner(self._oap_agent, session.uuid)
+                    _logger.debug("invoke_agent[%s]: starting existing runner", self.__class__.__name__)
                     await runner.start()
         if session is None or runner is None:
+            _logger.debug("invoke_agent[%s]: creating new session and runner", self.__class__.__name__)
             session = await self._oap_agent.create_session()
             runner = Runner(self._oap_agent, session.uuid)
+            _logger.debug("invoke_agent[%s]: starting new runner", self.__class__.__name__)
             await runner.start()
             if persistent_thread_id is not None:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
@@ -494,6 +500,7 @@ class AgenticObjectBase:
             runner.execution_environment.register_hook(
                 "after_step", _on_step_done, runner
             )
+            _logger.debug("invoke_agent[%s]: after_step hook registered", self.__class__.__name__)
 
             content: list[ContentPart] = [ContentPart.create_text(prompt)]
             if image is not None:
@@ -501,6 +508,7 @@ class AgenticObjectBase:
                 image_part = await create_media_content_part_async(image, timeout=timeout or 30.0)
                 content.append(image_part)
 
+            _logger.debug("invoke_agent[%s]: queuing prompt message", self.__class__.__name__)
             await runner.queue_message(Message.create(
                 role="user",
                 content_parts=content,
@@ -510,13 +518,19 @@ class AgenticObjectBase:
                            f"MIND THE OUTPUT SCHEMA!"
             start_time = time.time()
 
+            iteration = 0
             while True:
+                iteration += 1
+                _logger.debug("invoke_agent[%s]: waiting for idle (iter %d)", self.__class__.__name__, iteration)
                 await runner.wait_for_idle(timeout=timeout)
+                _logger.debug("invoke_agent[%s]: idle reached (iter %d), checking state", self.__class__.__name__, iteration)
                 produced_data = runner.state.get("_oap_produced_data")
                 if produced_data is not None:
+                    _logger.debug("invoke_agent[%s]: produced_data found, returning", self.__class__.__name__)
                     return json.loads(produced_data)
                 error_msg = runner.state.get("_oap_error")
                 if error_msg is not None:
+                    _logger.debug("invoke_agent[%s]: error found, returning", self.__class__.__name__)
                     return Error(error_msg)
 
                 elapsed = time.time() - start_time
@@ -529,6 +543,7 @@ class AgenticObjectBase:
                     )
                     return Error(f"Agent did not produce output within {timeout}s timeout")
 
+                _logger.debug("invoke_agent[%s]: queuing reminder (iter %d)", self.__class__.__name__, iteration)
                 await runner.queue_message(Message.create(
                     role="user",
                     content_parts=[ContentPart.create_text(reminder_msg)],

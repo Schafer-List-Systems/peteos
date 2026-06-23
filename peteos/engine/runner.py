@@ -148,7 +148,7 @@ class Runner(ActiveClass):
     @property
     def role(self) -> "Role":
         """Return the role for this runner's session."""
-        return self._session.role
+        return self._agent.role
 
     @property
     def execution_environment(self) -> ExecutionEnvironment:
@@ -391,7 +391,7 @@ class Runner(ActiveClass):
             return (ExecStatus.CONTINUE, None)
 
         if has_text_part and not self._execution_environment.has_pending_tool_call():
-            if self._session.role.behavior_policy == "continuous":
+            if self._agent.role.behavior_policy == "continuous":
                 _logger.debug("[runner] step(): Continuous agent produced text, keeping loop active.")
                 return (ExecStatus.CONTINUE, None)
             _logger.debug("[runner] step(): Had final answer.")
@@ -425,6 +425,7 @@ class Runner(ActiveClass):
         need_reentry = False
 
         while self.is_running():
+            need_reentry = need_reentry or self.has_event()
             if not need_reentry:
                 self._idle.set()
                 if not await self._wait_for_event():
@@ -452,8 +453,10 @@ class Runner(ActiveClass):
             need_reentry = False
 
             status, _ = await self.step()
+            _logger.debug("[runner] step() returned status=%s", status)
             hook_status = await self._call_hooks("after_step", status)
             hook_return = hook_status if hook_status is not None else status
+            _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
 
             if hook_return == ExecStatus.ERROR:
                 _logger.debug("[runner] run(): Execution error, exiting loop.")
@@ -482,7 +485,6 @@ class Runner(ActiveClass):
             if hook_return == ExecStatus.CONTINUE:
                 need_reentry = True
                 continue
-            need_reentry = False
             continue
 
     async def _wait_for_event(self, timeout: float | None = None) -> bool:

@@ -165,7 +165,7 @@ class InteractiveShellChannel(Channel):
         if self._active_session_uuid:
             short_uuid = str(self._active_session_uuid)[:8]
             session = self._agent.get_session(self._active_session_uuid)
-            role_name = session.role.name if session else "agent"
+            role_name = self._agent.role.name if session else "agent"
             return f"{short_uuid} @{role_name} >> "
         return ">> "
 

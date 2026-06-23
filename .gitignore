@@ -45,6 +45,10 @@ CLAUDE.md
 
 # Claude Code
 .claude/
+tmp/
+memory/
+design/
+designer/
 
 # HTTP client notes
 http_client.md
