@@ -11,6 +11,7 @@ from .chatbotresponse import ChatBotResponse, GenericChatBotResponse
 from .httpclient import HTTPClient
 from peteos.conversation.context import Context
 from peteos.utils.delta_merge import merge_delta_into_target
+from peteos.conversation.message import Message, ContentPart
 
 _logger = get_logger(__name__)
 
@@ -35,7 +36,7 @@ class OpenAIChatBot(ChatBot):
         "choices[*].delta.finish_reason": "stop_reason",
         # Tool calls: translate to uniform content array format
         "choices[*].delta.tool_calls[0].index": "content[0].index",
-        "choices[*].delta.tool_calls[0].id": "content[0].id",
+        "choices[*].delta.tool_calls[0].id": "content[0].call_id",
         "choices[*].delta.tool_calls[0].function.name": "content[0].name",
         "choices[*].delta.tool_calls[0].function.arguments": "content[0].arguments",
     }
@@ -437,3 +438,31 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
             self._finalize_reasoning(self._data)
 
         return _stream_generator().__aiter__()
+
+    def _build_message(self) -> Message:
+        """Convert OpenAI API-specific accumulated data into a Message."""
+        role: str = self._data.get("role", "")
+        content_array = self._data.get("content", [])
+        content_parts: list[ContentPart] = []
+        has_text = False
+
+        if isinstance(content_array, list):
+            for item in content_array:
+                if not isinstance(item, dict):
+                    continue
+                item_type = item.get("type", "")
+                if item_type == "tool_use":
+                    content_parts.append(ContentPart(dict(item)))
+                elif item_type == "texttool_use":
+                    content_parts.append(ContentPart.create_text(item.get("content", "")))
+                    content_parts.append(ContentPart(dict(item)))
+                elif item_type == "text":
+                    content_parts.append(ContentPart.create_text(item.get("content", "")))
+                    has_text = True
+                elif item_type == "thinking":
+                    content_parts.append(ContentPart.create_thinking(item.get("content", "")))
+                else:
+                    _logger.debug("Unknown OpenAI content part type: %s", item_type)
+
+        self._has_text_part = has_text
+        return Message.create(role=role, content_parts=content_parts)

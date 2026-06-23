@@ -329,7 +329,7 @@ class NextcloudTalkChannel(Channel):
         self.subscribe_to_session(session_uuid)
 
         await self.send(
-            Message(role="assistant", content=[ContentPart(part_type="text", text="Hello, I am online now.")]),
+            Message.create(role="assistant", content_parts=[ContentPart.create_text("Hello, I am online now.")]),
             session_uuid=session_uuid,
         )
 
@@ -372,9 +372,9 @@ class NextcloudTalkChannel(Channel):
             if self._config.get("prefix_actor_names", False):
                 message_text = f"User {display_name} wrote: {message_text}"
 
-            user_message = Message(
+            user_message = Message.create(
                 role="user",
-                content=[ContentPart(part_type="text", text=message_text)],
+                content_parts=[ContentPart.create_text(message_text)],
             )
             await session.queue_message(user_message)
 

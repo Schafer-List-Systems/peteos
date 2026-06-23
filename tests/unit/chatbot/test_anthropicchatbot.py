@@ -84,7 +84,7 @@ class TestAnthropicChatBotResponse:
         assert "content" in response.data
         assert len(response.data["content"]) >= 1
         assert response.data["content"][0]["type"] == "tool_use"
-        assert response.data["content"][0]["id"] == "tc_1"
+        assert response.data["content"][0]["call_id"] == "tc_1"
         assert response.data["content"][0]["name"] == "calculator"
         assert "query" in response.data["content"][0]["arguments"]
 
@@ -157,7 +157,7 @@ class TestAnthropicChatBotResponse:
         response = AnthropicChatBotResponse.from_json(mock_data, AnthropicChatBot.RESPONSE_TRANSLATIONS)
 
         assert response.data["content"][0]["type"] == "tool_use"
-        assert response.data["content"][0]["id"] == "tc_1"
+        assert response.data["content"][0]["call_id"] == "tc_1"
         assert response.data["content"][0]["name"] == "calculator"
         assert response.data["content"][0]["arguments"] == _json.dumps({"query": "1+1"})
 

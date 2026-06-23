@@ -14,6 +14,7 @@ from peteos.engine.executionenvironment import (
     ToolExecutionStatus,
 )
 from peteos.engine.exec_status import ExecStatus
+from peteos.conversation.message import ContentPart, Message
 from peteos.engine.runner import AgenticState, ApprovalEvent, Runner
 
 
@@ -111,7 +112,7 @@ class TestApprovalEvent:
     def test_defaults(self):
         evt = ApprovalEvent()
         assert evt.tool_call_id == ""
-        assert evt.tool_call == {}
+        assert isinstance(evt.tool_call, ContentPart)
         assert evt.approved is True
 
     def test_custom_values(self):
@@ -175,12 +176,29 @@ def _make_mock_agent(session: MagicMock) -> MagicMock:
     return agent
 
 
-def _make_mock_chatbot() -> MagicMock:
+def _make_mock_chatbot(
+    content: list[dict] | None = None,
+    role: str = "assistant",
+    error: str | None = None,
+) -> MagicMock:
     cb = MagicMock()
     response = AsyncMock()
-    response.data = {"role": "assistant", "content": []}
+    data: dict[str, Any] = {"role": role, "content": content or []}
+    if error:
+        data["error"] = error
+    response.data = data
+    if "error" in data:
+        response.message = None
+        response.has_text_part = False
+    else:
+        response.message = Message.create(
+            role=role,
+            content_parts=[ContentPart(dict(p)) for p in (content or [])],
+        )
+        response.has_text_part = any(p.get("type") == "text" for p in (content or []))
     cb.send_context = AsyncMock(return_value=response)
     cb.__aiter__ = AsyncMock(return_value=iter([]))
+    return cb
     return cb
 
 
@@ -240,14 +258,8 @@ class TestRunnerStepTextOnly:
         session = _make_mock_session()
         agent = _make_mock_agent(session)
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
-        runner._chatbot = _make_mock_chatbot()
-        runner._chatbot.send_context = AsyncMock(
-            return_value=MagicMock(
-                data={
-                    "role": "assistant",
-                    "content": [{"type": "text", "content": "done"}],
-                },
-            )
+        runner._chatbot = _make_mock_chatbot(
+            content=[{"type": "text", "content": "done"}],
         )
 
         status, _ = await runner.step()
@@ -258,14 +270,8 @@ class TestRunnerStepTextOnly:
         session = _make_mock_session()
         agent = _make_mock_agent(session)
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
-        runner._chatbot = _make_mock_chatbot()
-        runner._chatbot.send_context = AsyncMock(
-            return_value=MagicMock(
-                data={
-                    "role": "assistant",
-                    "content": [{"type": "thinking", "content": "let me think"}],
-                },
-            )
+        runner._chatbot = _make_mock_chatbot(
+            content=[{"type": "thinking", "content": "let me think"}],
         )
 
         status, _ = await runner.step()
@@ -276,14 +282,8 @@ class TestRunnerStepTextOnly:
         session = _make_mock_session(behavior_policy="continuous")
         agent = _make_mock_agent(session)
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
-        runner._chatbot = _make_mock_chatbot()
-        runner._chatbot.send_context = AsyncMock(
-            return_value=MagicMock(
-                data={
-                    "role": "assistant",
-                    "content": [{"type": "text", "content": "thinking..."}],
-                },
-            )
+        runner._chatbot = _make_mock_chatbot(
+            content=[{"type": "text", "content": "thinking..."}],
         )
 
         status, _ = await runner.step()
@@ -294,15 +294,8 @@ class TestRunnerStepTextOnly:
         session = _make_mock_session()
         agent = _make_mock_agent(session)
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
-        runner._chatbot = _make_mock_chatbot()
-        runner._chatbot.send_context = AsyncMock(
-            return_value=MagicMock(
-                data={
-                    "role": "assistant",
-                    "error": "API error",
-                    "content": [],
-                },
-            )
+        runner._chatbot = _make_mock_chatbot(
+            error="API error",
         )
 
         status, _ = await runner.step()
@@ -330,19 +323,15 @@ class TestRunnerStepToolCalls:
         # Pre-setup: create group and a PENDING tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            {"id": "tc1", "name": "add", "arguments": "{}"}, "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
         )
 
         # Make chatbot return text output
-        runner._chatbot = _make_mock_chatbot()
-        runner._chatbot.send_context = AsyncMock(
-            return_value=MagicMock(
-                data={
-                    "role": "assistant",
-                    "content": [{"type": "text", "content": "let me check"}],
-                },
-            )
+        runner._chatbot = _make_mock_chatbot(
+            content=[{"type": "text", "content": "let me check"}],
         )
+        # Ensure tool_manager returns the tool so add_tool_call creates PENDING record
+        session.tool_manager.get_tool = MagicMock(return_value=MagicMock(name="add"))
 
         status, _ = await runner.step()
         assert status is ExecStatus.PENDING
@@ -363,7 +352,7 @@ class TestRunnerStepToolCalls:
         # Pre-setup: auto-approved tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            {"id": "tc1", "name": "add", "arguments": "{}"}, "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
         )
 
         status, _ = await runner.step()
@@ -383,7 +372,7 @@ class TestRunnerStepToolCalls:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            {"id": "tc1", "name": "add", "arguments": "{}"}, "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
         )
 
         status, _ = await runner.step()
@@ -407,7 +396,7 @@ class TestRunnerStepToolCalls:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            {"id": "tc1", "name": "add", "arguments": "{}"}, "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
         )
 
         status, _ = await runner.step()
@@ -436,7 +425,7 @@ class TestRunnerEventHandling:
         # Create a group with a pending tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            {"id": "tc1", "name": "add", "arguments": "{}"}, "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
         )
 
         evt = ApprovalEvent(tool_call_id="tc1", approved=True)

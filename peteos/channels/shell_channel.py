@@ -82,9 +82,9 @@ class InteractiveShellChannel(Channel):
         """
         session = self._agent.get_session(session_uuid)
         if session:
-            message = Message(
+            message = Message.create(
                 role="user",
-                content=[ContentPart(part_type="text", text=content)]
+                content_parts=[ContentPart.create_text(content)]
             )
             asyncio.create_task(session.queue_message(message))
 
@@ -117,9 +117,9 @@ class InteractiveShellChannel(Channel):
 
         file_part = await create_media_content_part_async(src)
 
-        parts = [ContentPart(part_type="text", text=text)] if text else []
+        parts = [ContentPart.create_text(text)] if text else []
         parts.append(file_part)
-        message = Message(role="user", content=parts)
+        message = Message.create(role="user", content_parts=parts)
         session = self._agent.get_session(self._active_session_uuid)
         if session:
             await session.queue_message(message)

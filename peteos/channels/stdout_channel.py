@@ -223,9 +223,9 @@ class ReadStdoutChannel(Channel):
                         _logger.debug("Excluded by pattern '%s': %s", ex_pattern, truncate(line))
                         break
                 else:
-                    message = Message(
+                    message = Message.create(
                         role="user",
-                        content=[ContentPart(part_type="text", text=f"{self._prefix}{line}")],
+                        content_parts=[ContentPart.create_text(f"{self._prefix}{line}")],
                     )
                     try:
                         await self._agent.get_session(self._session_uuid).queue_message(message)

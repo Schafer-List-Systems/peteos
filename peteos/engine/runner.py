@@ -294,42 +294,13 @@ class Runner(ActiveClass):
                 _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
                 return (ExecStatus.ERROR, None)
 
-            if "role" not in response.data:
-                _logger.error("ChatBot response missing 'role' field. Response data: %s", response.data)
-                return (ExecStatus.ERROR, None)
-
-            # --- Phase 3: Build content parts from content array in original order ---
-            content_array: list = response.data.get("content", [])
-            content_parts: list[ContentPart] = []
-
-            for item in content_array:
-                if not isinstance(item, dict):
-                    _logger.error("Expected content item to be a dict, got %s", type(item).__name__)
-                    continue
-                item_type = item["type"]
-                if item_type == "tool_use":
-                    content_parts.append(ContentPart(dict(item)))
-                elif item_type == "texttool_use":
-                    content_parts.append(ContentPart.create_text(item["content"]))
-                    content_parts.append(ContentPart(dict(item)))
-                elif item_type == "text":
-                    content_value = item["content"]
-                    content_parts.append(ContentPart.create_text(content_value))
-                    has_text_part = True
-                elif item_type == "thinking":
-                    content_value = item["content"]
-                    content_parts.append(ContentPart.create_thinking(content_value))
-                else:
-                    _logger.debug("Unknown item type: %s", item_type)
-                    return (ExecStatus.ERROR, None)
-
-            # --- Phase 4: Append assistant message ---
-            _logger.debug("ChatBot response: role=%s, content_types=%s", response.data.get("role"), [item.get("type") for item in content_array] if isinstance(content_array, list) else "N/A")
-            _logger.debug("ChatBot full response data: %s", json.dumps(response.data, indent=2, default=str))
-            response_msg = Message.create(role=response.data["role"], content_parts=content_parts)
+            # --- Phase 3: Use the normalized message from the chatbot ---
+            response_msg: Message = response.message
             await self.append_and_notify(response_msg)
+            content_parts = response_msg.content
+            has_text_part = response.has_text_part
 
-            # --- Phase 4b: Create tool groups and result anchors ---
+            # --- Phase 4: Create tool groups and result anchors ---
             if any(cp.type == "tool_use" for cp in content_parts):
                 group_id = response_msg.id
                 anchor_name = f"{group_id}:tool_result"
@@ -348,7 +319,6 @@ class Runner(ActiveClass):
 
         # --- Phase 5: Execute tool calls (delegate to ExecutionEnvironment) ---
         did_tool_calls = self._execution_environment.has_reviewed_tool_call()
-        yielded = False
         while self._execution_environment.has_reviewed_tool_call():
             group = self._execution_environment.get_group(group_id := "")
             # Find a group that has a reviewed tool call
@@ -384,17 +354,10 @@ class Runner(ActiveClass):
             await self._call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
 
-            if tool_name == "yield_back":
-                yielded = True
-                break
-
-        if yielded:
-            _logger.debug("[runner] step(): Agent called yield_back, finishing.")
-            return (ExecStatus.FINISHED, None)
-
         # Track whether any tool actually produced a non-None result
         any_tool_produced = any(
-            len(g.result_message.raw_dict.get("content", [])) > 0
+            g.result_message is not None
+            and len(g.result_message.raw_dict.get("content", [])) > 0
             for g in self._execution_environment._groups.values()
         )
         if did_tool_calls and not self._execution_environment.has_pending_tool_call():
