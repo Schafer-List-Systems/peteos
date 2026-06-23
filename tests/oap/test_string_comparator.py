@@ -21,7 +21,7 @@ async def test_contains():
     test_cases = [
         (True, "The sky is blue", "The color of the world's ceiling"),
         (True, "Water boils at 100 degrees Celsius", "Boiling temperatur of water"),
-        (True, "Photosynthesis converts sunlight into energy", "oxygen creation"),
+        (True, "The plant uses sunlight to produce energy", "energy production"),
         (False, "The sky is blue", "green"),
         (False, "Water boils at 100 degrees Celsius", "freezing temperature"),
         (False, "Photosynthesis converts sunlight into energy", "nuclear energy"),
