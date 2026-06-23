@@ -334,6 +334,11 @@ class Runner(ActiveClass):
                 group_id = response_msg.id
                 anchor_name = f"{group_id}:tool_result"
                 self._execution_environment.create_tool_group(group_id, anchor_name)
+                # Add each tool_use call to the group (was inside the for loop
+                # in the old session/executionenvironment code)
+                for cp in content_parts:
+                    if cp.type == "tool_use":
+                        self._execution_environment.add_tool_call(cp, group_id)
                 # Get the end-iterator from the messages anchor so the
                 # negative offset stays correct even when other anchors
                 # exist after it
@@ -359,7 +364,7 @@ class Runner(ActiveClass):
 
             record = group.pop_first_reviewed()
             tool_call = record.tool_call
-            tool_name = tool_call["name"]
+            tool_name = tool_call.name
 
             # --- Deferred result message creation ---
             # First execution in group: create message, append to anchor,
@@ -372,7 +377,7 @@ class Runner(ActiveClass):
 
             # Handle denied tool calls (status set by _handle_approval)
             if record.approval_status == ToolApprovalStatus.DENIED:
-                denial_msg = tool_call.get("denied_reason", "Tool call was denied by user.")
+                denial_msg = record.denied_reason or "Tool call was denied by user."
                 await self._call_hooks("after_tool_execution", self, tool_call, denial_msg, False)
                 _logger.debug("[runner] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
@@ -486,7 +491,7 @@ class Runner(ActiveClass):
                     if record.approval_status == ToolApprovalStatus.PENDING:
                         record.approval_status = ToolApprovalStatus.DENIED
                         record.execution_status = ToolExecutionStatus.ABORTED
-                        record.tool_call["denied_reason"] = (
+                        record.denied_reason = (
                             "Tool call was aborted due to a previous tool failure."
                         )
                 _logger.debug("[runner] run(): Aborted all pending tool calls due to tool failure")

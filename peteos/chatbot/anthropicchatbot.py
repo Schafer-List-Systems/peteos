@@ -338,8 +338,9 @@ class AnthropicChatBotResponse(GenericChatBotResponse):
                 content_item = {"type": item.get("type", "text")}
                 if item.get("type") == "tool_use":
                     # Convert input dict to arguments JSON string
+                    # Normalize to the ChatBot contract key "call_id"
                     if "id" in item:
-                        content_item["id"] = item["id"]
+                        content_item["call_id"] = item["id"]
                     if "name" in item:
                         content_item["name"] = item["name"]
                     if "input" in item:

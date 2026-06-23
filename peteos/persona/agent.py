@@ -12,6 +12,7 @@ from peteos.utils import get_logger
 from peteos.conversation.system_prompt_message import SystemPromptMessage
 from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 from peteos.conversation.session import Session
+from peteos.conversation.message import ContentPart
 
 from .role import Role
 from .toolmanager import ToolManager
@@ -164,7 +165,7 @@ class Agent:
     def _on_before_tool_execution(
         self,
         session: Session,
-        tool_call: dict
+        tool_call: ContentPart
     ) -> tuple:
         """Hook callback fired before each tool execution.
 
@@ -174,7 +175,7 @@ class Agent:
             Tuple (allow: bool | None, message: str | None) - Returns
             (True, None) for auto-approved tools, ("pending", None) otherwise.
         """
-        tool_name = tool_call.get("name", "")
+        tool_name = tool_call.name
         if tool_name in session.auto_approve_tools:
             return (True, None)
 

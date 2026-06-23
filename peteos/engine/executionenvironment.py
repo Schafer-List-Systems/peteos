@@ -37,7 +37,7 @@ class ToolExecutionStatus(str, Enum):
 class ToolCallRecord:
     """Tracks the lifecycle of a tool call through approval and execution."""
     tool_call_id: str
-    tool_call: dict
+    tool_call: ContentPart
     approval_status: ToolApprovalStatus = ToolApprovalStatus.PENDING
     execution_status: ToolExecutionStatus = ToolExecutionStatus.WAITING_FOR_APPROVAL
     nextcloud_message_id: Optional[str] = None
@@ -92,7 +92,7 @@ class ToolCallGroup:
 class ApprovalEvent:
     """Event pushed to Runner.event_queue to signal approval of a tool call."""
     tool_call_id: str = ""
-    tool_call: dict = field(default_factory=dict)
+    tool_call: ContentPart = field(default_factory=lambda: ContentPart({"type": "tool_use"}))
     approved: bool = True
 
 
@@ -197,26 +197,26 @@ class ExecutionEnvironment:
             raise ValueError(f"Tool call group already exists: {group_id}")
         self._groups[group_id] = ToolCallGroup(id=group_id, anchor_name=anchor_name)
 
-    def add_tool_call(self, tool_call: dict, group_id: str) -> ToolCallRecord:
+    def add_tool_call(self, tool_call: ContentPart, group_id: str) -> ToolCallRecord:
         """Add a tool call to the specified group. Returns the created record."""
-        tc_id = tool_call.get("id")
+        tc_id = tool_call.call_id
         if tc_id is None:
-            raise ValueError("Tool call missing required 'id' field")
+            raise ValueError("Tool call missing required 'call_id' field")
         if tc_id in self._tool_to_group:
             raise ValueError(f"Duplicate tool call id: {tc_id}")
         if group_id not in self._groups:
             raise ValueError(f"Unknown tool call group: {group_id}")
 
         group = self._groups[group_id]
-        tool_name = tool_call.get("name", "")
+        tool_name = tool_call.name
 
         if not self._tool_manager or not self._tool_manager.get_tool(tool_name):
-            tool_call["denied_reason"] = f"Tool '{tool_name}' is not available for this agent"
             record = ToolCallRecord(
                 tool_call_id=tc_id,
                 tool_call=tool_call,
                 approval_status=ToolApprovalStatus.DENIED,
                 execution_status=ToolExecutionStatus.DENIED,
+                denied_reason=f"Tool '{tool_name}' is not available for this agent",
             )
         elif tool_name in self.auto_approve_tools:
             record = ToolCallRecord(
@@ -340,7 +340,7 @@ class ExecutionEnvironment:
             group.set_result_message(Message({"role": "tool_result", "content": []}))
         return group.result_message
 
-    async def execute_and_inject(self, tool_call: dict, group_id: str) -> tuple[str, bool]:
+    async def execute_and_inject(self, tool_call: ContentPart, group_id: str) -> tuple[str, bool]:
         """Execute a tool and inject the result ContentPart into the group's result message.
 
         Creates the result message if needed. The runner is responsible
@@ -354,8 +354,8 @@ class ExecutionEnvironment:
         result_msg = self._ensure_result_message(group_id)
         result_str, success = await self.execute_tool(tool_call)
 
-        cp = ContentPart.create_tool_result(tool_call.get("id", ""), result_str)
-        cp.raw_dict["name"] = tool_call.get("name", "")
+        cp = ContentPart.create_tool_result(tool_call.call_id, result_str)
+        cp.raw_dict["name"] = tool_call.name
         result_msg.raw_dict["content"].append(cp.raw_dict)
 
         return result_str, success
@@ -364,7 +364,7 @@ class ExecutionEnvironment:
     # Tool execution — standalone
     # ------------------------------------------------------------------ #
 
-    async def execute_tool(self, tool_call: dict) -> tuple[str, bool]:
+    async def execute_tool(self, tool_call: ContentPart) -> tuple[str, bool]:
         """Execute a single tool call.
 
         Looks up the tool by name, casts arguments, fires the
@@ -372,13 +372,13 @@ class ExecutionEnvironment:
         the ``after_tool_execution`` hook, and returns the result.
 
         Args:
-            tool_call: Dict with keys ``name``, ``arguments``, ``id``.
+            tool_call: ContentPart with type "tool_use".
 
         Returns:
             Tuple of (result_string, success_bool).
         """
-        tool_name = tool_call.get("name", "")
-        args = json.loads(tool_call.get("arguments", "{}"))
+        tool_name = tool_call.name
+        args = json.loads(tool_call.arguments or "{}")
 
         _logger.debug("Attempting to execute tool: %s(%s)", tool_name, args)
 

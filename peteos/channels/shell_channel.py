@@ -239,7 +239,7 @@ class InteractiveShellChannel(Channel):
                 approved=True,
             )
             session.push_event(approval_event)
-            return (True, f"Approved tool call: {record.tool_call.get('name')}")
+            return (True, f"Approved tool call: {record.tool_call.name}")
 
         elif command == "/deny":
             if self._active_session_uuid is None:
@@ -257,7 +257,7 @@ class InteractiveShellChannel(Channel):
                 approved=False,
             )
             session.push_event(approval_event)
-            return (True, f"Denied tool call: {record.tool_call.get('name')}")
+            return (True, f"Denied tool call: {record.tool_call.name}")
 
         elif command == "/pending":
             if self._active_session_uuid is None:
@@ -270,7 +270,7 @@ class InteractiveShellChannel(Channel):
                 return (True, "No pending tool calls")
             output = "Pending tool calls:"
             for record in pending:
-                output += f"\n  [{record.tool_call_id}] {record.tool_call.get('name', '?')} ({record.approval_status.value})"
+                output += f"\n  [{record.tool_call_id}] {record.tool_call.name} ({record.approval_status.value})"
             return (True, output)
 
         elif command in ("/image", "/file"):

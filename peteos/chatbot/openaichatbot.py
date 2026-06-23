@@ -355,7 +355,7 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
                         response._data.setdefault("content", []).append({
                             "index": len(response._data.get("content", [])),
                             "type": "tool_use",
-                            "id": tc.get("id"),
+                            "call_id": tc.get("id"),
                             "name": tc.get("function", {}).get("name"),
                             "arguments": tc.get("function", {}).get("arguments", ""),
                         })
