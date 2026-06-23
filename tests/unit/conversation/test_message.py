@@ -4,6 +4,11 @@ import pytest
 from peteos.conversation.message import ContentPart, Message
 from peteos.conversation.message_registry import MessageRegistry
 
+# Import production classes at module level so they are registered once
+# via __init_subclass__ and survive across tests.
+from peteos.conversation.system_prompt_message import SystemPromptMessage  # noqa: F401
+from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage  # noqa: F401
+
 
 class TestContentPart:
     """Tests for ContentPart factory methods and properties."""
@@ -84,12 +89,6 @@ class TestContentPart:
 
 class TestMessageRegistry:
     """Tests for MessageRegistry."""
-
-    @pytest.fixture(autouse=True)
-    def _clean_registry(self):
-        MessageRegistry.clear()
-        yield
-        MessageRegistry.clear()
 
     def test_register_and_get(self):
         class CustomMessage(Message):

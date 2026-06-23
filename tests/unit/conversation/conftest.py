@@ -23,3 +23,8 @@ sys.modules["peteos"] = _peeteos
 _logger = types.ModuleType("peteos.logger")
 _logger.get_logger = logging.getLogger
 sys.modules["peteos.logger"] = _logger
+
+# Import message subclasses so they register with MessageRegistry.
+# These must be imported AFTER the stub replaces sys.modules["peteos"].
+import peteos.conversation.system_prompt_message  # noqa: F401
+import peteos.conversation.tool_definitions_message  # noqa: F401

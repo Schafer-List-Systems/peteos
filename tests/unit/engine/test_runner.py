@@ -424,7 +424,7 @@ class TestRunnerEventHandling:
         agent = _make_mock_agent(session)
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
         msg = MagicMock()
-        await runner.queue_message(msg)
+        runner.push_event(msg)
         assert not runner.event_queue.empty()
 
     async def test_approval_event_processed(self, chatbot_manager_mock):
@@ -440,9 +440,11 @@ class TestRunnerEventHandling:
         )
 
         evt = ApprovalEvent(tool_call_id="tc1", approved=True)
-        await runner.queue_message(evt)
+        runner.push_event(evt)
 
         assert not runner.event_queue.empty()
+
+        await runner.stop()
 
 
 # ---------------------------------------------------------------------------

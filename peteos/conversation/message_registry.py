@@ -44,9 +44,18 @@ class MessageRegistry:
     def clear(cls) -> None:
         """Clear the registry. Useful for testing.
 
-        Preserves the base ``Message`` class which is always needed.
+        Preserves the base ``Message`` class and production message subclasses
+        (SystemPromptMessage, ToolDefinitionsMessage) which are auto-registered
+        once via ``__init_subclass__`` and cannot be re-registered by
+        re-importing cached modules.
         """
         cls._registry.clear()
-        # Re-register the base Message class after clearing
+        # Re-register the base Message class and all production subclasses.
+        # These classes already ran __init_subclass__ during import, so
+        # re-importing cached modules won't re-register them.
         from peteos.conversation.message import Message
         cls.register(Message)
+        from peteos.conversation.system_prompt_message import SystemPromptMessage
+        cls.register(SystemPromptMessage)
+        from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
+        cls.register(ToolDefinitionsMessage)
