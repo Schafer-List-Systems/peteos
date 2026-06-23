@@ -277,6 +277,13 @@ class Runner(ActiveClass):
         has_text_part = False
 
         if not self._execution_environment.has_unfinished_tool_call():
+            self._session.materialize()
+            tdm = self._session.active_context.tool_definitions_message
+            tool_count = len(tdm.content) if tdm and tdm.content else 0
+            _logger.debug(
+                "[runner] step(): Materialized context, tool_definitions_message has %d tools",
+                tool_count,
+            )
             await self._call_hooks("before_send_to_chatbot", self, self._session.active_context)
             response = await self._chatbot.send_context(self._session.active_context)
             async for _ in response:
@@ -327,8 +334,11 @@ class Runner(ActiveClass):
                 group_id = response_msg.id
                 anchor_name = f"{group_id}:tool_result"
                 self._execution_environment.create_tool_group(group_id, anchor_name)
-                # msg_index is the end-iterator position after the assistant message
-                msg_index = len(self._session.active_context.messages)
+                # Get the end-iterator from the messages anchor so the
+                # negative offset stays correct even when other anchors
+                # exist after it
+                messages_anchor = self._session.active_context.get_anchor_index("messages")
+                msg_index = self._session.active_context.anchor_points[messages_anchor][1]
                 self._session.active_context.add_anchor(anchor_name, msg_index - len(self._session.active_context.messages))
 
         # --- Phase 5: Execute tool calls (delegate to ExecutionEnvironment) ---

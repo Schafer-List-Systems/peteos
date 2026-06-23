@@ -106,13 +106,18 @@ class Agent:
 
     def _tool_list_hook(self) -> str:
         """Hook callback that returns the tool list as a JSON string."""
+        tool_list = self._tool_manager.get_tool_list()
+        _logger.debug(
+            "Agent._tool_list_hook: %d tools available for role '%s': %s",
+            len(tool_list), self._role.name, [t.name for t in tool_list],
+        )
         return json.dumps([
             {
                 "name": tool.name,
                 "description": tool.description,
                 "parameters": tool.parameters,
             }
-            for tool in self._tool_manager.get_tool_list()
+            for tool in tool_list
         ])
 
     def _tool_filter_hook(self) -> str:

@@ -112,14 +112,16 @@ class ToolDefinitionsMessage(Message):
         tool_list: list[dict],
         filter_patterns: set[str],
     ) -> list[dict]:
-        """Filter the tool list, excluding tools matching any regex pattern.
+        """Filter the tool list, including only tools matching any regex pattern.
 
         Uses ``re.fullmatch`` — patterns like ``"internal_.*"`` will
-        exclude tools whose names start with ``internal_``.
+        include only tools whose names start with ``internal_``.
+
+        An empty filter patterns set means include all tools.
 
         Args:
             tool_list: The full list of tool definition dicts.
-            filter_patterns: Regex patterns to exclude tools by name.
+            filter_patterns: Regex patterns to include tools by name.
 
         Returns:
             The filtered tool list.
@@ -128,7 +130,7 @@ class ToolDefinitionsMessage(Message):
             return tool_list
         return [
             tool for tool in tool_list
-            if not any(re.fullmatch(pattern, tool.get("name", "")) for pattern in filter_patterns)
+            if any(re.fullmatch(pattern, tool.get("name", "")) for pattern in filter_patterns)
         ]
 
     @staticmethod
