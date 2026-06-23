@@ -340,20 +340,30 @@ class ExecutionEnvironment:
             group.set_result_message(Message({"role": "tool_result", "content": []}))
         return group.result_message
 
-    async def execute_and_inject(self, tool_call: ContentPart, group_id: str) -> tuple[str, bool]:
+    async def execute_and_inject(self, tool_call: ContentPart, group_id: str, runner: "Runner | None" = None) -> tuple[str | None, bool]:
         """Execute a tool and inject the result ContentPart into the group's result message.
 
-        Creates the result message if needed. The runner is responsible
-        for appending and notifying the result message.
-        Returns (result_string, success) — same as ``execute_tool``.
+        Creates the result message lazily — only when the first non-None
+        result arrives. Returns (None, True) for fire-and-forget tools
+        without adding a ContentPart to the result message.
+
+        Args:
+            tool_call: ContentPart with type "tool_use".
+            group_id: The tool call group ID.
+            runner: Optional runner to inject as ``runner`` kwarg into tool calls.
+
+        Returns:
+            Tuple of (result_string_or_None, success_bool).
         """
         group = self._groups.get(group_id)
         if group is None:
             raise ValueError(f"Unknown tool call group: {group_id}")
 
-        result_msg = self._ensure_result_message(group_id)
-        result_str, success = await self.execute_tool(tool_call)
+        result_str, success = await self.execute_tool(tool_call, runner=runner)
+        if result_str is None:
+            return None, success
 
+        result_msg = self._ensure_result_message(group_id)
         cp = ContentPart.create_tool_result(tool_call.call_id, result_str)
         cp.raw_dict["name"] = tool_call.name
         result_msg.raw_dict["content"].append(cp.raw_dict)
@@ -364,18 +374,22 @@ class ExecutionEnvironment:
     # Tool execution — standalone
     # ------------------------------------------------------------------ #
 
-    async def execute_tool(self, tool_call: ContentPart) -> tuple[str, bool]:
+    async def execute_tool(self, tool_call: ContentPart, runner: "Runner | None" = None) -> tuple[str | None, bool]:
         """Execute a single tool call.
 
         Looks up the tool by name, casts arguments, fires the
         ``before_tool_execution`` deny hook, executes the tool, fires
         the ``after_tool_execution`` hook, and returns the result.
 
+        Returns (None, True) when the tool returns None (fire-and-forget),
+        (result_string, True) for successful calls, and (error_msg, False)
+        for failures.
+
         Args:
             tool_call: ContentPart with type "tool_use".
 
         Returns:
-            Tuple of (result_string, success_bool).
+            Tuple of (result_string_or_None, success_bool).
         """
         tool_name = tool_call.name
         args = json.loads(tool_call.arguments or "{}")
@@ -396,9 +410,13 @@ class ExecutionEnvironment:
                 return message, False
 
         try:
-            result = tool.execute(**casted_args, session=None)
+            result = tool.execute(**casted_args, runner=runner)
             if asyncio.iscoroutine(result):
                 result = await result
+            if result is None:
+                await self.call_hooks("after_tool_execution", tool_call, None, True)
+                _logger.debug("Tool %s returned None (fire-and-forget)", tool_name)
+                return None, True
             result_str = str(result)
             await self.call_hooks("after_tool_execution", tool_call, result_str, True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)

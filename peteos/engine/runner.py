@@ -366,15 +366,6 @@ class Runner(ActiveClass):
             tool_call = record.tool_call
             tool_name = tool_call.name
 
-            # --- Deferred result message creation ---
-            # First execution in group: create message, append to anchor,
-            # notify. Result message is in context, EE injects into it.
-            if group.get_result_message() is None:
-                result_msg = Message.create(role="tool_result", content_parts=[])
-                self._session.active_context.append(result_msg, anchor_point=group.anchor_name)
-                await self.append_and_notify(result_msg)
-                group.set_result_message(result_msg)
-
             # Handle denied tool calls (status set by _handle_approval)
             if record.approval_status == ToolApprovalStatus.DENIED:
                 denial_msg = record.denied_reason or "Tool call was denied by user."
@@ -382,7 +373,7 @@ class Runner(ActiveClass):
                 _logger.debug("[runner] step(): Tool call %s was denied by user", tool_name)
                 return (ExecStatus.TOOL_DENIED, None)
 
-            result_str, success = await self._execution_environment.execute_and_inject(tool_call, group_id)
+            result_str, success = await self._execution_environment.execute_and_inject(tool_call, group_id, runner=self)
             if not success and result_str.startswith("Error: Tool '"):
                 _logger.debug("[runner] step(): Tool %s not found", tool_name)
                 return (ExecStatus.TOOL_NOT_FOUND, None)
@@ -390,7 +381,7 @@ class Runner(ActiveClass):
                 await self._call_hooks("after_tool_execution", self, tool_call, result_str, False)
                 _logger.debug("[runner] step(): Tool %s failed", tool_name)
                 return (ExecStatus.TOOL_FAILED, None)
-            await self._call_hooks("after_tool_execution", self, tool_call, result_str, True)
+            await self._call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
 
             if tool_name == "yield_back":
@@ -401,9 +392,17 @@ class Runner(ActiveClass):
             _logger.debug("[runner] step(): Agent called yield_back, finishing.")
             return (ExecStatus.FINISHED, None)
 
+        # Track whether any tool actually produced a non-None result
+        any_tool_produced = any(
+            len(g.result_message.raw_dict.get("content", [])) > 0
+            for g in self._execution_environment._groups.values()
+        )
         if did_tool_calls and not self._execution_environment.has_pending_tool_call():
-            _logger.debug("[runner] step(): Did tool calls. Need to continue, such that the ChatBot can see the result.")
-            return (ExecStatus.CONTINUE, None)
+            if any_tool_produced:
+                _logger.debug("[runner] step(): Did tool calls with results. Need to continue, such that the ChatBot can see the results.")
+                return (ExecStatus.CONTINUE, None)
+            _logger.debug("[runner] step(): Did tool calls but all returned None (fire-and-forget). Skipping re-entry.")
+            return (ExecStatus.FINISHED, None)
 
         if has_text_part and not self._execution_environment.has_pending_tool_call():
             if self._agent.role.behavior_policy == "continuous":
@@ -465,7 +464,6 @@ class Runner(ActiveClass):
 
             if not need_reentry and events_processed == 0:
                 continue
-            need_reentry = False
 
             status, _ = await self.step()
             _logger.debug("[runner] step() returned status=%s", status)
@@ -473,6 +471,7 @@ class Runner(ActiveClass):
             hook_return = hook_status if hook_status is not None else status
             _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
 
+            need_reentry = False
             if hook_return == ExecStatus.ERROR:
                 _logger.debug("[runner] run(): Execution error, exiting loop.")
                 break
@@ -484,7 +483,6 @@ class Runner(ActiveClass):
                 continue
             if hook_return in (ExecStatus.TOOL_NOT_FOUND, ExecStatus.TOOL_DENIED):
                 _logger.debug("[runner] run(): Tool call failed/denied, re-entering step loop.")
-                need_reentry = True
                 continue
             if hook_return == ExecStatus.TOOL_FAILED:
                 for record in self._execution_environment.get_pending_tool_calls():
@@ -495,7 +493,6 @@ class Runner(ActiveClass):
                             "Tool call was aborted due to a previous tool failure."
                         )
                 _logger.debug("[runner] run(): Aborted all pending tool calls due to tool failure")
-                need_reentry = True
                 continue
             if hook_return == ExecStatus.CONTINUE:
                 need_reentry = True
