@@ -30,6 +30,8 @@ class ContentPart:
 
     def __init__(self, json_dict: dict) -> None:
         """
+        ContentPart objects shall only be created using the factory functions!
+
         Args:
             json_dict: The raw serialized content part dict.
         """
@@ -177,6 +179,8 @@ class Message:
 
     def __init__(self, json_dict: dict) -> None:
         """
+        Message objects shall only be created using the factory functions!
+
         Args:
             json_dict: The raw serialized message dict.
         """

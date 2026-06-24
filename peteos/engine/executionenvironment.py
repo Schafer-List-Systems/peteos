@@ -75,6 +75,16 @@ class ToolCallGroup:
     def has_unfinished(self) -> bool:
         return any(r.execution_status != ToolExecutionStatus.EXECUTED for r in self.records)
 
+    def is_done(self) -> bool:
+        """Return True when all tool calls are finalized (no more pending or approved)."""
+        for r in self.records:
+            if r.approval_status not in (ToolApprovalStatus.DENIED, ToolApprovalStatus.APPROVED):
+                return False
+            if r.approval_status == ToolApprovalStatus.APPROVED:
+                if r.execution_status != ToolExecutionStatus.EXECUTED:
+                    return False
+        return True
+
     def pop_first_reviewed(self) -> Optional[ToolCallRecord]:
         for i, r in enumerate(self.records):
             if r.approval_status != ToolApprovalStatus.PENDING:
@@ -101,10 +111,11 @@ class ExecutionEnvironment:
 
     Provides the hook system and the full tool call lifecycle:
 
-    - Queue management (``add_tool_call``, ``pop_pending_tool_call``)
+    - Queue management (``add_tool_call``)
     - Approval workflow (``_handle_approval``)
     - Single-tool execution (``execute_tool``)
     - Lifecycle hooks
+    - Foreground group management
 
     The Runner owns the event loop and chatbot interaction.
     """
@@ -121,7 +132,7 @@ class ExecutionEnvironment:
         self.auto_approve_tools = auto_approve_tools
         self.tool_failure_policy = tool_failure_policy
         self._groups: dict[str, ToolCallGroup] = {}  # group_id -> ToolCallGroup
-        self._tool_to_group: dict[str, str] = {}  # tool_call_id -> group_id
+        self._foreground_group: ToolCallGroup | None = None
         self._hooks: dict[str, list[Callable]] = {
             "before_send_to_chatbot": [],
             "after_step": [],
@@ -188,26 +199,41 @@ class ExecutionEnvironment:
         return first_deny
 
     # ------------------------------------------------------------------ #
-    # Tool call queue management — group-based
+    # Foreground group management
     # ------------------------------------------------------------------ #
 
-    def create_tool_group(self, group_id: str, anchor_name: str) -> None:
-        """Create a new tool call group. Anchor already exists in Context."""
-        if group_id in self._groups:
-            raise ValueError(f"Tool call group already exists: {group_id}")
-        self._groups[group_id] = ToolCallGroup(id=group_id, anchor_name=anchor_name)
+    def get_foreground_group(self) -> ToolCallGroup | None:
+        """Return the current foreground tool call group, or None."""
+        return self._foreground_group
 
-    def add_tool_call(self, tool_call: ContentPart, group_id: str) -> ToolCallRecord:
-        """Add a tool call to the specified group. Returns the created record."""
+    def create_tool_group(self, group_id: str, anchor_name: str) -> None:
+        """Create a new tool call group and set it as the foreground group.
+
+        Raises an error if a foreground group already exists.
+        """
+        if self._foreground_group is not None:
+            raise ValueError("A foreground tool call group already exists")
+        group = ToolCallGroup(id=group_id, anchor_name=anchor_name)
+        self._groups[group_id] = group
+        self._foreground_group = group
+
+    def close_foreground_group(self) -> None:
+        """Close and remove the foreground group."""
+        if self._foreground_group is None:
+            return
+        self._groups.pop(self._foreground_group.id, None)
+        self._foreground_group = None
+
+    def add_tool_call(self, tool_call: ContentPart) -> ToolCallRecord:
+        """Add a tool call to the foreground group. Returns the created record."""
+        group = self._foreground_group
+        if group is None:
+            raise RuntimeError("No foreground tool call group")
+
         tc_id = tool_call.call_id
         if tc_id is None:
             raise ValueError("Tool call missing required 'call_id' field")
-        if tc_id in self._tool_to_group:
-            raise ValueError(f"Duplicate tool call id: {tc_id}")
-        if group_id not in self._groups:
-            raise ValueError(f"Unknown tool call group: {group_id}")
 
-        group = self._groups[group_id]
         tool_name = tool_call.name
 
         if not self._tool_manager or not self._tool_manager.get_tool(tool_name):
@@ -233,75 +259,11 @@ class ExecutionEnvironment:
                 execution_status=ToolExecutionStatus.WAITING_FOR_APPROVAL,
             )
         group.add_tool_call(record)
-        self._tool_to_group[tc_id] = group_id
         return record
-
-    # ------------------------------------------------------------------ #
-    # Group-aware queries (group_id=None aggregates across all groups)
-    # ------------------------------------------------------------------ #
-
-    def get_group(self, group_id: str) -> Optional[ToolCallGroup]:
-        """Return a tool call group by ID."""
-        return self._groups.get(group_id)
-
-    def get_tool_calls_in_group(self, group_id: str) -> list[ToolCallRecord]:
-        """Return all tool call records for a specific group."""
-        group = self._groups.get(group_id)
-        return list(group.records) if group else []
-
-    def get_group_id(self, tool_call_id: str) -> Optional[str]:
-        """Return the group ID for a given tool call ID."""
-        return self._tool_to_group.get(tool_call_id)
-
-    def has_pending_tool_call(self, group_id: Optional[str] = None) -> bool:
-        """Check if any tool call needs user approval (approval status is PENDING)."""
-        if group_id:
-            group = self._groups.get(group_id)
-            return group.has_pending() if group else False
-        return any(g.has_pending() for g in self._groups.values())
-
-    def has_unfinished_tool_call(self, group_id: Optional[str] = None) -> bool:
-        """Check if any tool call is not yet fully executed."""
-        groups = [self._groups[group_id]] if group_id else list(self._groups.values())
-        return any(g.has_unfinished() for g in groups)
-
-    def has_reviewed_tool_call(self, group_id: Optional[str] = None) -> bool:
-        """Check if the first tool call in a group has been approved (no longer PENDING)."""
-        groups = [self._groups[group_id]] if group_id else list(self._groups.values())
-        return any(g.has_reviewed() for g in groups)
-
-    def get_pending_tool_calls(self) -> list[ToolCallRecord]:
-        """Return all currently pending tool calls across all groups."""
-        result = []
-        for group in self._groups.values():
-            result.extend(group.records)
-        return result
-
-    def pop_pending_tool_call(self, group_id: str) -> ToolCallRecord:
-        """Remove and return the first approved tool call from a group."""
-        group = self._groups.get(group_id)
-        if group is None:
-            raise RuntimeError(f"Unknown tool call group: {group_id}")
-        record = group.pop_first_reviewed()
-        if record is None:
-            raise RuntimeError(f"No reviewed tool calls in group: {group_id}")
-        return record
-
-    def is_tool_call_pending(self, tool_call_id: str) -> bool:
-        """Check if a tool call needs user approval."""
-        group_id = self._tool_to_group.get(tool_call_id)
-        group = self._groups.get(group_id)
-        if group is None:
-            return False
-        for record in group.records:
-            if record.tool_call_id == tool_call_id:
-                return record.approval_status == ToolApprovalStatus.PENDING
-        return False
 
     def _find_pending_record(self, tool_call_id: str) -> Optional[ToolCallRecord]:
         """Find a pending tool call record by its tool_call_id."""
-        group_id = self._tool_to_group.get(tool_call_id)
-        group = self._groups.get(group_id)
+        group = self._foreground_group
         if group is None:
             return None
         for record in group.records:
@@ -312,36 +274,34 @@ class ExecutionEnvironment:
     def _handle_approval(self, event: Any) -> tuple[bool, Optional[str]]:
         """Handle an approval/denial event for a pending tool call.
 
-        Returns (True, group_id) if approved, (False, group_id) if denied,
-        (False, None) if tool call not found.
+        If the tool call is denied, all remaining PENDING records in the
+        group are also denied.
         """
-        record = self._find_pending_record(event.tool_call_id)
-        group_id = self._tool_to_group.get(event.tool_call_id)
-        if record is None:
+        group = self._foreground_group
+        if group is None:
             return False, None
 
-        if event.approved:
-            record.approval_status = ToolApprovalStatus.APPROVED
-            return True, group_id
-        else:
-            record.approval_status = ToolApprovalStatus.DENIED
-            return False, group_id
+        for record in group.records:
+            if record.tool_call_id == event.tool_call_id:
+                if event.approved:
+                    record.approval_status = ToolApprovalStatus.APPROVED
+                    return True, group.id
+                else:
+                    record.approval_status = ToolApprovalStatus.DENIED
+                    for other in group.records:
+                        if other.tool_call_id != event.tool_call_id and other.approval_status == ToolApprovalStatus.PENDING:
+                            other.approval_status = ToolApprovalStatus.DENIED
+                            other.execution_status = ToolExecutionStatus.DENIED
+                            other.denied_reason = "Tool group denied by user."
+                    return False, group.id
+        return False, None
 
     # ------------------------------------------------------------------ #
     # Result injection — EE owns result message and ContentPart injection.
     # ------------------------------------------------------------------ #
 
-    def _ensure_result_message(self, group_id: str) -> Message:
-        """Ensure a result message exists for this group, creating it if needed."""
-        group = self._groups.get(group_id)
-        if group is None:
-            raise ValueError(f"Unknown tool call group: {group_id}")
-        if group.result_message is None:
-            group.set_result_message(Message({"role": "tool_result", "content": []}))
-        return group.result_message
-
-    async def execute_and_inject(self, tool_call: ContentPart, group_id: str, runner: "Runner | None" = None) -> tuple[str | None, bool]:
-        """Execute a tool and inject the result ContentPart into the group's result message.
+    async def execute_and_inject(self, tool_call: ContentPart, runner: "Runner | None" = None) -> tuple[str | None, bool]:
+        """Execute a tool and inject the result ContentPart into the foreground group's result message.
 
         Creates the result message lazily — only when the first non-None
         result arrives. Returns (None, True) for fire-and-forget tools
@@ -349,21 +309,23 @@ class ExecutionEnvironment:
 
         Args:
             tool_call: ContentPart with type "tool_use".
-            group_id: The tool call group ID.
             runner: Optional runner to inject as ``runner`` kwarg into tool calls.
 
         Returns:
             Tuple of (result_string_or_None, success_bool).
         """
-        group = self._groups.get(group_id)
+        group = self._foreground_group
         if group is None:
-            raise ValueError(f"Unknown tool call group: {group_id}")
+            raise RuntimeError("No foreground tool call group")
 
         result_str, success = await self.execute_tool(tool_call, runner=runner)
         if result_str is None:
             return None, success
 
-        result_msg = self._ensure_result_message(group_id)
+        result_msg = self._foreground_group.result_message
+        if result_msg is None:
+            result_msg = Message.create("tool_result", [])
+            self._foreground_group.result_message = result_msg
         cp = ContentPart.create_tool_result(tool_call.call_id, result_str)
         cp.raw_dict["name"] = tool_call.name
         result_msg.raw_dict["content"].append(cp.raw_dict)
