@@ -289,6 +289,20 @@ class Runner(ActiveClass):
             async for _ in response:
                 pass
 
+            # --- Phase 1.5: Debug output ---
+            _logger.debug(
+                "[runner] step(): Chatbot response — has_text=%s, content_parts=%d, message_id=%s",
+                response.has_text_part,
+                len(response.message.content) if response.message else 0,
+                response.message.id if response.message else None,
+            )
+            for i, part in enumerate(response.message.content if response.message else []):
+                _logger.debug("[runner] step():   content_part[%d] type=%s", i, part.type)
+                if part.type == "text":
+                    _logger.debug("[runner] step():   content_part[%d] text=%s", i, json.dumps(part.text))
+                elif part.type == "tool_use":
+                    _logger.debug("[runner] step():   content_part[%d] tool_use(name=%s, arguments=%s)", i, part.name, part.arguments)
+
             # --- Phase 2: Error handling ---
             if "error" in response.data:
                 _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
@@ -313,9 +327,8 @@ class Runner(ActiveClass):
                 # Get the end-iterator from the messages anchor so the
                 # negative offset stays correct even when other anchors
                 # exist after it
-                messages_anchor = self._session.active_context.get_anchor_index("messages")
-                msg_index = self._session.active_context.anchor_points[messages_anchor][1]
-                self._session.active_context.add_anchor(anchor_name, msg_index - len(self._session.active_context.messages))
+                msg_index = self._session.active_context.get_anchor_msg_index("messages")
+                self._session.active_context.add_anchor(anchor_name, msg_index, after_existing=False)
 
         # --- Phase 5: Execute tool calls (delegate to ExecutionEnvironment) ---
         did_tool_calls = self._execution_environment.has_reviewed_tool_call()
@@ -363,6 +376,7 @@ class Runner(ActiveClass):
         if did_tool_calls and not self._execution_environment.has_pending_tool_call():
             if any_tool_produced:
                 _logger.debug("[runner] step(): Did tool calls with results. Need to continue, such that the ChatBot can see the results.")
+                #TODO: result msg is not appended to the context yet (note to take the right group anchor)
                 return (ExecStatus.CONTINUE, None)
             _logger.debug("[runner] step(): Did tool calls but all returned None (fire-and-forget). Skipping re-entry.")
             return (ExecStatus.FINISHED, None)

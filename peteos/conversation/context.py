@@ -71,10 +71,10 @@ class Context:
         """
         ctx = cls({}, parent_context=parent_context)
         if system_prompt_message is not None:
-            ctx.append(system_prompt_message)
+            ctx.append(system_prompt_message, anchor_point="system_prompt")
             ctx.raw_dict["system_prompt_message_id"] = system_prompt_message.id
         if tool_definitions_message is not None:
-            ctx.append(tool_definitions_message)
+            ctx.append(tool_definitions_message, anchor_point="tools")
             ctx.raw_dict["tool_definitions_message_id"] = tool_definitions_message.id
         return ctx
 
@@ -117,6 +117,8 @@ class Context:
         parent_context: Context | None = None,
     ) -> None:
         """
+        Context objects shall only be created using the factory functions!
+
         Args:
             json_dict: The raw serialized context dict.
             parent_context: If provided, inherit the parent's content map.
@@ -128,21 +130,23 @@ class Context:
         self._json_dict.setdefault("anchor_points", [])
         self._json_dict.setdefault("message_sequence", 0)
 
-        self._messages: list[Message] = [
-            Message.from_dict(msg) for msg in self._json_dict["messages"]
-        ]
         # Inherit content map from parent if provided, otherwise start empty
         if parent_context is not None:
             self._json_dict["content_map"] = dict(parent_context._json_dict["content_map"])
             self._json_dict["origin_context_id"] = parent_context.id
-        # Map hook_id → list of messages that reference this hook
-        # Default anchor points: system_prompt, tools, messages
-        if not any(n == "system_prompt" for n, _ in self._json_dict["anchor_points"]):
-            self._json_dict["anchor_points"].append(("system_prompt", 0))
-        if not any(n == "tools" for n, _ in self._json_dict["anchor_points"]):
-            self._json_dict["anchor_points"].append(("tools", 1))
-        if not any(n == "messages" for n, _ in self._json_dict["anchor_points"]):
-            self._json_dict["anchor_points"].append(("messages", 2))
+
+        # Add default anchor points only for fresh contexts (empty anchor list = no serialization)
+        if not self._json_dict["anchor_points"]:
+            assert(not self._json_dict["messages"])
+            self._messages: list[Message] = []
+            self.add_anchor("system_prompt", 0)
+            self.add_anchor("tools", 0)
+            self.add_anchor("messages", 0)
+        else:
+            self._messages: list[Message] = [
+                Message.from_dict(msg) for msg in self._json_dict["messages"]
+            ]
+
         self._hook_index: dict[str, list[Message]] = {}
         self._update_hook_index()
 
@@ -245,16 +249,28 @@ class Context:
         """Return the position of *name* in the anchor point list."""
         return next(i for i, (n, _) in enumerate(self._json_dict["anchor_points"]) if n == name)
 
-    def add_anchor(self, name: str, msg_index: int) -> None:
+    def get_anchor_msg_index(self, name: str) -> int:
+        """Return the message index stored for anchor *name*."""
+        return self._json_dict["anchor_points"][self.get_anchor_index(name)][1]
+
+    def add_anchor(self, name: str, msg_index: int, after_existing: bool = True) -> None:
         """Register a new anchor point.
 
-        The index is a non-negative absolute position into the messages
-        array.  Negative input indices are resolved via standard Python
-        negative indexing (``len(messages) + index``).
+        The *msg_index* is always a non-negative absolute position into the
+        messages array (0 = before all messages, len(messages) = after all
+        messages).
+
+        When multiple anchors share the same message index, *after_existing*
+        controls the ordering in the anchor list.  With ``after_existing=True``
+        (default), the new anchor is placed after existing anchors at the same
+        position (it appears later in the list).  With ``after_existing=False``,
+        it is placed before them.
 
         Args:
             name: The anchor point name.
-            msg_index: Initial index (positive or negative).
+            msg_index: Absolute message index (0 to len(messages)).
+            after_existing: Ordering when another anchor already occupies this
+                position.
 
         Raises:
             ValueError: If *name* already exists.
@@ -262,28 +278,30 @@ class Context:
         if any(n == name for n, _ in self._json_dict["anchor_points"]):
             raise ValueError(f"Anchor point already exists: {name}")
 
-        if msg_index < 0:
-            abs_idx = len(self._messages) + msg_index
-        else:
-            abs_idx = msg_index
+        assert 0 <= msg_index <= len(self._messages), (
+            f"Anchor '{name}' index {msg_index} is out of bounds "
+            f"[0, {len(self._messages)}]"
+        )
 
-        if msg_index < 0:
-            for pos, (_, existing_idx) in enumerate(self._json_dict["anchor_points"]):
-                if existing_idx >= abs_idx:
-                    self._json_dict["anchor_points"].insert(pos, (name, abs_idx))
-                    return
-        else:
-            for pos, (_, existing_idx) in enumerate(self._json_dict["anchor_points"]):
-                if existing_idx > abs_idx:
-                    self._json_dict["anchor_points"].insert(pos, (name, abs_idx))
-                    return
-        self._json_dict["anchor_points"].append((name, abs_idx))
+        for pos, (_, existing_idx) in enumerate(self._json_dict["anchor_points"]):
+            if after_existing and existing_idx > msg_index:
+                self._json_dict["anchor_points"].insert(pos, (name, msg_index))
+                return
+            if not after_existing and existing_idx >= msg_index:
+                self._json_dict["anchor_points"].insert(pos, (name, msg_index))
+                return
+        self._json_dict["anchor_points"].append((name, msg_index))
 
     def _shift_anchors_after_insert(self, anchor_list_index: int) -> None:
         """Increment stored indices for all anchors at or after *anchor_list_index* in the list."""
         for i in range(anchor_list_index, len(self._json_dict["anchor_points"])):
             n, idx = self._json_dict["anchor_points"][i]
-            self._json_dict["anchor_points"][i] = (n, idx + 1)
+            new_idx = idx + 1
+            self._json_dict["anchor_points"][i] = (n, new_idx)
+            assert 0 <= new_idx <= len(self._messages), (
+                f"Anchor '{n}' index {new_idx} is out of bounds "
+                f"[0, {len(self._messages)}]"
+            )
 
     def append(self, message: Message, anchor_point: str = "messages") -> None:
         """Insert a Message at the anchor point's end-iterator position.

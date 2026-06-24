@@ -248,7 +248,7 @@ class AgenticObjectBase:
             )
         except ValueError as e:
             return f"Error: {e}"
-        return "OK"
+        return None
 
     async def _read_media(self, src: str, runner: "Runner | None" = None) -> str:
         """Tool: load a media file and queue it back to the agent's runner.

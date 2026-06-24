@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from peteos.logger import get_logger
+from peteos.utils.logger import get_logger
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
 from .edge import Edge
