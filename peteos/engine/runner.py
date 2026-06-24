@@ -259,7 +259,7 @@ class Runner(ActiveClass):
     # step() — the core reasoning iteration
     # ------------------------------------------------------------------ #
 
-    async def step(self) -> tuple[ExecStatus, dict | None]:
+    async def step(self) -> tuple[ExecStatus, Message | None]:
         """Execute one reasoning iteration: chatbot -> create tool group.
 
         If a foreground tool call group already exists, returns PENDING
@@ -269,7 +269,7 @@ class Runner(ActiveClass):
         a foreground tool call group if tool calls are present.
 
         Returns:
-            Tuple of (status, data).
+            Tuple of (status, response_message).
         """
         # --- If there's a foreground tool call group, don't call chatbot ---
         foreground = self._execution_environment.get_foreground_group()
@@ -328,14 +328,14 @@ class Runner(ActiveClass):
 
         if not has_text_part:
             _logger.debug("[runner] step(): Response contained only reasoning part(s).")
-            return (ExecStatus.CONTINUE, None)
+            return (ExecStatus.CONTINUE, response_msg)
 
         if self._agent.role.behavior_policy == "continuous":
             _logger.debug("[runner] step(): Continuous agent produced text, keeping loop active.")
-            return (ExecStatus.CONTINUE, None)
+            return (ExecStatus.CONTINUE, response_msg)
 
         _logger.debug("[runner] step(): Had final answer.")
-        return (ExecStatus.FINISHED, None)
+        return (ExecStatus.FINISHED, response_msg)
 
     async def _call_hooks(self, hook_point: str, *args: Any) -> ExecStatus | None:
         """Delegate to execution environment's hook system."""
@@ -416,13 +416,16 @@ class Runner(ActiveClass):
         have_new_message = False
 
         while self.is_running():
+            foreground = self._execution_environment.get_foreground_group()
+
             # Drain the event queue
-            if not have_new_message and not self.has_event():
+            if not have_new_message and not self.has_event() and (not foreground or not foreground.has_reviewed()):
                 self._idle.set()
                 if not await self._wait_for_event():
                     continue
                 self._idle.clear()
 
+            # drain event queue
             events_processed = 0
             while self.has_event():
                 event = self.event_queue.get_nowait()
@@ -441,13 +444,13 @@ class Runner(ActiveClass):
                     continue
 
             # If a foreground tool group exists, process approved tool calls
-            foreground = self._execution_environment.get_foreground_group()
             if foreground is not None:
                 if not await self._handle_tool_group() and not have_new_message:
                     continue
 
-            status, _ = await self.step()
+            status, response_msg = await self.step()
             have_new_message = False
+
             _logger.debug("[runner] step() returned status=%s", status)
             hook_status = await self._call_hooks("after_step", status)
             hook_return = hook_status if hook_status is not None else status
@@ -456,18 +459,7 @@ class Runner(ActiveClass):
             if hook_return == ExecStatus.ERROR:
                 _logger.debug("[runner] run(): Execution error, exiting loop.")
                 break
-            if hook_return == ExecStatus.FINISHED:
-                foreground = self._execution_environment.get_foreground_group()
-                if foreground is not None and foreground.result_message is not None:
-                    self._append_result_message(foreground)
-                    self._execution_environment.close_foreground_group()
-                    _logger.debug("[runner] run(): Appended tool result and continuing to chatbot.")
-                    continue
-                _logger.debug("[runner] run(): Step finished, waiting for next events.")
-                continue
-            if hook_return == ExecStatus.CONTINUE:
-                _logger.debug("[runner] run(): Continuing, waiting for next events.")
-                continue
+            _logger.debug("[runner] run(): Iterating...")
 
     async def _wait_for_event(self, timeout: float | None = None) -> bool:
         """Block until an event arrives in the queue.

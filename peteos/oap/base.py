@@ -238,10 +238,17 @@ class AgenticObjectBase:
         try:
             parsed = parse_data(data, self._oap_current_output_schema)
         except ValueError as e:
-            return str(e)
+            desc = get_schema_description(self._oap_current_output_schema)
+            if desc is None:
+                hint = f"Expected a value of type {self._oap_current_output_schema.__name__}."
+            else:
+                hint = f"Expected data matching: {desc[0]}."
+                if desc[1]:
+                    hint += f" {desc[1]}."
+            return f"{e} {hint}"
 
         try:
-            runner.state.create("_oap_produced_data", json.dumps(parsed))
+            runner.state.create("_oap_produced_data", data)
             _logger.debug(
                 "_produce_output: wrote to runner %s, _oap_produced_data=%s",
                 runner.session_uuid, parsed,
@@ -466,7 +473,7 @@ class AgenticObjectBase:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
 
         try:
-            async def _on_step_done(r: "Runner", status: ExecStatus) -> ExecStatus | None:
+            async def _on_step_done(r: Runner, status: ExecStatus) -> ExecStatus | None:
                 produced = r.state.get("_oap_produced_data")
                 errored = r.state.get("_oap_error")
                 if errored is not None:
@@ -475,7 +482,7 @@ class AgenticObjectBase:
                 elif produced is not None:
                     _logger.debug("_on_step_done: produced data found, returning FINISHED")
                     return ExecStatus.FINISHED
-                else:
+                elif status == ExecStatus.FINISHED:
                     schema_desc = ""
                     desc = get_schema_description(self._oap_current_output_schema)
                     if desc is not None:
@@ -495,7 +502,7 @@ class AgenticObjectBase:
                         role="user",
                         content_parts=[ContentPart.create_text(reminder)],
                     ))
-                    return None
+                return None
 
             runner.execution_environment.register_hook(
                 "after_step", _on_step_done, runner
@@ -527,7 +534,11 @@ class AgenticObjectBase:
                 produced_data = runner.state.get("_oap_produced_data")
                 if produced_data is not None:
                     _logger.debug("invoke_agent[%s]: produced_data found, returning", self.__class__.__name__)
-                    return json.loads(produced_data)
+                    try:
+                        return parse_data(produced_data, self._oap_current_output_schema)
+                    except ValueError as e:
+                        _logger.warning("invoke_agent[%s]: produced data failed to parse: %s", self.__class__.__name__, e)
+                        return Error(f"Agent produced data that failed schema validation: {e}")
                 error_msg = runner.state.get("_oap_error")
                 if error_msg is not None:
                     _logger.debug("invoke_agent[%s]: error found, returning", self.__class__.__name__)
