@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from peteos.oap import Error
 from peteos.utils.logger import get_logger
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
@@ -378,9 +379,9 @@ ome on, man.
         self._feedback = body
 
         if body == "":
-            return "Feedback has been cleared! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
+            return "Feedback has been cleared!"
         else:
-            return "Feedback has been set! USE THE `produce_output` TOOL WITH THE 'decision' FIELD SET TO 'pending' NOW, UNLESS YOU NEED TO ALSO ESCALATE AN ISSUE!"
+            return "Feedback has been set!"
 
     @tool
     def get_feedback(self) -> str:
@@ -447,36 +448,40 @@ ome on, man.
         thread_id = f"{self._process_id}/{self.task_id}" if self._process_id else None
 
         if email_uid is not None:
-            prompt = (
+            main_prompt = (
                 f"Process the incoming E-Mail with UID {email_uid} (and older E-Mails if necessary) according your task description. "
-                f"IF THAT E-MAIL IS IRRELEVANT FOR YOUR TASK, CHECK IF OLDER E-MAILS ARE RELEVANT! "
-                f"Use your tools to read and act on the email content."
-                f"If NEITHER that E-Mail NOR any other E-Mail is relevant for your task, then call `set_feedback` and `append_text` mentioning what you need!\n"
+                f" IF THAT E-MAIL IS IRRELEVANT FOR YOUR TASK, CHECK IF OLDER E-MAILS ARE RELEVANT! "
+                f" Use your tools to read and act on the email content."
+                f" TRACK YOUR PROGRESS USING `append_text`!"
+                f" If NEITHER that E-Mail NOR any other E-Mail is relevant for your task, then call `set_feedback` and `append_text` mentioning what you need!\n"
                 f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL and one of the following arguments:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
                 f"- pending: You used `set_feedback()` and you need more information from the user via the supervisor OR the E-Mail is irrelevant for your task."
             )
         else:
-            prompt = (
-                f"Proceed executing your task! "
-                f"WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL and one of the following arguments:\n"
+            main_prompt = (
+                f"Proceed executing your task!"
+                f" TRACK YOUR PROGRESS USING `append_text`!"
+                f" WHEN YOU HAVE ANALYZED ALL RELEVANT INFORMATION, USE THE `produce_output` TOOL and one of the following arguments:\n"
                 f"- ready: you have everything to evaluate edge conditions\n"
                 f"- deny: you reject the task and the overall process\n"
                 f"- pending: You used `set_feedback()` and you need more information from the user via the supervisor OR the E-Mail is irrelevant for your task."
             )
+        reminder = f"UPDATE TEXT AND PROVIDE FEEDBACK! CALL `append_text` AND `set_feedback`! ONLY THEN PRODUCE OUTPUT VIA A `produce_output`!"
 
         # Capture text before invoking; loop until agent calls append_text
+        prompt = main_prompt
         text_before = self.text
         for attempt in range(3):
-            reminder = "" if attempt == 0 else f" Reminder: your text was not updated or you provided no feedback. You have one last chance to do that via `append_text` and `set_feedback`. PRODUCE OUTPUT VIA A `produce_output` TOOL CALL!"
             status = await self.invoke_agent(
-                prompt=prompt + reminder,
+                prompt=prompt,
                 output_schema=TaskStatus,
                 persistent_thread_id=thread_id,
             )
             if self.text != text_before and self._feedback is not None:
                 break
+            prompt = reminder
 
         decision = status.decision
 
@@ -511,7 +516,7 @@ ome on, man.
                 evaluations: list[Any] | None = None
                 retry_prompt_suffix = ""
                 for attempt in range(max_attempts):
-                    prompt = (
+                    main_prompt = (
                         f"The task reached a 'ready' state and all its outgoing edges need to be evaluated. "
                         f"The task has the following outgoing edges:\n{edge_list}\n"
                         f"Evaluate each edge condition and use the `produce_output` tool to return a list of evaluations. "
@@ -519,7 +524,7 @@ ome on, man.
                         f"{retry_prompt_suffix}"
                     )
                     evaluations = await self.invoke_agent(
-                        prompt=prompt,
+                        prompt=main_prompt,
                         output_schema=list[EdgeEvaluation],
                         persistent_thread_id=thread_id,
                     )

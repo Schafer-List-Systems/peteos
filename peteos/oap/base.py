@@ -248,6 +248,8 @@ class AgenticObjectBase:
             return f"{e} {hint}"
 
         try:
+            if runner.state.get("_oap_produced_data"):
+                runner.state.delete("_oap_produced_data")
             runner.state.create("_oap_produced_data", data)
             _logger.debug(
                 "_produce_output: wrote to runner %s, _oap_produced_data=%s",

@@ -448,6 +448,7 @@ class Runner(ActiveClass):
                 if not await self._handle_tool_group() and not have_new_message:
                     continue
 
+            # Send context to chatbot and get a response, already passing the tool calls
             status, response_msg = await self.step()
             have_new_message = False
 
