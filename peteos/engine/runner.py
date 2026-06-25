@@ -29,6 +29,66 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
+async def invoke_agent(
+        prompt: str,
+        agent: "Agent",
+        *,
+        timeout: float,
+) -> dict[str, Any]:
+    """Invoke an agent and return its final answer.
+
+    Creates a session and runner pair, queues the prompt,
+    waits for processing to complete, and returns the assistant's answer.
+
+    Args:
+        prompt: The prompt to send to the agent.
+        agent: Agent with role and tool manager.
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        Dict with keys:
+            - answer (str): Last assistant text.
+            - history (list[Message]): Full chat history.
+            - state (dict[str, str]): AgenticState data.
+
+    Raises:
+        ValueError: If agent is not provided.
+        TimeoutError: If timeout expires.
+    """
+    session = await agent.create_session()
+    runner = Runner(agent, session.uuid)
+
+    done: asyncio.Event = asyncio.Event()
+
+    def on_finished(status: ExecStatus) -> None:
+        if status == ExecStatus.FINISHED:
+            done.set()
+
+    runner._execution_environment.register_hook("after_step", on_finished)
+
+    try:
+        user_message = Message.create(role="user", content_parts=[ContentPart.create_text(prompt)])
+        await runner.queue_message(user_message)
+        await asyncio.wait_for(done.wait(), timeout=timeout)
+        answer = _extract_last_assistant_text(session.active_context)
+        return_state = dict(runner._state._data)
+    finally:
+        try:
+            runner._execution_environment.deregister_hook("after_step", on_finished)
+        except (ValueError, Exception):
+            pass
+        try:
+            await runner.stop()
+        except (Exception, RuntimeError):
+            pass
+
+    return {
+        "answer": answer,
+        "history": list(session.active_context.messages),
+        "state": return_state,
+    }
+
+
 class AgenticState:
     """Mutable key-value store for agents to leave intermediate state.
 
@@ -338,12 +398,6 @@ class Runner(ActiveClass):
         return (ExecStatus.FINISHED, response_msg)
 
     async def _call_hooks(self, hook_point: str, *args: Any) -> ExecStatus | None:
-        """Delegate to execution environment's hook system."""
-        if self.execution_environment:
-            return await self.execution_environment.call_hooks(hook_point, *args)
-        return None
-
-    async def _append_result_message(self, group: ToolCallGroup) -> bool:
         """Append the group's result message to the active context at the group's anchor.
 
         Returns True if a message was appended, False if the group had no

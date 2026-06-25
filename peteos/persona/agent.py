@@ -4,9 +4,8 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Dict, Optional, Set
+from typing import Dict, Optional
 
-from peteos.persona.channel import Channel
 from peteos.utils import get_logger
 
 from peteos.conversation.system_prompt_message import SystemPromptMessage
@@ -44,28 +43,6 @@ class Agent:
 
         # Session management
         self._sessions: Dict[str, Session] = {}
-
-        # Track which channels are subscribed to which sessions
-
-        # Track registered channels (for Channel base class compatibility)
-        self._channels: Dict[str, Channel] = {}
-
-    def register_channel(self, channel: Channel) -> None:
-        """Register a channel with the agent."""
-        self._channels[channel.name] = channel
-
-    def deregister_channel(self, name: str) -> None:
-        """Deregister a channel from the agent."""
-        if name in self._channels:
-            del self._channels[name]
-
-    def get_channel(self, name: str) -> Channel | None:
-        """Get a channel by name."""
-        return self._channels.get(name)
-
-    def list_channels(self) -> Dict[str, Channel]:
-        """List all registered channels."""
-        return dict(self._channels)
 
     async def create_session(self) -> Session:
         """Create a new session for this agent."""

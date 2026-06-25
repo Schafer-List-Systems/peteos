@@ -1,4 +1,4 @@
-from peteos.persona.channel import Channel
+from peteos.engine.channel import Channel
 from peteos.channels.nextcloud_talk_channel import NextcloudTalkChannel
 from peteos.channels.shell_channel import InteractiveShellChannel
 from peteos.channels.stdout_channel import ReadStdoutChannel

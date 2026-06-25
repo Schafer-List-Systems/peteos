@@ -6,9 +6,12 @@ import uuid
 from typing import Optional
 
 from peteos.chatbot import Message, ContentPart
+from peteos.engine.channel import Channel
+from peteos.engine.executionenvironment import (
+    ApprovalEvent,
+    ToolApprovalStatus,
+)
 from peteos.utils import get_logger
-from peteos.engine.executionenvironment import ApprovalEvent
-from peteos.persona.channel import Channel
 
 _logger = get_logger(__name__)
 
@@ -16,46 +19,36 @@ _logger = get_logger(__name__)
 class InteractiveShellChannel(Channel):
     """Interactive shell channel for REPL-style interaction with agents.
 
-    This channel uses the Agent's queue-based architecture:
-    - User input (non-command lines) is posted to the Agent's message queue
-    - Agent processes messages and triggers session execution
+    This channel connects directly to a Runner:
+    - User input (non-command lines) is posted to the Runner's message queue
     - Notifications are pushed to the channel's notification queue
     - Channel consumes notifications and displays them to user
 
-    The shell runs in a separate thread from the Agent's event loop,
-    so blocking input() doesn't block session processing.
+    Session switching is the application's responsibility — the app
+    creates a new runner and constructs a new shell channel for it.
 
     Example:
-        >>> role = Role(name="test", description="Test role")
         >>> agent = Agent(role, tool_manager)
-        >>> await agent.start()
-        >>> shell = InteractiveShellChannel("shell", agent)
+        >>> session = await agent.create_session()
+        >>> runner = Runner(agent, session.uuid)
+        >>> await runner.start()
+        >>> shell = InteractiveShellChannel("shell", runner)
         >>> await shell.start()
-        >>> # User types: /new
         >>> # User types: Hello!
         >>> # Agent processes and notifications appear
         >>> await shell.stop()
-        >>> await agent.stop()
+        >>> await runner.stop()
     """
 
-    def __init__(self, name: str, agent):
+    def __init__(self, name: str, runner):
         """Initialize InteractiveShellChannel.
 
         Args:
             name: Unique identifier for this channel.
-            agent: The Agent instance this channel connects to.
+            runner: The Runner instance this channel connects to.
         """
-        super().__init__(name, agent)
-        self._active_session_uuid: uuid.UUID | None = None
-
-    @property
-    def active_session_uuid(self) -> uuid.UUID | None:
-        """Get the currently active session UUID for this shell."""
-        return self._active_session_uuid
-
-    @active_session_uuid.setter
-    def active_session_uuid(self, value: uuid.UUID | None) -> None:
-        self._active_session_uuid = value
+        super().__init__(name, runner)
+        self._input_task: asyncio.Task | None = None
 
     async def send(self, message: Message | str, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the shell.
@@ -69,29 +62,24 @@ class InteractiveShellChannel(Channel):
         else:
             print(message.printable())
 
-    def _post_message_to_agent(self, session_uuid: uuid.UUID, content: str) -> None:
-        """Post a message directly to the session's event queue.
+    def _post_message_to_runner(self, content: str) -> None:
+        """Post a message directly to the runner's event queue.
 
-        Non-blocking. The session's event loop processes the message.
+        Non-blocking. The runner's event loop processes the message.
         Since this method is sync (called from the input loop), uses
         asyncio.create_task to call the async queue_message.
 
         Args:
-            session_uuid: The UUID of the target session.
             content: The message content from the user.
         """
-        session = self._agent.get_session(session_uuid)
-        if session:
-            message = Message.create(
-                role="user",
-                content_parts=[ContentPart.create_text(content)]
-            )
-            asyncio.create_task(session.queue_message(message))
+        message = Message.create(
+            role="user",
+            content_parts=[ContentPart.create_text(content)]
+        )
+        self._runner.push_event(message)
 
     def _handle_file(self, args: str) -> tuple[bool, str]:
         """Handle /image or /file command."""
-        if self._active_session_uuid is None:
-            return (True, "No session selected")
         parts = args.split(maxsplit=1)
         src = parts[0]
         text = parts[1] if len(parts) > 1 else ""
@@ -120,13 +108,8 @@ class InteractiveShellChannel(Channel):
         parts = [ContentPart.create_text(text)] if text else []
         parts.append(file_part)
         message = Message.create(role="user", content_parts=parts)
-        session = self._agent.get_session(self._active_session_uuid)
-        if session:
-            await session.queue_message(message)
-            _logger.debug(
-                "%s message queued for session %s from %s",
-                file_type, self._active_session_uuid, src,
-            )
+        self._runner.push_event(message)
+        _logger.debug("%s message queued from %s", file_type, src)
 
     def _get_input_line(self) -> Optional[str]:
         """Synchronous input reader for use with run_in_executor."""
@@ -143,31 +126,29 @@ class InteractiveShellChannel(Channel):
         and the input reading loop via asyncio.create_task().
         """
         await super().start()
-        asyncio.create_task(self.read_input_loop())
+        self._input_task = asyncio.create_task(self.read_input_loop())
+        self._input_task.add_done_callback(self._on_input_task_done)
+
+    @staticmethod
+    def _on_input_task_done(task: asyncio.Task) -> None:
+        """Suppress CancelledError from input task to avoid 'exception never retrieved' warnings."""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            _logger.error("[InteractiveShellChannel]: input task finished with exception: %s: %r", type(e).__name__, e)
 
     async def stop(self) -> None:
         """Stop the shell channel gracefully."""
+        if self._input_task is not None:
+            self._input_task.cancel()
+            self._input_task = None
         await super().stop()
-
-    def select_session(self, session_uuid: uuid.UUID) -> None:
-        """Select a session as the active session for this channel.
-
-        Also subscribes to notifications for this session via the base class.
-
-        Args:
-            session_uuid: The UUID of the session to select.
-        """
-        self._active_session_uuid = session_uuid
-        self.subscribe_to_session(session_uuid)
 
     def _get_prompt(self) -> str:
         """Get the prompt string for the shell."""
-        if self._active_session_uuid:
-            short_uuid = str(self._active_session_uuid)[:8]
-            session = self._agent.get_session(self._active_session_uuid)
-            role_name = self._agent.role.name if session else "agent"
-            return f"{short_uuid} @{role_name} >> "
-        return ">> "
+        return f"{self._runner.uuid.hex[:8]} @{self._runner.role.name} >> "
 
     def handle_command(self, line: str) -> tuple[bool, str]:
         """Handle a shell command.
@@ -182,54 +163,8 @@ class InteractiveShellChannel(Channel):
         command = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
 
-        if command == "/new":
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.create_task(self._handle_new_session())
-                    return (True, "")
-                else:
-                    session = loop.run_until_complete(
-                        self._agent.create_session()
-                    )
-                    self.select_session(session.uuid)
-                    _logger.debug("Session created: %s", session.uuid)
-                    return (True, "")
-            except Exception as e:
-                return (True, str(e))
-
-        elif command == "/list":
-            sessions = self._agent.list_sessions()
-            if not sessions:
-                role_name = self._agent.role.name if hasattr(self._agent, "role") else "??"
-                return (True, f"No sessions available (role: {role_name})")
-            output = f"Sessions ({self._agent.role.name}):"
-            for uuid_, session in sessions.items():
-                active_marker = " (active)" if uuid_ == self._active_session_uuid else ""
-                output += f"\n  {uuid_}{active_marker}"
-            return (True, output)
-
-        elif command == "/switch":
-            if not args:
-                return (True, "Usage: /switch <uuid>")
-            try:
-                session_uuid = uuid.UUID(args.strip())
-                session = self._agent.get_session(session_uuid)
-                if session is None:
-                    return (True, f"Session not found: {session_uuid}")
-                self.select_session(session_uuid)
-                _logger.debug("Active session: %s", session_uuid)
-                return (True, "")
-            except ValueError:
-                return (True, f"Invalid UUID: {args}")
-
-        elif command == "/approve":
-            if self._active_session_uuid is None:
-                return (True, "No session selected")
-            session = self._agent.get_session(self._active_session_uuid)
-            if session is None:
-                return (True, "Session not found")
-            pending = session.get_pending_tool_calls()
+        if command == "/approve":
+            pending = self._runner._execution_environment.get_pending_tool_calls()
             if not pending:
                 return (True, "No pending tool calls")
             record = pending[0]
@@ -238,16 +173,11 @@ class InteractiveShellChannel(Channel):
                 tool_call=record.tool_call,
                 approved=True,
             )
-            session.push_event(approval_event)
+            self._runner.push_event(approval_event)
             return (True, f"Approved tool call: {record.tool_call.name}")
 
         elif command == "/deny":
-            if self._active_session_uuid is None:
-                return (True, "No session selected")
-            session = self._agent.get_session(self._active_session_uuid)
-            if session is None:
-                return (True, "Session not found")
-            pending = session.get_pending_tool_calls()
+            pending = self._runner._execution_environment.get_pending_tool_calls()
             if not pending:
                 return (True, "No pending tool calls")
             record = pending[0]
@@ -256,16 +186,11 @@ class InteractiveShellChannel(Channel):
                 tool_call=record.tool_call,
                 approved=False,
             )
-            session.push_event(approval_event)
+            self._runner.push_event(approval_event)
             return (True, f"Denied tool call: {record.tool_call.name}")
 
         elif command == "/pending":
-            if self._active_session_uuid is None:
-                return (True, "No session selected")
-            session = self._agent.get_session(self._active_session_uuid)
-            if session is None:
-                return (True, "Session not found")
-            pending = session.get_pending_tool_calls()
+            pending = self._runner._execution_environment.get_pending_tool_calls()
             if not pending:
                 return (True, "No pending tool calls")
             output = "Pending tool calls:"
@@ -274,7 +199,7 @@ class InteractiveShellChannel(Channel):
             return (True, output)
 
         elif command in ("/image", "/file"):
-            if not args or self._active_session_uuid is None:
+            if not args:
                 return (True, "Usage: /file <filepath or url> [text]")
             return self._handle_file(args)
 
@@ -283,17 +208,11 @@ class InteractiveShellChannel(Channel):
             return (False, "Goodbye!")
 
         else:
-            return (True, f"Unknown command: {command}. Use /list for available commands.")
-
-    async def _handle_new_session(self) -> None:
-        """Async helper for /new command."""
-        session = await self._agent.create_session()
-        self.select_session(session.uuid)
-        _logger.debug("Session created: %s", session.uuid)
+            return (True, f"Unknown command: {command}. Use /approve, /deny, /pending, /image (or /file), /quit.")
 
     async def read_input_loop(self) -> None:
-        """Read user input and send events to the channel's queue."""
-        await self.send("Connected. Commands: /new, /list, /switch, /approve, /deny, /pending, /image (or /file), /quit")
+        """Read user input and send events to the runner's queue."""
+        await self.send("Connected. Commands: /approve, /deny, /pending, /image (or /file), /quit")
 
         while self.is_running():
             # Print prompt before reading input
@@ -321,16 +240,7 @@ class InteractiveShellChannel(Channel):
                 if not should_continue:
                     break
             else:
-                # Push user input as an event to the channel queue.
-                # The Channel.run() loop consumes events via _wait() and
-                # processes them by calling send(). For non-command input,
-                # we need to forward to the agent's message queue directly
-                # since this is a shell-specific flow.
-                if self._active_session_uuid is None:
-                    await self.send("No session selected. Use /new or /switch <uuid>.")
-                    continue
-
                 try:
-                    self._post_message_to_agent(self._active_session_uuid, line)
+                    self._post_message_to_runner(line)
                 except Exception as e:
                     await self.send(f"Error: {type(e).__name__}: {str(e)}")

@@ -11,9 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from peteos.channels import NextcloudTalkChannel
-from peteos.channels.channel import Channel
+from peteos.engine.channel import Channel
 from peteos.chatbot import Message, ContentPart
-from peteos.role import Role
+from peteos.persona.role import Role
 
 
 def _cleanup_channels():
@@ -68,6 +68,10 @@ def _make_config(**overrides) -> dict:
         "port": 0,
         "default_role": "test",
         "nextcloud_api_timeout": 10.0,
+        "show_reasoning": True,
+        "show_tool_calls": True,
+        "show_tool_results": True,
+        "prefix_actor_names": False,
         **overrides,
     }
     return config
@@ -176,6 +180,11 @@ class TestEventDispatch:
         session_mock.start = AsyncMock(return_value=None)
         agent.get_session = MagicMock(return_value=session_mock)
 
+        runner_mock = MagicMock()
+        runner_mock.queue_message = AsyncMock(return_value=None)
+        runner_mock.subscribe = MagicMock(return_value=True)
+        agent.get_runner = MagicMock(return_value=runner_mock)
+
         channel = NextcloudTalkChannel(
             name="nextcloud", agent=agent,
             config=_make_config(),
@@ -196,8 +205,8 @@ class TestEventDispatch:
         }
         await channel._handle_message(event)
 
-        session_mock.queue_message.assert_called_once()
-        queued_msg = session_mock.queue_message.call_args[0][0]
+        runner_mock.queue_message.assert_called_once()
+        queued_msg = runner_mock.queue_message.call_args[0][0]
         assert queued_msg.content[0].text == "Hello bot!"
 
         # Await the thinking reaction task to prevent RuntimeWarning
@@ -346,7 +355,7 @@ class TestSend:
             config=_make_config(),
         )
         # No session_uuid means no-op
-        await channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]))
+        await channel.send(Message.create(role="assistant", content_parts=[ContentPart.create_text("hello")]))
 
     @pytest.mark.asyncio
     async def test_send_no_conversation_mapping(self, agent):

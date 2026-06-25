@@ -34,6 +34,7 @@ from peteos.agent import Agent
 from peteos.channels import NextcloudTalkChannel
 from peteos.chatbot.manager import ChatBotManager
 from peteos.chatbot import Message, ContentPart
+from peteos.engine.runner import Runner
 from peteos.logger import setup_logging
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
@@ -195,8 +196,15 @@ async def main():
         print(f"Aborting: {e}")
         return
 
-    # Create the Nextcloud Talk channel
-    nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=config)
+    # Create a session and runner for the default room
+    session = await agent.create_session()
+    runner = Runner(agent, session.uuid)
+    await runner.start()
+    print(f"Created session: {session.uuid}")
+    print()
+
+    # Create the Nextcloud Talk channel connected to the runner
+    nextcloud = NextcloudTalkChannel(name="nextcloud", runner=runner, config=config)
 
     # Start the webhook receiver
     webhook_url = await nextcloud.start()
@@ -212,11 +220,6 @@ async def main():
     print("Responses are sent back to the originating room.")
     print()
 
-    # Create a session for the first room and register it
-    session = await agent.create_session()
-    print(f"Created session: {session.uuid}")
-    print()
-
     # Handle pre-joined rooms from config
     auto_join_rooms = config.get("auto_join_rooms", [])
     for room_token in auto_join_rooms:
@@ -224,11 +227,20 @@ async def main():
         print(f"Registered room {room_token} with session {session.uuid}")
 
     # When the bot is added to a new room, the channel calls this callback
-    # to let the app register the room with a session
+    # to let the app create a new runner+channel for that room
     async def on_room_joined(room_token: str):
-        """Handle new room join: create session and register the room."""
+        """Handle new room join: create new session, runner, channel, then register."""
         new_session = await agent.create_session()
-        await nextcloud.register_room(new_session.uuid, room_token)
+        new_runner = Runner(agent, new_session.uuid)
+        await new_runner.start()
+        new_channel = NextcloudTalkChannel(
+            name=f"nextcloud-{room_token}",
+            runner=new_runner,
+            config=config,
+        )
+        new_channel.on_room_joined = on_room_joined
+        await new_channel.register_room(new_session.uuid, room_token)
+        await new_channel.start()
         print(f"Registered new room {room_token} with session {new_session.uuid}")
 
     nextcloud.on_room_joined = on_room_joined
@@ -244,10 +256,11 @@ async def main():
         print("\nSending goodbye message...")
         if nextcloud._rooms:
             for token, session_uuid in nextcloud._rooms.items():
-                await nextcloud.send(
-                    Message(role="assistant", content=[ContentPart(part_type="text", text="I am going offline.")]),
-                    session_uuid=session_uuid,
+                bye = Message.create(
+                    role="assistant",
+                    content_parts=[ContentPart.create_text("I am going offline.")],
                 )
+                await nextcloud.send(bye, session_uuid=session_uuid)
                 print(f"  Sent 'I am going offline.' to room {token}")
         await nextcloud.stop()
         print("Stopped.")

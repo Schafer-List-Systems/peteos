@@ -261,8 +261,15 @@ class ExecutionEnvironment:
         group.add_tool_call(record)
         return record
 
-    def _find_pending_record(self, tool_call_id: str) -> Optional[ToolCallRecord]:
-        """Find a pending tool call record by its tool_call_id."""
+    def get_pending_tool_calls(self) -> list[ToolCallRecord]:
+        """Return all pending tool call records from the foreground group."""
+        group = self._foreground_group
+        if group is None:
+            return []
+        return [r for r in group.records if r.approval_status == ToolApprovalStatus.PENDING]
+
+    def find_pending_record(self, tool_call_id: str) -> Optional[ToolCallRecord]:
+        """Find a tool call record by its tool_call_id in the foreground group."""
         group = self._foreground_group
         if group is None:
             return None

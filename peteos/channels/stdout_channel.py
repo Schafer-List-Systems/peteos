@@ -1,4 +1,4 @@
-"""ReadStdoutChannel - Read stdout from a process and forward matching lines to a session."""
+"""ReadStdoutChannel - Read stdout from a process and forward matching lines to a runner."""
 
 import asyncio
 import json
@@ -7,8 +7,8 @@ import uuid
 from typing import Optional
 
 from peteos.chatbot import Message, ContentPart
+from peteos.engine.channel import Channel
 from peteos.utils import get_logger, truncate
-from peteos.persona.channel import Channel
 
 _logger = get_logger(__name__)
 
@@ -17,36 +17,35 @@ class ReadStdoutChannel(Channel):
     """A read-only channel that monitors a subprocess's stdout.
 
     Matches each line against a regex. Matching lines become messages
-    pushed into the session's queue. No send() is needed - the
+    pushed into the runner's queue. No send() is needed - the
     channel is a one-way source, not a destination.
 
     Example::
 
         channel = ReadStdoutChannel(
             name="docker-logs",
-            agent=agent,
+            runner=runner,
             config={"command": ["journalctl", "-f"], "pattern": r"ERROR|WARNING"},
         )
-        channel.subscribe_to_session(some_uuid)
         await channel.start()
-        # messages matching the pattern are queued to the session
+        # messages matching the pattern are queued to the runner
         await channel.stop()
     """
 
     def __init__(
         self,
         name: str,
-        agent,
+        runner,
         config: dict,
     ):
         """Initialize the channel.
 
         Args:
             name: Unique identifier for this channel.
-            agent: The Agent instance to queue messages to.
+            runner: The Runner instance to queue messages to.
             config: Dict with command and optional pattern.
         """
-        super().__init__(name, agent)
+        super().__init__(name, runner)
         self._config = config
         self._prefix = config.get("prefix", "")
         self._process: asyncio.subprocess.Process | None = None
@@ -228,9 +227,9 @@ class ReadStdoutChannel(Channel):
                         content_parts=[ContentPart.create_text(f"{self._prefix}{line}")],
                     )
                     try:
-                        await self._agent.get_session(self._session_uuid).queue_message(message)
+                        self._runner.push_event(message)
                         _logger.debug("Queued to session %s: %s", self._session_uuid, truncate(line))
-                    except (KeyError, AttributeError):
+                    except Exception:
                         _logger.warning("Session %s no longer exists, dropping message", self._session_uuid)
         except asyncio.CancelledError:
             pass

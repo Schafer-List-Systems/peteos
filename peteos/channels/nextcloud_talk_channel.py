@@ -11,12 +11,12 @@ from typing import Optional
 from aiohttp import web
 
 from peteos.chatbot import Message, ContentPart
+from peteos.engine.channel import Channel
 from peteos.engine.executionenvironment import (
     ApprovalEvent,
     ToolApprovalStatus,
     ToolExecutionStatus,
 )
-from peteos.persona.channel import Channel
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +34,13 @@ class NextcloudTalkChannel(Channel):
     def __init__(
         self,
         name: str,
-        agent,
+        runner,
         config: dict,
     ):
-        super().__init__(name, agent)
+        super().__init__(name, runner)
         self._config = config
         self._app: web.Application = None
-        self._runner: web.AppRunner = None
+        self._http_runner: web.AppRunner = None
         self._site: web.TCPSite = None
         self._server_url: str = ""
         self._on_room_joined: callable | None = None
@@ -95,10 +95,10 @@ class NextcloudTalkChannel(Channel):
         self._app = web.Application()
         self._app.router.add_post("/nextcloud-talk-webhook", self._handle_webhook)
 
-        self._runner = web.AppRunner(self._app)
-        await self._runner.setup()
+        self._http_runner = web.AppRunner(self._app)
+        await self._http_runner.setup()
 
-        self._site = web.TCPSite(self._runner, self._config["host"], self._config["port"])
+        self._site = web.TCPSite(self._http_runner, self._config["host"], self._config["port"])
         await self._site.start()
 
         actual_port = self._site._server.sockets[0].getsockname()[1]
@@ -109,8 +109,8 @@ class NextcloudTalkChannel(Channel):
     async def stop(self) -> None:
         """Stop the webhook receiver server."""
         self._running = False
-        if self._runner:
-            await self._runner.cleanup()
+        if self._http_runner:
+            await self._http_runner.cleanup()
 
     async def send(self, message: Message, session_uuid: uuid.UUID | None = None) -> None:
         """Send a message to the originating Nextcloud conversation.
@@ -123,29 +123,29 @@ class NextcloudTalkChannel(Channel):
             session_uuid: The session UUID to route to.
         """
         if not session_uuid:
-            logger.debug("[nextcloud] send(): NO session_uuid, dropping %s", message.get_id()[:8])
+            logger.debug("[nextcloud] send(): NO session_uuid, dropping %s", message.id[:8])
             return
         conversation_token = self._session_conversations.get(session_uuid)
         if not conversation_token:
-            logger.debug("[nextcloud] send(): NO conversation_token for %s, dropping %s", session_uuid, message.get_id()[:8])
+            logger.debug("[nextcloud] send(): NO conversation_token for %s, dropping %s", session_uuid, message.id[:8])
             return
 
         if not message.content:
-            logger.debug("[nextcloud] send(): NO content for %s, dropping %s", message.get_id()[:8])
+            logger.debug("[nextcloud] send(): NO content for %s, dropping %s", message.id[:8])
             return
 
-        logger.debug("[nextcloud] send(): %s id=%s parts=%d", message.get_role(), message.get_id()[:8], len(message.content))
+        logger.debug("[nextcloud] send(): %s id=%s parts=%d", message.role, message.id[:8], len(message.content))
 
         for part in message.content:
             muted = message.metadata.get("mute", False) or not self._should_send_part(part)
-            tool_call_id = part.data.get("id") if part.type == "tool_use" else None
+            tool_call_id = part.raw_dict.get("id") if part.type == "tool_use" else None
             if tool_call_id is not None:
-                session = self._agent.get_session(session_uuid)
-                if session.is_tool_call_pending(tool_call_id):
+                pending = self._runner._execution_environment.get_pending_tool_calls()
+                if any(r.tool_call_id == tool_call_id for r in pending):
                     muted = False
             if muted:
                 continue
-            payload = self._format_for_nextcloud(part, message.get_id())
+            payload = self._format_for_nextcloud(part, message.id)
 
             # Track the sent part for reaction matching
             self._sent_parts.append({
@@ -187,19 +187,19 @@ class NextcloudTalkChannel(Channel):
             "silent": part.type != "text",
         }
         if part.type == "text":
-            payload["message"] = part.data.get("text", "")
+            payload["message"] = part.raw_dict.get("text", "")
 
         elif part.type == "reasoning":
-            reasoning = part.data.get("reasoning", "")
+            reasoning = part.raw_dict.get("reasoning", "")
             payload["message"] = f"> _{reasoning}_"
 
         elif part.type in ("tool_calls", "tool_call", "tool_use"):
-            tc = part.data.get("tool_call") or part.data.get("tool_calls")
-            if tc is None and "id" in part.data:
+            tc = part.raw_dict.get("tool_call") or part.raw_dict.get("tool_calls")
+            if tc is None and "id" in part.raw_dict:
                 # Direct tool_use format: {type, id, name, arguments}
-                args = part.data.get("arguments", "{}")
-                tool_id = part.data.get("id", "?")
-                name = part.data.get("name", "?")
+                args = part.raw_dict.get("arguments", "{}")
+                tool_id = part.raw_dict.get("id", "?")
+                name = part.raw_dict.get("name", "?")
                 payload["message"] = f"```python\n{name}({args})\n```\n/* id: {tool_id} */"
             elif isinstance(tc, dict):
                 args = tc.get("arguments", "{}")
@@ -216,7 +216,7 @@ class NextcloudTalkChannel(Channel):
                 payload["message"] = "```python\n(no data)\n```"
 
         elif part.type == "tool_result":
-            content = part.data.get("content", "")
+            content = part.raw_dict.get("content", "")
             if isinstance(content, (dict, list)):
                 payload["message"] = "```json\n" + json.dumps(content, indent=2) + "\n```"
             elif isinstance(content, str):
@@ -316,22 +316,18 @@ class NextcloudTalkChannel(Channel):
     async def register_room(self, session_uuid: uuid.UUID, conversation_token: str) -> None:
         """Register a session with a Nextcloud Talk conversation token.
 
-        The app creates sessions and calls this to map them to rooms.
-        After registration, incoming messages for this room will be routed
-        to the session.
+        The app creates a session and runner, and calls this to map them to rooms.
 
         Args:
-            session_uuid: The session to route messages to.
+            session_uuid: The session UUID to route messages to.
             conversation_token: The Nextcloud Talk conversation token.
         """
         self._rooms[conversation_token] = session_uuid
         self._session_conversations[session_uuid] = conversation_token
         self.subscribe_to_session(session_uuid)
 
-        await self.send(
-            Message.create(role="assistant", content_parts=[ContentPart.create_text("Hello, I am online now.")]),
-            session_uuid=session_uuid,
-        )
+        welcome = Message.create(role="assistant", content_parts=[ContentPart.create_text("Hello, I am online now.")])
+        await self.send(welcome, session_uuid=session_uuid)
 
         logger.info("Registered room %s with session %s", conversation_token, session_uuid)
 
@@ -360,23 +356,26 @@ class NextcloudTalkChannel(Channel):
             logger.warning("Empty message from %s", display_name)
             return
 
-        session = await self._find_session(conversation_token)
-        if session:
-            message_id = obj.get("id")
-            if message_id:
-                self._incoming_message_ids[session.uuid] = message_id
-                # Send thinking reaction immediately, before processing
-                await self._send_reaction(conversation_token, message_id, "🤖")
-                await self._send_reaction(conversation_token, message_id, "🤔")
+        session_uuid = self._rooms.get(conversation_token)
+        if not session_uuid:
+            logger.warning("Unregistered conversation: %s", conversation_token)
+            return
 
-            if self._config.get("prefix_actor_names", False):
-                message_text = f"User {display_name} wrote: {message_text}"
+        message_id = obj.get("id")
+        if message_id:
+            self._incoming_message_ids[session_uuid] = message_id
+            # Send thinking reaction immediately, before processing
+            await self._send_reaction(conversation_token, message_id, "🤖")
+            await self._send_reaction(conversation_token, message_id, "🤔")
 
-            user_message = Message.create(
-                role="user",
-                content_parts=[ContentPart.create_text(message_text)],
-            )
-            await session.queue_message(user_message)
+        if self._config.get("prefix_actor_names", False):
+            message_text = f"User {display_name} wrote: {message_text}"
+
+        user_message = Message.create(
+            role="user",
+            content_parts=[ContentPart.create_text(message_text)],
+        )
+        self._runner.push_event(user_message)
 
     async def _handle_reaction(self, event: dict) -> None:
         """Handle reaction added (Like event). Approve or deny tool calls."""
@@ -416,11 +415,10 @@ class NextcloudTalkChannel(Channel):
             return
 
         session_uuid = sent_part.get("session_uuid")
-        session = self._agent.get_session(session_uuid)
-        if not session:
+        if session_uuid != self._session_uuid:
             return
 
-        record = session._find_pending_record(tool_call_id)
+        record = self._runner._execution_environment.find_pending_record(tool_call_id)
         if record is None:
             logger.warning("No pending record for tool_call_id=%s", tool_call_id)
             return
@@ -431,7 +429,7 @@ class NextcloudTalkChannel(Channel):
             tool_call=record.tool_call,
             approved=approved,
         )
-        session.push_event(approval_event)
+        self._runner.push_event(approval_event)
         logger.info("Tool call %s %s via reaction %s", tool_call_id, "approved" if approved else "denied", emoji)
 
     async def _handle_reaction_undo(self, event: dict) -> None:
@@ -470,11 +468,10 @@ class NextcloudTalkChannel(Channel):
             return
 
         session_uuid = sent_part.get("session_uuid")
-        session = self._agent.get_session(session_uuid)
-        if not session:
+        if session_uuid != self._session_uuid:
             return
 
-        record = session._find_pending_record(tool_call_id)
+        record = self._runner._execution_environment.find_pending_record(tool_call_id)
         if record is None:
             return
         record.approval_status = ToolApprovalStatus.PENDING
@@ -508,22 +505,6 @@ class NextcloudTalkChannel(Channel):
             self._incoming_message_ids.pop(session_uuid, None)
             self.unsubscribe_from_session(session_uuid)
         logger.info("Removed mapping for conversation %s", conversation_token)
-
-    async def _find_session(self, conversation_token: str):
-        """Find a registered session for a conversation token.
-
-        Returns None if the room is not registered (app must call register_room first).
-
-        Args:
-            conversation_token: Nextcloud Talk conversation token.
-
-        Returns:
-            The session object, or None if room is not registered.
-        """
-        session_uuid = self._rooms.get(conversation_token)
-        if session_uuid:
-            return self._agent.get_session(session_uuid)
-        return None
 
     async def _send_to_nextcloud(self, conversation_token: str, payload: dict) -> Optional[str]:
         """Send a message to a Nextcloud Talk conversation.

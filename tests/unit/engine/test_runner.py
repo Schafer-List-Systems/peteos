@@ -323,7 +323,7 @@ class TestRunnerStepToolCalls:
         # Pre-setup: create group and a PENDING tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}")
         )
 
         # Make chatbot return text output
@@ -352,7 +352,7 @@ class TestRunnerStepToolCalls:
         # Pre-setup: auto-approved tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}")
         )
 
         status, _ = await runner.step()
@@ -372,7 +372,7 @@ class TestRunnerStepToolCalls:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}")
         )
 
         status, _ = await runner.step()
@@ -396,7 +396,7 @@ class TestRunnerStepToolCalls:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}")
         )
 
         status, _ = await runner.step()
@@ -425,7 +425,7 @@ class TestRunnerEventHandling:
         # Create a group with a pending tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}"), "g1"
+            ContentPart.create_tool_use("tc1", "add", "{}")
         )
 
         evt = ApprovalEvent(tool_call_id="tc1", approved=True)

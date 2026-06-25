@@ -41,6 +41,7 @@ from peteos.agent import Agent
 from peteos.channels import NextcloudTalkChannel, ReadStdoutChannel
 from peteos.chatbot.manager import ChatBotManager
 from peteos.chatbot import Message, ContentPart
+from peteos.engine.runner import Runner
 from peteos.logger import setup_logging
 from peteos.role import Role
 from peteos.toolmanager import ToolManager
@@ -213,13 +214,22 @@ async def main():
         print(f"Aborting: {e}")
         return
 
-    # Create a shared session that both channels attach to
+    # Create a shared session and runner that both channels attach to
     session = await agent.create_session()
+    runner = Runner(agent, session.uuid)
+    await runner.start()
     print(f"Created session: {session.uuid}")
     print()
 
+    # Create the stdout monitor channel first (read-only, forwards log lines to runner)
+    stdout_channel = ReadStdoutChannel(
+        name="log-monitor",
+        runner=runner,
+        config=stdout_config,
+    )
+
     # Create the Nextcloud Talk channel (user-facing, sends and receives)
-    nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=nextcloud_config)
+    nextcloud = NextcloudTalkChannel(name="nextcloud", runner=runner, config=nextcloud_config)
 
     # Register rooms with the session (app owns session lifecycle)
     auto_join_rooms = nextcloud_config.get("auto_join_rooms", [])
@@ -227,21 +237,20 @@ async def main():
         await nextcloud.register_room(session.uuid, room_token)
         print(f"Registered room {room_token} with session {session.uuid}")
 
-    # Callback for dynamic room joins
+    # Callback for dynamic room joins — create new session, runner, channel
     async def on_room_joined(room_token: str):
         new_session = await agent.create_session()
-        await nextcloud.register_room(new_session.uuid, room_token)
+        new_runner = Runner(agent, new_session.uuid)
+        await new_runner.start()
+        new_channel = NextcloudTalkChannel(
+            name=f"nextcloud-{room_token}",
+            runner=new_runner,
+            config=nextcloud_config,
+        )
+        new_channel.on_room_joined = on_room_joined
+        await new_channel.register_room(new_session.uuid, room_token)
+        await new_channel.start()
         print(f"Registered new room {room_token} with session {new_session.uuid}")
-
-    nextcloud.on_room_joined = on_room_joined
-
-    # Create the stdout monitor channel (read-only, forwards log lines to session)
-    stdout_channel = ReadStdoutChannel(
-        name="log-monitor",
-        agent=agent,
-        config=stdout_config,
-    )
-    stdout_channel.subscribe_to_session(session.uuid)
 
     # Start both channels
     await stdout_channel.start()
@@ -273,10 +282,11 @@ async def main():
         print("\nSending goodbye message...")
         if nextcloud._rooms:
             for token, session_uuid in nextcloud._rooms.items():
-                await nextcloud.send(
-                    Message(role="assistant", content=[ContentPart(part_type="text", text="I am going offline.")]),
-                    session_uuid=session_uuid,
+                bye = Message.create(
+                    role="assistant",
+                    content_parts=[ContentPart.create_text("I am going offline.")],
                 )
+                await nextcloud.send(bye, session_uuid=session_uuid)
                 print(f"  Sent 'I am going offline.' to room {token}")
         await nextcloud.stop()
         await stdout_channel.stop()
