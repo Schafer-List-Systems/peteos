@@ -109,6 +109,16 @@ class ContentPart:
         """
         return ContentPart({"type": "tool", "name": name, "description": description, "parameters": parameters})
 
+    @staticmethod
+    def create_pdf(source: dict) -> "ContentPart":
+        """Create a PDF content part.
+
+        Args:
+            source: A source dict like {"type": "base64", "data": "...", "media_type": "application/pdf"}
+                    or {"type": "url", "url": "https://..."}.
+        """
+        return ContentPart({"type": "pdf", "source": source})
+
     @property
     def raw_dict(self) -> dict:
         """Return the wrapped serialized dict."""

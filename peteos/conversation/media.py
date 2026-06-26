@@ -145,6 +145,17 @@ def _infer_part_type(media_type: Optional[str]) -> str:
     return "image"
 
 
+def _create_media_for_bytes(b64: str, media_type: Optional[str]) -> ContentPart:
+    """Create the right ContentPart factory for a base64-encoded media source."""
+    part_type = _infer_part_type(media_type)
+    source = {"type": "base64", "media_type": media_type, "data": b64}
+    if part_type == "video":
+        return ContentPart.create_video(source)
+    elif part_type == "pdf":
+        return ContentPart.create_pdf(source)
+    return ContentPart.create_image(source)
+
+
 def create_media_content_part(
     src: str | bytes,
     mime_type: Optional[str] = None,
@@ -169,9 +180,8 @@ def create_media_content_part(
         if mime_type is None:
             raise ValueError("mime_type is required when src is bytes")
         b64 = base64.b64encode(src).decode("ascii")
-        return ContentPart(
-            part_type=_infer_part_type(mime_type),
-            source={"type": "base64", "media_type": mime_type, "data": b64},
+        return ContentPart.create_image(
+            {"type": "base64", "media_type": mime_type, "data": b64}
         )
     return _create_media_content_part_file(src)
 
@@ -195,18 +205,12 @@ async def create_media_content_part_async(
         if mime_type is None:
             raise ValueError("mime_type is required when src is bytes")
         b64 = base64.b64encode(src).decode("ascii")
-        return ContentPart(
-            part_type=_infer_part_type(mime_type),
-            source={"type": "base64", "media_type": mime_type, "data": b64},
-        )
+        return _create_media_for_bytes(b64, mime_type)
     if isinstance(src, str) and src.startswith(("http://", "https://")):
         data = await _url_to_bytes(src, timeout)
         media_type = _get_media_type_for_base64(data, src)
         b64 = base64.b64encode(data).decode("ascii")
-        return ContentPart(
-            part_type=_infer_part_type(media_type),
-            source={"type": "base64", "media_type": media_type, "data": b64},
-        )
+        return _create_media_for_bytes(b64, media_type)
     return _create_media_content_part_file(src)
 
 
@@ -214,13 +218,7 @@ def _create_media_content_part_file(filepath: str) -> ContentPart:
     """Create a ContentPart from a local file path."""
     data = _file_to_base64(filepath)
     media_type = get_media_type(filepath)
-    part_type = get_content_type(filepath)
-    if part_type is None:
-        part_type = "image"
-    return ContentPart(
-        part_type=part_type,
-        source={"type": "base64", "media_type": media_type, "data": data},
-    )
+    return _create_media_for_bytes(data, media_type)
 
 
 # ── Backward-compatible aliases ──────────────────────────────────────
@@ -237,9 +235,8 @@ async def create_image_content_part_async(src: str, timeout: float = 30.0) -> Co
         data = await _url_to_bytes(src, timeout)
         media_type = _get_media_type_for_base64(data, src)
         b64 = base64.b64encode(data).decode("ascii")
-        return ContentPart(
-            part_type="image",
-            source={"type": "base64", "media_type": media_type, "data": b64},
+        return ContentPart.create_image(
+            {"type": "base64", "media_type": media_type, "data": b64}
         )
     return create_image_content_part(src)
 
@@ -250,11 +247,7 @@ async def create_content_part_async(src: str, timeout: float = 30.0) -> ContentP
         data = await _url_to_bytes(src, timeout)
         media_type = _get_media_type_for_base64(data, src)
         b64 = base64.b64encode(data).decode("ascii")
-        part_type = _infer_part_type(media_type)
-        return ContentPart(
-            part_type=part_type,
-            source={"type": "base64", "media_type": media_type, "data": b64},
-        )
+        return _create_media_for_bytes(b64, media_type)
     return _create_media_content_part_file(src)
 
 
