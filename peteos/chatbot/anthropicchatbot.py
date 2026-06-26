@@ -238,7 +238,7 @@ class AnthropicChatBot(ChatBot):
                     elif raw.get("type") == "thinking":
                         content.append({
                             "type": "thinking",
-                            "thinking": raw.get("text", "")
+                            "thinking": raw["text"],
                         })
                     else:
                         content.append(raw)
@@ -347,7 +347,6 @@ class AnthropicChatBotResponse(GenericChatBotResponse):
                     if "input" in item:
                         content_item["arguments"] = json.dumps(item["input"])
                 elif item.get("type") == "thinking":
-                    # thinking blocks use "thinking" key, not "text"
                     content_item["content"] = item.get("thinking", "")
                 else:
                     # text blocks

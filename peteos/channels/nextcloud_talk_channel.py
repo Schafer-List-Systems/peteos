@@ -138,7 +138,7 @@ class NextcloudTalkChannel(Channel):
 
         for part in message.content:
             muted = message.metadata.get("mute", False) or not self._should_send_part(part)
-            tool_call_id = part.raw_dict.get("id") if part.type == "tool_use" else None
+            tool_call_id = part.raw_dict.get("call_id") or part.raw_dict.get("id") if part.type == "tool_use" else None
             if tool_call_id is not None:
                 pending = self._runner._execution_environment.get_pending_tool_calls()
                 if any(r.tool_call_id == tool_call_id for r in pending):
@@ -165,7 +165,7 @@ class NextcloudTalkChannel(Channel):
 
     def _should_send_part(self, part: ContentPart) -> bool:
         """Check if a content part should be sent based on enabled/disabled flags."""
-        if part.type == "reasoning" and not self._config.get("show_reasoning", True):
+        if part.type == "thinking" and not self._config.get("show_reasoning", True):
             return False
         if part.type in ("tool_calls", "tool_call", "tool_use") and not self._config.get("show_tool_calls", True):
             return False
@@ -189,16 +189,15 @@ class NextcloudTalkChannel(Channel):
         if part.type == "text":
             payload["message"] = part.raw_dict.get("text", "")
 
-        elif part.type == "reasoning":
-            reasoning = part.raw_dict.get("reasoning", "")
-            payload["message"] = f"> _{reasoning}_"
+        elif part.type == "thinking":
+            payload["message"] = f"> _{part.text or ''}_"
 
         elif part.type in ("tool_calls", "tool_call", "tool_use"):
             tc = part.raw_dict.get("tool_call") or part.raw_dict.get("tool_calls")
-            if tc is None and "id" in part.raw_dict:
-                # Direct tool_use format: {type, id, name, arguments}
+            if tc is None and "call_id" in part.raw_dict:
+                # Direct tool_use format: {type, call_id, name, arguments}
                 args = part.raw_dict.get("arguments", "{}")
-                tool_id = part.raw_dict.get("id", "?")
+                tool_id = part.raw_dict.get("call_id", "?")
                 name = part.raw_dict.get("name", "?")
                 payload["message"] = f"```python\n{name}({args})\n```\n/* id: {tool_id} */"
             elif isinstance(tc, dict):

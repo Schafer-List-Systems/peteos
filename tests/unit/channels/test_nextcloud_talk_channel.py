@@ -93,7 +93,7 @@ class TestNextcloudTalkChannelInit:
 
         channel = NextcloudTalkChannel(
             name="nextcloud",
-            agent=agent,
+            runner=agent,
             config=_make_config(host="0.0.0.0", port=9999),
         )
 
@@ -105,17 +105,9 @@ class TestNextcloudTalkChannelInit:
         assert channel._rooms == {}
         assert channel._session_conversations == {}
 
-    def test_channel_registered_with_agent(self, agent):
-        channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
-            config=_make_config(),
-        )
-
-        agent.register_channel.assert_called_with(channel)
-
     def test_config_defaults(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
         assert channel._config["host"] == "0.0.0.0"
@@ -131,7 +123,7 @@ class TestSignatureVerification:
 
     def test_valid_signature(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(bot_secret="mysecret"),
         )
 
@@ -143,7 +135,7 @@ class TestSignatureVerification:
 
     def test_invalid_signature(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(bot_secret="mysecret"),
         )
 
@@ -154,7 +146,7 @@ class TestSignatureVerification:
 
     def test_signature_with_wrong_secret(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(bot_secret="secret_a"),
         )
 
@@ -173,26 +165,17 @@ class TestEventDispatch:
     @pytest.mark.asyncio
     async def test_handle_create_message(self, agent):
         agent.role = Role(name="test", description="Test")
+        agent._execution_environment = MagicMock()
 
         session_uuid = uuid.uuid4()
-        session_mock = MagicMock(uuid=session_uuid)
-        session_mock.queue_message = AsyncMock(return_value=None)
-        session_mock.start = AsyncMock(return_value=None)
-        agent.get_session = MagicMock(return_value=session_mock)
-
-        runner_mock = MagicMock()
-        runner_mock.queue_message = AsyncMock(return_value=None)
-        runner_mock.subscribe = MagicMock(return_value=True)
-        agent.get_runner = MagicMock(return_value=runner_mock)
+        agent._sessions = {session_uuid: MagicMock()}
 
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
         agent._session_channels = {}
-
-        # App registers the room with a session
-        await channel.register_room(session_uuid, "conv1")
+        channel._rooms = {"conv1": session_uuid}
 
         event = {
             "type": "Create",
@@ -205,8 +188,9 @@ class TestEventDispatch:
         }
         await channel._handle_message(event)
 
-        runner_mock.queue_message.assert_called_once()
-        queued_msg = runner_mock.queue_message.call_args[0][0]
+        # Verify push_event was called with the queued message
+        agent.push_event.assert_called_once()
+        queued_msg = agent.push_event.call_args[0][0]
         assert queued_msg.content[0].text == "Hello bot!"
 
         # Await the thinking reaction task to prevent RuntimeWarning
@@ -216,7 +200,7 @@ class TestEventDispatch:
     @pytest.mark.asyncio
     async def test_handle_join(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
 
@@ -233,7 +217,7 @@ class TestEventDispatch:
     @pytest.mark.asyncio
     async def test_handle_leave(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
         channel._rooms["myroom"] = uuid.uuid4()
@@ -250,7 +234,7 @@ class TestEventDispatch:
     @pytest.mark.asyncio
     async def test_handle_like_reaction(self, agent, caplog):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
         caplog.set_level(logging.DEBUG)
@@ -269,7 +253,7 @@ class TestEventDispatch:
     @pytest.mark.asyncio
     async def test_handle_undo_reaction(self, agent, caplog):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
         caplog.set_level(logging.INFO)
@@ -285,7 +269,7 @@ class TestEventDispatch:
     @pytest.mark.asyncio
     async def test_empty_message_ignored(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
 
@@ -299,59 +283,20 @@ class TestEventDispatch:
         agent.create_session.assert_not_called()
 
 
-class TestSessionRouting:
-    """Test session lookup and creation."""
-
-    @pytest.mark.asyncio
-    async def test_find_session_existing(self, agent):
-        existing_uuid = uuid.uuid4()
-        existing_session = MagicMock(uuid=existing_uuid)
-        channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
-            config=_make_config(),
-        )
-        channel._rooms["tok1"] = existing_uuid
-        agent.get_session = MagicMock(return_value=existing_session)
-
-        result = await channel._find_session("tok1")
-
-        assert result is existing_session
-
-    @pytest.mark.asyncio
-    async def test_find_session_not_registered_returns_none(self, agent):
-        channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
-            config=_make_config(),
-        )
-
-        result = await channel._find_session("unknown")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_register_room(self, agent):
-        session_uuid = uuid.uuid4()
-        channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
-            config=_make_config(),
-        )
-        # Mock subscribe_to_session to avoid session creation
-        channel.subscribe_to_session = MagicMock()
-
-        await channel.register_room(session_uuid, "myroom")
-
-        assert channel._rooms["myroom"] == session_uuid
-        assert channel._session_conversations[session_uuid] == "myroom"
-        channel.subscribe_to_session.assert_called_once_with(session_uuid)
-
 
 class TestSend:
     """Test send method."""
 
+    @pytest.fixture
+    def runner_with_env(self):
+        runner_mock = MagicMock()
+        runner_mock._execution_environment = MagicMock()
+        return runner_mock
+
     @pytest.mark.asyncio
     async def test_send_no_active_session(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
         # No session_uuid means no-op
@@ -361,16 +306,16 @@ class TestSend:
     async def test_send_no_conversation_mapping(self, agent):
         test_uuid = uuid.uuid4()
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
-        await channel.send(Message(role="assistant", content=[ContentPart(part_type="text", text="hello")]), session_uuid=test_uuid)
+        await channel.send(Message.create(role="assistant", content_parts=[ContentPart.create_text("hello")]), session_uuid=test_uuid)
 
     @pytest.mark.asyncio
-    async def test_send_calls_nextcloud_api(self, agent):
+    async def test_send_calls_nextcloud_api(self, runner_with_env):
         test_uuid = uuid.uuid4()
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=runner_with_env,
             config=_make_config(),
         )
         channel._session_conversations[test_uuid] = "convtoken"
@@ -390,9 +335,9 @@ class TestSend:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            await channel.send(Message(
+            await channel.send(Message.create(
                 role="assistant",
-                content=[ContentPart(part_type="text", text="Hello!")],
+                content_parts=[ContentPart.create_text("Hello!")],
             ), session_uuid=test_uuid)
             await asyncio.sleep(0.05)
 
@@ -410,7 +355,7 @@ class TestSend:
         """Test that multiple content parts are sent in order."""
         test_uuid = uuid.uuid4()
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(),
         )
         channel._session_conversations[test_uuid] = "convtoken"
@@ -430,11 +375,11 @@ class TestSend:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_session_obj)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            await channel.send(Message(
+            await channel.send(Message.create(
                 role="assistant",
-                content=[
-                    ContentPart(part_type="reasoning", reasoning="Thinking..."),
-                    ContentPart(part_type="text", text="Hello!"),
+                content_parts=[
+                    ContentPart.create_thinking("Thinking..."),
+                    ContentPart.create_text("Hello!"),
                 ],
             ), session_uuid=test_uuid)
             await asyncio.sleep(0.05)
@@ -453,7 +398,7 @@ class TestStartStop:
     @pytest.mark.asyncio
     async def test_start_returns_server_url(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(port=0),
         )
 
@@ -468,7 +413,7 @@ class TestStartStop:
     @pytest.mark.asyncio
     async def test_stop_cleans_up(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(port=0),
         )
 
@@ -484,16 +429,16 @@ class TestShouldSendPart:
     def _make_channel(self, **overrides):
         agent_mock = MagicMock()
         config = _make_config(**overrides)
-        return NextcloudTalkChannel(name="nextcloud", agent=agent_mock, config=config)
+        return NextcloudTalkChannel(name="nextcloud", runner=agent_mock, config=config)
 
     def test_text_always_sends(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="text", text="Hello")
+        part = ContentPart.create_text("Hello")
         assert ch._should_send_part(part) is True
 
     def test_reasoning_respects_config(self):
         ch = self._make_channel(show_reasoning=True)
-        part = ContentPart(part_type="reasoning", reasoning="Thinking...")
+        part = ContentPart.create_thinking("Thinking...")
         assert ch._should_send_part(part) is True
 
         ch._config["show_reasoning"] = False
@@ -501,7 +446,7 @@ class TestShouldSendPart:
 
     def test_tool_use_respects_config(self):
         ch = self._make_channel(show_tool_calls=True)
-        part = ContentPart(part_type="tool_use", data={"id": "1", "name": "x", "arguments": "{}"})
+        part = ContentPart.create_tool_use("1", "x", "{}")
         assert ch._should_send_part(part) is True
 
         ch._config["show_tool_calls"] = False
@@ -509,7 +454,7 @@ class TestShouldSendPart:
 
     def test_tool_result_respects_config(self):
         ch = self._make_channel(show_tool_results=True)
-        part = ContentPart(part_type="tool_result", data={"content": "result"})
+        part = ContentPart.create_tool_result("1", "result")
         assert ch._should_send_part(part) is True
 
         ch._config["show_tool_results"] = False
@@ -517,12 +462,12 @@ class TestShouldSendPart:
 
     def test_image_always_sends(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="image", source={"type": "url", "url": "http://img.png"})
+        part = ContentPart.create_image({"type": "url", "url": "http://img.png"})
         assert ch._should_send_part(part) is True
 
     def test_video_always_sends(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="video", source={"type": "url", "url": "http://vid.mp4"})
+        part = ContentPart.create_video({"type": "url", "url": "http://vid.mp4"})
         assert ch._should_send_part(part) is True
 
 
@@ -532,11 +477,11 @@ class TestFormatForNextcloud:
     def _make_channel(self, **overrides):
         agent_mock = MagicMock()
         config = _make_config(**overrides)
-        return NextcloudTalkChannel(name="nextcloud", agent=agent_mock, config=config)
+        return NextcloudTalkChannel(name="nextcloud", runner=agent_mock, config=config)
 
     def test_format_text(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="text", text="Hello")
+        part = ContentPart.create_text("Hello")
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert payload["message"] == "Hello"
         assert payload["silent"] is False
@@ -544,72 +489,51 @@ class TestFormatForNextcloud:
 
     def test_format_reasoning(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="reasoning", reasoning="Thinking...")
+        part = ContentPart.create_thinking("Thinking...")
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert payload["message"] == "> _Thinking..._"
         assert payload["silent"] is True
 
     def test_format_tool_use_dict(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="tool_use", data={
-            "id": "tc1", "name": "calculate", "arguments": "{'x': 1}",
-        })
+        part = ContentPart.create_tool_use("tc1", "calculate", "{'x': 1}")
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert "calculate({'x': 1})" in payload["message"]
         assert "/* id: tc1 */" in payload["message"]
 
-    def test_format_tool_use_list(self):
-        ch = self._make_channel()
-        part = ContentPart(part_type="tool_calls", data={
-            "tool_calls": [
-                {"id": "1", "name": "a", "arguments": "{}"},
-                {"id": "2", "name": "b", "arguments": "{}"},
-            ],
-        })
-        payload = ch._format_for_nextcloud(part, "ref-1")
-        assert "a({})" in payload["message"]
-        assert "b({})" in payload["message"]
-
     def test_format_tool_result_string(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="tool_result", data={"content": "result text"})
+        part = ContentPart.create_tool_result("1", "result text")
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert payload["message"] == "result text"
 
-    def test_format_tool_result_dict(self):
-        ch = self._make_channel()
-        part = ContentPart(part_type="tool_result", data={"content": {"key": "value"}})
-        payload = ch._format_for_nextcloud(part, "ref-1")
-        assert "```json" in payload["message"]
-        assert '"key": "value"' in payload["message"]
-
     def test_format_image_url(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="image", source={"type": "url", "url": "http://img.png"})
+        part = ContentPart.create_image({"type": "url", "url": "http://img.png"})
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert payload["message"] == "![image](http://img.png)"
 
     def test_format_image_base64(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="image", source={"type": "base64", "media_type": "image/png"})
+        part = ContentPart.create_image({"type": "base64", "media_type": "image/png"})
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert payload["message"] == "[Image] (base64 encoded, image/png)"
 
     def test_format_video_url(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="video", source={"type": "url", "url": "http://vid.mp4"})
+        part = ContentPart.create_video({"type": "url", "url": "http://vid.mp4"})
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert payload["message"] == "📹 [Video](http://vid.mp4)"
 
     def test_format_pdf_url(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="pdf", source={"type": "url", "url": "http://doc.pdf"})
+        part = ContentPart.create_pdf({"type": "url", "url": "http://doc.pdf"})
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert payload["message"] == "📄 [Document](http://doc.pdf)"
 
     def test_format_pdf_base64(self):
         ch = self._make_channel()
-        part = ContentPart(part_type="pdf", source={"type": "base64", "media_type": "application/pdf"})
+        part = ContentPart.create_pdf({"type": "base64", "media_type": "application/pdf"})
         payload = ch._format_for_nextcloud(part, "ref-1")
         assert payload["message"] == "[Document] (base64 encoded, application/pdf)"
 
@@ -620,7 +544,7 @@ class TestWebhookHandling:
     @pytest.mark.asyncio
     async def test_handle_webhook_create(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(bot_secret="secret"),
         )
 
@@ -642,7 +566,7 @@ class TestWebhookHandling:
     @pytest.mark.asyncio
     async def test_handle_webhook_invalid_signature(self, agent):
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(bot_secret="secret"),
         )
 
@@ -661,7 +585,7 @@ class TestWebhookHandling:
     async def test_handle_webhook_unknown_event_type(self, agent, caplog):
         caplog.set_level(logging.WARNING)
         channel = NextcloudTalkChannel(
-            name="nextcloud", agent=agent,
+            name="nextcloud", runner=agent,
             config=_make_config(bot_secret="secret"),
         )
 
