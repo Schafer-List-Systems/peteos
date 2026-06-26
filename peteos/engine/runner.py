@@ -22,7 +22,7 @@ from peteos.utils import get_logger
 from peteos.persona.role import Role
 
 if TYPE_CHECKING:
-    from peteos.persona.channel import Channel
+    from peteos.engine.channel import Channel
     from peteos.conversation.session import Session
     from peteos.persona.agent import Agent
 
@@ -296,7 +296,7 @@ class Runner(ActiveClass):
 
     async def publish_notification(self, message: Message) -> None:
         """Publish a notification to all subscribed channels."""
-        from peteos.persona.channel import NotificationEvent
+        from peteos.engine.channel import NotificationEvent
         await self._call_before_notification_publish(message)
         for channel in self._channels:
             channel.push_event(NotificationEvent(self.uuid, message))
