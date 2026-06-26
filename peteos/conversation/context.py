@@ -129,6 +129,8 @@ class Context:
         self._json_dict.setdefault("content_map", {})
         self._json_dict.setdefault("anchor_points", [])
         self._json_dict.setdefault("message_sequence", 0)
+        self._json_dict.setdefault("_message_sequence_counter", 0)
+        self._json_dict.setdefault("_anchor_sequence_counter", 0)
 
         # Inherit content map from parent if provided, otherwise start empty
         if parent_context is not None:
@@ -139,10 +141,14 @@ class Context:
         if not self._json_dict["anchor_points"]:
             assert(not self._json_dict["messages"])
             self._messages: list[Message] = []
+            self._anchor_sequences: list[int] = []
             self.add_anchor("system_prompt", 0)
             self.add_anchor("tools", 0)
             self.add_anchor("messages", 0)
         else:
+            self._anchor_sequences: list[int] = list(
+                self._json_dict.get("_anchor_sequences", [])
+            )
             self._messages: list[Message] = [
                 Message.from_dict(msg) for msg in self._json_dict["messages"]
             ]
@@ -258,13 +264,8 @@ class Context:
 
         The *msg_index* is always a non-negative absolute position into the
         messages array (0 = before all messages, len(messages) = after all
-        messages).
-
-        When multiple anchors share the same message index, *after_existing*
-        controls the ordering in the anchor list.  With ``after_existing=True``
-        (default), the new anchor is placed after existing anchors at the same
-        position (it appears later in the list).  With ``after_existing=False``,
-        it is placed before them.
+        messages). Each anchor records the current sequence counter so it can
+        be selected during forking.
 
         Args:
             name: The anchor point name.
@@ -282,6 +283,10 @@ class Context:
             f"Anchor '{name}' index {msg_index} is out of bounds "
             f"[0, {len(self._messages)}]"
         )
+
+        # Record the current sequence number for this anchor
+        self._anchor_sequences.append(self._json_dict["_anchor_sequence_counter"])
+        self._json_dict["_anchor_sequence_counter"] += 1
 
         for pos, (_, existing_idx) in enumerate(self._json_dict["anchor_points"]):
             if after_existing and existing_idx > msg_index:
@@ -321,7 +326,9 @@ class Context:
         self._messages.insert(msg_index, message)
         self.raw_dict["messages"].insert(msg_index, message.raw_dict)
         self._json_dict["message_sequence"] += 1
-        message.raw_dict["_sequence_number"] = self._json_dict["message_sequence"]
+        # Assign sequence number from the message counter (0-based, no remapping)
+        message.raw_dict["_sequence_number"] = self._json_dict["_message_sequence_counter"]
+        self._json_dict["_message_sequence_counter"] += 1
         self._shift_anchors_after_insert(anchor_list_index)
         self._add_message_to_hook_index(message)
 
@@ -330,55 +337,115 @@ class Context:
         *,
         system_prompt_message: SystemPromptMessage | None = None,
         tool_definitions_message: ToolDefinitionsMessage | None = None,
-        count: int | None = None,
-        ids: list[str] | None = None,
+        start: int | None = None,
+        end: int | None = None,
     ) -> Context:
-        """Fork this context, creating a new one that shares Message objects
-        and inherits the content map.
+        """Fork this context with Python-style slice semantics on sequence numbers.
 
-        The fork has its own _json_dict and _messages list, so appending
-        to one does not affect the other. However, the Message objects
-        themselves are shared — mutating a message in the fork mutates it
-        in the origin too.
+        Forking uses a sequence counter system: every entity (message or anchor
+        point) stores the sequence number it was assigned when inserted. The
+        context's ``_sequence_counter`` tracks the next value to assign.
+
+        **Fork algorithm (sequence range slicing):**
+
+        1. Resolve slice semantics → absolute ``(lo, hi)`` bounds:
+
+           ``resolve_slice(start, end, max_seq)``:
+               if start is None:      start = 0
+               if end is None:         end = max_seq + 1        # exclusive past last
+               if start < 0:           start = max_seq + 1 + start   # -1 → last seq
+               if end < 0:             end = max_seq + 1 + end
+               return (start, end)
+
+           Example: parent has seq 0..9, ``(-3, None)`` → ``(7, 10)``
+
+        2. Collect selected entities from parent, keyed by sequence number:
+
+           ``selected_msgs = {seq: msg for (seq, msg) in parent._messages_by_seq
+                              if lo <= seq < hi}``
+
+           ``selected_anchors = {seq: anchor for (seq, anchor) in parent._anchors_by_seq
+                                 if lo <= seq < hi}``
+
+        3. Create child with fresh special messages, continue parent's sequence
+           numbering:
+
+           ``child = Context.create(system_prompt_message, tool_definitions_message, parent)``
+           ``child._sequence_counter = lo``  # no remapping needed
+
+        4. Re-insert selected entities in **display order** (not sequence order):
+
+           ``interleaved = []``
+           ``for idx, entity in enumerate(parent._ordered_entities):``
+           ``    seq = entity.sequence``
+           ``    if entity.type == "message"  and seq in selected_msgs:``
+           ``        interleaved.append((idx, "msg", seq))``
+           ``    if entity.type == "anchor"   and seq in selected_anchors:``
+           ``        interleaved.append((idx, "anchor", seq))``
+           ``interleaved.sort(by=idx)``  # preserve display order
+
+        5. Insert into child using append/add_anchor in display order:
+
+           ``for (display_idx, etype, seq) in interleaved:``
+           ``    if etype == "msg":``
+           ``        child.append(Message.from_dict(selected_msgs[seq].raw_dict),``
+           ``                     anchor_point="messages")``
+           ``    else:``
+           ``        child.add_anchor(selected_anchors[seq].name,``
+           ``                         child.get_anchor_msg_index(selected_anchors[seq].name))``
+
+        The forked context's sequence counter starts at ``lo`` so no sequence
+        remapping is necessary — entities retain their original sequence values.
 
         Args:
             system_prompt_message: Optional new system prompt for the fork.
             tool_definitions_message: Optional new tool definitions message.
-            count: If set, fork the last n messages from the origin.
-            ids: If set, fork only the messages whose IDs are in this list.
-            Both omitted to copy all messages.
+            start: Start of sequence range (inclusive, supports negative indices).
+                None means from the first sequence.
+            end: End of sequence range (exclusive, supports negative indices).
+                None means up to the last sequence.
+                Both ``start`` and ``end`` being None copies the entire context.
 
         Returns:
             A new Context with the selected messages.
-
-        Raises:
-            ValueError: If both count and ids are provided.
         """
-        if count is not None and ids is not None:
-            raise ValueError("Provide only count or ids, not both")
+        # ── Resolve range to absolute (lo, hi) ────────────────────
+        max_seq = self._json_dict["_message_sequence_counter"]
+        lo = 0 if start is None else (max_seq + start if start < 0 else start)
+        hi = max_seq if end is None else (max_seq + end if end < 0 else end)
 
-        # Select messages to fork
-        if count is not None:
-            selected = self.messages[-count:]
-        elif ids is not None:
-            selected = [m for m in self.messages if m.id in ids]
-        else:
-            selected = list(self.messages)
-
-        ctx = Context.create(
-            system_prompt_message=system_prompt_message or self.system_prompt_message,
-            tool_definitions_message=tool_definitions_message or self.tool_definitions_message,
+        # ── Create child with fresh special messages ──────────────
+        child = Context.create(
+            system_prompt_message or self.system_prompt_message,
+            tool_definitions_message or self.tool_definitions_message,
             parent_context=self,
         )
-        ctx._json_dict["anchor_points"] = list(self._json_dict["anchor_points"])
-        ctx._json_dict["message_sequence"] = self._json_dict["message_sequence"]
-        # Remove special messages from selected to avoid duplicating them
-        selected = [m for m in selected if m != self.system_prompt_message and m != self.tool_definitions_message]
-        # Recreate new Message objects from raw dicts so the fork has independent copies
-        selected_dicts = [msg.raw_dict for msg in selected]
-        for raw_dict in selected_dicts:
-            ctx.append(Message.from_dict(dict(raw_dict)))
-        return ctx
+        # Prevent counter conflict with messages added by Context.create()
+        child._json_dict["_message_sequence_counter"] = max(
+            lo, child._json_dict["_message_sequence_counter"]
+        )
+        child._anchor_sequences = []  # fresh state
+
+        # ── Build seq → Message lookup (non-special messages) ─────
+        msg_by_seq: dict[int, Message] = {}
+        for msg in self.messages:
+            if msg not in (self.system_prompt_message, self.tool_definitions_message):
+                seq = msg.raw_dict.get("_sequence_number")
+                if seq is not None:
+                    msg_by_seq[seq] = msg
+
+        # ── Append selected messages in sequence order ────────────
+        # Counter auto-assigns correct sequence numbers — no remapping.
+        for seq in sorted(msg_by_seq.keys()):
+            if lo <= seq < hi:
+                child.append(
+                    Message.from_dict(dict(msg_by_seq[seq].raw_dict)),
+                    anchor_point="messages",
+                )
+
+        # ── Restore child's message sequence counter to parent's final ─
+        child._json_dict["_message_sequence_counter"] = self._json_dict["_message_sequence_counter"]
+        return child
 
     def _gather_dynamic_messages(self) -> list[Message]:
         """Gather all unique messages that have at least one hook from the hook index."""

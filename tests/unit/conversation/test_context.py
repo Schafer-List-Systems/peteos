@@ -148,7 +148,7 @@ class TestContextAppend:
         msg = Message.create("user", [ContentPart.create_text("seq")])
         ctx.append(msg)
         assert "_sequence_number" in msg.raw_dict
-        assert msg.raw_dict["_sequence_number"] == 1
+        assert msg.raw_dict["_sequence_number"] == 0
 
     def test_append_at_messages_anchor(self):
         ctx = Context.create()
@@ -349,18 +349,16 @@ class TestContextFork:
         assert len(fork.messages) == 2
         assert fork.messages[1].content[0].text == "fork msg"
 
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
     def test_fork_with_count(self):
         ctx = Context.create()
         for i in range(4):
             text = f"msg {i}"
             ctx.append(Message.create("user", [ContentPart.create_text(text)]))
-        fork = ctx.fork(count=2)
+        fork = ctx.fork(start=-2)
         assert len(fork.messages) == 2
         assert fork.messages[0].content[0].text == "msg 2"
         assert fork.messages[1].content[0].text == "msg 3"
 
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
     def test_fork_with_ids(self):
         ctx = Context.create()
         ids = []
@@ -369,16 +367,10 @@ class TestContextFork:
             msg = Message.create("user", [ContentPart.create_text(text)])
             ids.append(msg.id)
             ctx.append(msg)
-        fork = ctx.fork(ids=[ids[1]])
+        fork = ctx.fork(start=1, end=2)
         assert len(fork.messages) == 1
         assert fork.messages[0].id == ids[1]
 
-    def test_fork_both_count_and_ids_raises(self):
-        ctx = Context.create()
-        with pytest.raises(ValueError, match="Provide only count or ids, not both"):
-            ctx.fork(count=2, ids=["some_id"])
-
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
     def test_fork_excludes_special_messages(self):
         sys_msg = SystemPromptMessage.create("system prompt")
         tools_msg = ToolDefinitionsMessage()
@@ -408,7 +400,6 @@ class TestContextFork:
         fork = ctx.fork(tool_definitions_message=new_tools)
         assert fork.tool_definitions_message is new_tools
 
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
     def test_fork_message_independence_from_raw_dict(self):
         ctx = Context.create()
         msg = Message.create("user", [ContentPart.create_text("original")])
@@ -422,7 +413,6 @@ class TestContextFork:
         fork = ctx.fork()
         assert fork._json_dict["origin_context_id"] == ctx.id
 
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
     def test_fork_with_empty_context(self):
         ctx = Context.create()
         fork = ctx.fork()
