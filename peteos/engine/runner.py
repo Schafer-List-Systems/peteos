@@ -346,7 +346,7 @@ class Runner(ActiveClass):
             "[runner] step(): Materialized context, tool_definitions_message has %d tools",
             tool_count,
         )
-        await self._call_hooks("before_send_to_chatbot", self, self._session.active_context)
+        await self.execution_environment.call_hooks("before_send_to_chatbot", self, self._session.active_context)
         response = await self._chatbot.send_context(self._session.active_context)
         async for _ in response:
             pass
@@ -398,12 +398,6 @@ class Runner(ActiveClass):
         _logger.debug("[runner] step(): Had final answer.")
         return (ExecStatus.FINISHED, response_msg)
 
-    async def _call_hooks(self, hook_point: str, *args: Any) -> ExecStatus | None:
-        """Delegate to execution environment's hook system."""
-        if self.execution_environment:
-            return await self.execution_environment.call_hooks(hook_point, *args)
-        return None
-
     async def _append_result_message(self, group: "ToolCallGroup") -> bool:
         """Append the group's result message to the active context at the group's anchor.
 
@@ -441,7 +435,7 @@ class Runner(ActiveClass):
 
             if record.approval_status == ToolApprovalStatus.DENIED:
                 denial_msg = record.denied_reason or "Tool call was denied by user."
-                await self._call_hooks("after_tool_execution", self, tool_call, denial_msg, False)
+                await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, denial_msg, False)
                 _logger.debug("[runner] Tool call %s was denied by user", tool_name)
                 break
 
@@ -450,10 +444,10 @@ class Runner(ActiveClass):
                 _logger.debug("[runner] Tool %s not found", tool_name)
                 break
             if not success:
-                await self._call_hooks("after_tool_execution", self, tool_call, result_str, False)
+                await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, result_str, False)
                 _logger.debug("[runner] Tool %s failed", tool_name)
                 break
-            await self._call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
+            await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
 
         if foreground.is_done():
@@ -514,7 +508,7 @@ class Runner(ActiveClass):
             have_new_message = False
 
             _logger.debug("[runner] step() returned status=%s", status)
-            hook_status = await self._call_hooks("after_step", status)
+            hook_status = await self.execution_environment.call_hooks("after_step", status)
             hook_return = hook_status if hook_status is not None else status
             _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
 
