@@ -15,6 +15,7 @@ from peteos.engine.executionenvironment import (
     ApprovalEvent,
     ExecutionEnvironment,
     ToolApprovalStatus,
+    ToolCallGroup,
     ToolCallRecord,
     ToolExecutionStatus,
 )
@@ -398,6 +399,12 @@ class Runner(ActiveClass):
         return (ExecStatus.FINISHED, response_msg)
 
     async def _call_hooks(self, hook_point: str, *args: Any) -> ExecStatus | None:
+        """Delegate to execution environment's hook system."""
+        if self.execution_environment:
+            return await self.execution_environment.call_hooks(hook_point, *args)
+        return None
+
+    async def _append_result_message(self, group: "ToolCallGroup") -> bool:
         """Append the group's result message to the active context at the group's anchor.
 
         Returns True if a message was appended, False if the group had no
