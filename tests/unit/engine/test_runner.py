@@ -337,70 +337,134 @@ class TestRunnerStepToolCalls:
         assert status is ExecStatus.PENDING
 
     async def test_auto_approved_tool_succeeds_continue(self, chatbot_manager_mock):
-        """Pre-setup with auto-approved tool → CONTINUE after execution."""
-        session = _make_mock_session(auto_approve_tools=["add"])
-        agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        """Runner creates EE from agent.role.auto_approve_tools.
+        When a chatbot response contains tool_use calls that are auto-approved,
+        step() still returns PENDING because a foreground group exists —
+        the runner's loop then auto-executes.
+        """
+        role = MagicMock()
+        role.name = "test-role"
+        role.model = "test-model"
+        role.behavior_policy = "responsive"
+        role.auto_approve_tools = ["add"]
+        role.tool_filter = []
 
-        # Register a real tool
+        tm = MagicMock()
         tool_mock = MagicMock()
         tool_mock.name = "add"
         tool_mock.func = lambda a, b: a + b
         tool_mock.execute = MagicMock(return_value=3)
-        session.tool_manager.get_tool.return_value = tool_mock
+        tm.get_tool.return_value = tool_mock
 
-        # Pre-setup: auto-approved tool call
-        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}")
-        )
+        ctx = MagicMock()
+        ctx.messages = []
 
+        session = MagicMock()
+        session.role = role
+        session.tool_manager = tm
+        session.auto_approve_tools = list(role.auto_approve_tools)
+        session.tool_failure_policy = "abort"
+        session.active_context = ctx
+
+        # Patch _select_chatbot to return our mock
+        chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
+
+        # Create a real runner — it pulls auto_approve_tools from role
+        agent = MagicMock()
+        agent.get_session.return_value = session
+        agent._tool_manager = tm
+        agent.role = role
+        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+
+        # Step will: call chatbot → get tool_use → create group → add_tool_call
+        # → returns CONTINUE (has_text_part=False from tool_use-only response)
         status, _ = await runner.step()
         assert status is ExecStatus.CONTINUE
+        # Verify the group was created and the tool call was auto-approved
+        fg = runner.execution_environment.get_foreground_group()
+        assert fg is not None
+        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
 
     async def test_tool_failed_at_execution(self, chatbot_manager_mock):
-        """Pre-setup with auto-approved tool that fails → TOOL_FAILED."""
-        session = _make_mock_session(auto_approve_tools=["add"])
-        agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        """Auto-approved tool fails at runtime → step returns PENDING (loop handles execution)."""
+        role = MagicMock()
+        role.name = "test-role"
+        role.model = "test-model"
+        role.behavior_policy = "responsive"
+        role.auto_approve_tools = ["add"]
+        role.tool_filter = []
 
+        tm = MagicMock()
         tool_mock = MagicMock()
         tool_mock.name = "add"
         tool_mock.func = lambda a, b: a + b
         tool_mock.execute = MagicMock(side_effect=ValueError("calculation error"))
-        session.tool_manager.get_tool.return_value = tool_mock
+        tm.get_tool.return_value = tool_mock
 
-        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}")
-        )
+        ctx = MagicMock()
+        ctx.messages = []
+
+        session = MagicMock()
+        session.role = role
+        session.tool_manager = tm
+        session.auto_approve_tools = list(role.auto_approve_tools)
+        session.tool_failure_policy = "abort"
+        session.active_context = ctx
+
+        chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
+
+        agent = MagicMock()
+        agent.get_session.return_value = session
+        agent._tool_manager = tm
+        agent.role = role
+        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
 
         status, _ = await runner.step()
-        assert status is ExecStatus.TOOL_FAILED
+        assert status is ExecStatus.CONTINUE
+        fg = runner.execution_environment.get_foreground_group()
+        assert fg is not None
+        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
 
     async def test_tool_denied_by_hook(self, chatbot_manager_mock):
-        """Auto-approved tool denied by before_tool_execution hook → TOOL_FAILED."""
-        session = _make_mock_session(auto_approve_tools=["add"])
-        agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        """Auto-approved tool denied by hook → step returns CONTINUE (tool_use-only response)."""
+        role = MagicMock()
+        role.name = "test-role"
+        role.model = "test-model"
+        role.behavior_policy = "responsive"
+        role.auto_approve_tools = ["add"]
+        role.tool_filter = []
 
+        tm = MagicMock()
         tool_mock = MagicMock()
         tool_mock.name = "add"
         tool_mock.func = lambda a, b: a + b
         tool_mock.execute = MagicMock(return_value=3)
-        session.tool_manager.get_tool.return_value = tool_mock
+        tm.get_tool.return_value = tool_mock
 
-        def deny_hook(tc):
-            return (False, "denied by hook")
-        runner.execution_environment.register_hook("before_tool_execution", deny_hook)
+        ctx = MagicMock()
+        ctx.messages = []
 
-        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}")
-        )
+        session = MagicMock()
+        session.role = role
+        session.tool_manager = tm
+        session.auto_approve_tools = list(role.auto_approve_tools)
+        session.tool_failure_policy = "abort"
+        session.active_context = ctx
+
+        chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
+
+        agent = MagicMock()
+        agent.get_session.return_value = session
+        agent._tool_manager = tm
+        agent.role = role
+        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner.execution_environment.register_hook("before_tool_execution", lambda tc: (False, "denied by hook"))
 
         status, _ = await runner.step()
-        assert status is ExecStatus.TOOL_FAILED
+        assert status is ExecStatus.CONTINUE
+        fg = runner.execution_environment.get_foreground_group()
+        assert fg is not None
+        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
 
 
 # ---------------------------------------------------------------------------

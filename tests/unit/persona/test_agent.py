@@ -10,6 +10,7 @@ import pytest
 from peteos.persona.agent import Agent
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
+from peteos.conversation.message import ContentPart
 
 
 @pytest.fixture
@@ -60,7 +61,6 @@ class TestAgentInit:
     def test_agent_creation(self, agent):
         assert agent._role.name == "test"
         assert len(agent._sessions) == 0
-        assert len(agent._channels) == 0
 
     def test_agent_dir_property(self, agent):
         assert agent.agent_dir == "/tmp/agent_test"
@@ -71,33 +71,18 @@ class TestAgentInit:
 
 
 class TestAgentChannelRegistry:
-    """Test Agent channel management."""
+    """Test Agent channel management — removed in refactor, tests updated to match."""
 
-    def test_register_channel(self, agent):
-        mock_channel = type("MockChannel", (), {"name": "shell"})()
-        agent.register_channel(mock_channel)
-        assert agent.get_channel("shell") is mock_channel
-        assert len(agent._channels) == 1
+    def test_channels_removed_from_agent(self, agent):
+        """Channels are no longer managed on the Agent (moved to Session level)."""
+        assert not hasattr(agent, "_channels")
 
-    def test_deregister_channel(self, agent):
-        mock_channel = type("MockChannel", (), {"name": "shell"})()
-        agent.register_channel(mock_channel)
-        agent.deregister_channel("shell")
-        assert agent.get_channel("shell") is None
-        assert len(agent._channels) == 0
-
-    def test_get_channel_not_found(self, agent):
-        assert agent.get_channel("nonexistent") is None
-
-    def test_list_channels(self, agent):
-        mock1 = type("MockChannel", (), {"name": "c1"})()
-        mock2 = type("MockChannel", (), {"name": "c2"})()
-        agent.register_channel(mock1)
-        agent.register_channel(mock2)
-        channels = agent.list_channels()
-        assert len(channels) == 2
-        assert "c1" in channels
-        assert "c2" in channels
+    def test_channel_methods_removed_from_agent(self, agent):
+        """Channel registry methods removed from Agent."""
+        assert not hasattr(agent, "register_channel")
+        assert not hasattr(agent, "deregister_channel")
+        assert not hasattr(agent, "get_channel")
+        assert not hasattr(agent, "list_channels")
 
 
 class TestAgentSessionManagement:
@@ -165,34 +150,30 @@ class TestAgentHooks:
     @pytest.mark.asyncio
     async def test_on_before_tool_execution_pending(self, agent_with_sessions):
         session = await agent_with_sessions.create_session()
-        tool_call = {"name": "test_tool", "arguments": {"param": "value"}}
+        tool_call = ContentPart.create_tool_use("tc1", "test_tool", '{"param": "value"}')
         result = agent_with_sessions._on_before_tool_execution(session, tool_call)
         assert result == ("pending", None)
 
     @pytest.mark.asyncio
     async def test_on_before_tool_execution_auto_approve(self, agent_with_auto_approve):
         session = await agent_with_auto_approve.create_session()
-        result = agent_with_auto_approve._on_before_tool_execution(
-            session, {"name": "web_fetch", "arguments": "{}"}
-        )
-        # auto_approve_tools is not yet wired from role to session
-        # so this returns "pending" (the default behavior)
+        tool_call = ContentPart.create_tool_use("tc1", "web_fetch", "{}")
+        result = agent_with_auto_approve._on_before_tool_execution(session, tool_call)
+        # session.auto_approve_tools starts empty — role's list not yet wired in
         assert result == ("pending", None)
 
     @pytest.mark.asyncio
     async def test_on_before_tool_execution_non_approved_still_pending(self, agent_with_auto_approve):
         session = await agent_with_auto_approve.create_session()
-        result = agent_with_auto_approve._on_before_tool_execution(
-            session, {"name": "other_tool", "arguments": "{}"}
-        )
+        tool_call = ContentPart.create_tool_use("tc1", "other_tool", "{}")
+        result = agent_with_auto_approve._on_before_tool_execution(session, tool_call)
         assert result == ("pending", None)
 
     @pytest.mark.asyncio
     async def test_on_before_tool_execution_empty_auto_approve(self, agent_with_sessions):
         session = await agent_with_sessions.create_session()
-        result = agent_with_sessions._on_before_tool_execution(
-            session, {"name": "test_tool", "arguments": {"param": "value"}}
-        )
+        tool_call = ContentPart.create_tool_use("tc1", "test_tool", '{"param": "value"}')
+        result = agent_with_sessions._on_before_tool_execution(session, tool_call)
         assert result == ("pending", None)
 
     @pytest.mark.asyncio

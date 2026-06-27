@@ -36,12 +36,12 @@ class TestToolFromCallable:
         assert "a" in tool.parameters
         assert "b" in tool.parameters
 
-    def test_session_excluded_from_parameters(self):
-        def with_session(session=None) -> str:
-            """A tool with session param."""
+    def test_runner_excluded_from_parameters(self):
+        def with_runner(runner=None) -> str:
+            """A tool with runner param."""
             return ""
-        tool = Tool.from_callable(with_session)
-        assert "session" not in tool.parameters
+        tool = Tool.from_callable(with_runner)
+        assert "runner" not in tool.parameters
 
     def test_signature_preserved_by_wraps(self):
         def original(x: int, y: str = "default") -> None:
@@ -98,20 +98,20 @@ class TestToolInit:
         assert tool.execute(x=5) == 10
 
 
-class TestToolWrapForSession:
-    """Test _wrap_for_session behaviour."""
+class TestToolWrapForRunner:
+    """Test _wrap_for_runner behaviour."""
 
-    def test_fn_accepting_session_is_unchanged(self):
-        def with_session(x: int, session=None) -> int:
+    def test_fn_accepting_runner_is_unchanged(self):
+        def with_runner(x: int, runner=None) -> int:
             return x
-        tool = Tool(name="test", description="t", func=with_session)
+        tool = Tool(name="test", description="t", func=with_runner)
         assert tool(x=5) == 5
 
-    def test_fn_without_session_does_not_error_on_session_kwarg(self):
+    def test_fn_without_runner_does_not_error_on_runner_kwarg(self):
         def bare(x: int) -> int:
             return x + 1
         tool = Tool(name="bare", description="b", func=bare)
-        assert tool(x=5, session="some_session") == 6
+        assert tool(x=5, runner="some_runner") == 6
 
 
 class TestToolParameterExtraction:
