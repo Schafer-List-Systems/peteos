@@ -107,6 +107,20 @@ class Context:
         with open(path, "w") as f:
             json.dump(self._json_dict, f, indent=2)
 
+    def total_token_count(self, encoding: str = "cl100k_base") -> int:
+        """Sum of token counts across all messages.
+
+        Special messages (system prompt, tool definitions) are already
+        included in ``self.messages``.
+
+        Args:
+            encoding: Tiktoken encoding name.
+
+        Returns:
+            Total token count as an integer.
+        """
+        return sum(msg.count_tokens(encoding) for msg in self.messages)
+
     # ------------------------------------------------------------------ #
     # Internal construction (used by all factory methods)
     # ------------------------------------------------------------------ #
@@ -464,25 +478,23 @@ class Context:
                     dynamic_messages.append(msg)
         return dynamic_messages
 
-    def rolling_sequence_window(self, count: int) -> "Context":
+    def rolling_sequence_window(self, count: int) -> "Context | None":
         """Fork including the last *count* non-special messages by sequence number.
 
         Special messages are always included if they fall within the sequence
         range. All messages between the selected messages are also included.
 
-        Args:
-            count: Number of non-special messages to keep from the end.
-
         Returns:
-            A new Context with the selected messages.
+            A new Context with the selected messages, or None if the window
+            covers all non-special messages (no fork needed).
         """
-        # 1. Early return: count covers all non-special messages
+        # 1. Count non-special messages
         non_special_count = sum(
             1 for msg in self.messages
             if msg not in (self.system_prompt_message, self.tool_definitions_message)
         )
         if count >= non_special_count:
-            return self.fork()
+            return None
 
         # 2. Collect non-special messages with sequence numbers
         entries: list[tuple[int, Message]] = []
@@ -501,6 +513,66 @@ class Context:
 
         # 5. Fork
         return self.fork(start=lo, end=hi)
+
+    def rolling_token_window(
+        self,
+        max_tokens: int,
+        encoding: str = "cl100k_base",
+    ) -> "Context | None":
+        """Fork keeping messages from the end until total tokens <= *max_tokens*.
+
+        Messages are selected by sequence number (same ordering as
+        ``rolling_sequence_window``). The total token count includes both
+        special messages (system prompt, tool definitions) and non-special
+        messages.
+
+        Returns:
+            A new Context whose total tokens are <= max_tokens, or None if
+            no messages need to be dropped.
+        """
+        non_special = [
+            (msg.raw_dict.get("_sequence_number"), msg)
+            for msg in self.messages
+            if msg not in (self.system_prompt_message, self.tool_definitions_message)
+            and msg.raw_dict.get("_sequence_number") is not None
+        ]
+        non_special.sort(key=lambda e: e[0])
+        if not non_special:
+            return None
+
+        # Special messages total
+        special_tokens = sum(
+            msg.count_tokens(encoding)
+            for msg in (self.system_prompt_message, self.tool_definitions_message)
+            if msg is not None
+        )
+
+        # Token counts for non-special messages
+        msg_tokens: list[tuple[int, Message, int]] = []
+        for seq, msg in non_special:
+            tc = msg.count_tokens(encoding)
+            msg_tokens.append((seq, msg, tc))
+
+        total = special_tokens + sum(tc for _, _, tc in msg_tokens)
+        if total <= max_tokens:
+            return None
+
+        # Start with special messages' tokens, accumulate from the end
+        # backwards until we'd exceed max_tokens
+        running = special_tokens
+        kept = 0
+        for i in range(len(msg_tokens) - 1, -1, -1):
+            tc = msg_tokens[i][2]
+            if running + tc > max_tokens:
+                break
+            running += tc
+            kept += 1
+
+        # Determine sequence range from the kept messages (last `kept`)
+        kept_start = msg_tokens[len(msg_tokens) - kept][0]
+        hi = self._json_dict["_message_sequence_counter"]
+
+        return self.fork(start=kept_start, end=hi)
 
     def strip_thinking(self) -> "Context":
         """Fork removing thinking content parts from all messages.

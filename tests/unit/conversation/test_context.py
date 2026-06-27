@@ -427,7 +427,8 @@ class TestContextCompaction:
         for i in range(5):
             ctx.append(Message.create("user", [ContentPart.create_text(f"msg {i}")]))
         window = ctx.rolling_sequence_window(5)
-        assert len(window.messages) == 5
+        # count >= non_special_count -> no fork needed, returns None
+        assert window is None
 
     def test_rolling_sequence_window_partial(self):
         ctx = Context.create()
@@ -470,7 +471,8 @@ class TestContextCompaction:
     def test_rolling_sequence_window_empty_context(self):
         ctx = Context.create()
         window = ctx.rolling_sequence_window(1)
-        assert len(window.messages) == 0
+        # 0 non-special messages, 1 >= 0 -> returns None
+        assert window is None
 
     def test_strip_thinking_removes_thinking_parts(self):
         ctx = Context.create()

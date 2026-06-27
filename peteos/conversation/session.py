@@ -106,6 +106,55 @@ class Session:
         """Return the active context ID from the JSON dict."""
         return self.raw_dict["active_context_id"]
 
+    def rolling_sequence_window(self, count: int) -> Context | None:
+        """Apply a rolling sequence window to the active context.
+
+        Delegates to ``Context.rolling_sequence_window(count)`` and sets
+        the result as the new active context only if messages were actually
+        dropped.
+
+        Args:
+            count: Number of non-special messages to keep from the end.
+
+        Returns:
+            The new active Context, or None if the context was already
+            within the window or there is no active context.
+        """
+        ctx = self.active_context
+        if ctx is None:
+            return None
+        new_ctx = ctx.rolling_sequence_window(count)
+        if new_ctx is not None:
+            self.set_active_context(new_ctx)
+        return new_ctx
+
+    def rolling_token_window(
+        self,
+        max_tokens: int,
+        encoding: str = "cl100k_base",
+    ) -> Context | None:
+        """Apply a rolling token window to the active context.
+
+        Delegates to ``Context.rolling_token_window(max_tokens)`` and sets
+        the result as the new active context only if messages were actually
+        dropped.
+
+        Args:
+            max_tokens: Maximum total token count for the resulting context.
+            encoding: Tiktoken encoding name.
+
+        Returns:
+            The new active Context, or None if the context was already
+            within the window or there is no active context.
+        """
+        ctx = self.active_context
+        if ctx is None:
+            return None
+        new_ctx = ctx.rolling_token_window(max_tokens, encoding)
+        if new_ctx is not None:
+            self.set_active_context(new_ctx)
+        return new_ctx
+
     @property
     def auto_approve_tools(self) -> list[str]:
         """Return the list of tool names auto-approved by this session."""
