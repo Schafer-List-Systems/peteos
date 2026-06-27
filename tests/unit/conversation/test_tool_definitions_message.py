@@ -54,7 +54,7 @@ class TestToolFilter:
 
     def test_filter_single_pattern(self):
         msg = ToolDefinitionsMessage()
-        tool_list = json.dumps([_make_tool("public_tool", "visible")])
+        tool_list = json.dumps([_make_tool("internal_tool", "visible")])
         tool_filter = json.dumps(["internal_.*"])
         msg.materialize(
             materialized_hooks={
@@ -67,14 +67,14 @@ class TestToolFilter:
             },
         )
         assert len(msg.content) == 1
-        assert msg.content[0].name == "public_tool"
+        assert msg.content[0].name == "internal_tool"
 
     def test_filter_excludes_matching_tools(self):
         msg = ToolDefinitionsMessage()
         tool_list = json.dumps([
             _make_tool("public", "ok"),
-            _make_tool("internal_get", "hide me"),
-            _make_tool("internal_set", "hide me too"),
+            _make_tool("internal_get", "included"),
+            _make_tool("internal_set", "included"),
         ])
         tool_filter = json.dumps(["internal_.*"])
         msg.materialize(
@@ -87,14 +87,15 @@ class TestToolFilter:
                 "hash_filter": tool_filter,
             },
         )
-        assert len(msg.content) == 1
-        assert msg.content[0].name == "public"
+        assert len(msg.content) == 2
+        assert msg.content[0].name == "internal_get"
+        assert msg.content[1].name == "internal_set"
 
     def test_filter_fullmatch_vs_prefix(self):
         msg = ToolDefinitionsMessage()
         tool_list = json.dumps([
             _make_tool("internal_get", "exact match"),
-            _make_tool("internal_get_extra", "prefix match, not excluded"),
+            _make_tool("internal_get_extra", "prefix match, not included"),
         ])
         tool_filter = json.dumps(["internal_get"])
         msg.materialize(
@@ -107,9 +108,9 @@ class TestToolFilter:
                 "hash_filter": tool_filter,
             },
         )
-        # internal_get matches exactly, internal_get_extra does not
+        # internal_get matches exactly via fullmatch, internal_get_extra does not
         assert len(msg.content) == 1
-        assert msg.content[0].name == "internal_get_extra"
+        assert msg.content[0].name == "internal_get"
 
     def test_filter_no_filter_hook(self):
         msg = ToolDefinitionsMessage()

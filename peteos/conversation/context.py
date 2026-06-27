@@ -569,10 +569,14 @@ class Context:
             kept += 1
 
         # Determine sequence range from the kept messages (last `kept`)
-        kept_start = msg_tokens[len(msg_tokens) - kept][0]
+        # When kept == 0, no non-special messages fit — fork with only special messages.
         hi = self._json_dict["_message_sequence_counter"]
+        if kept == 0:
+            start_seq = hi  # empty range [hi, hi) → no non-special messages
+        else:
+            start_seq = msg_tokens[len(msg_tokens) - kept][0]
 
-        return self.fork(start=kept_start, end=hi)
+        return self.fork(start=start_seq, end=hi)
 
     def strip_thinking(self) -> "Context":
         """Fork removing thinking content parts from all messages.
