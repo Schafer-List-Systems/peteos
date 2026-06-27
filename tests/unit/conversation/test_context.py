@@ -419,6 +419,105 @@ class TestContextFork:
         assert len(fork.messages) == 0
 
 
+class TestContextCompaction:
+    """Tests for Context.compaction methods (rolling_sequence_window, strip_thinking)."""
+
+    def test_rolling_sequence_window_full_copy(self):
+        ctx = Context.create()
+        for i in range(5):
+            ctx.append(Message.create("user", [ContentPart.create_text(f"msg {i}")]))
+        window = ctx.rolling_sequence_window(5)
+        assert len(window.messages) == 5
+
+    def test_rolling_sequence_window_partial(self):
+        ctx = Context.create()
+        for i in range(5):
+            ctx.append(Message.create("user", [ContentPart.create_text(f"msg {i}")]))
+        window = ctx.rolling_sequence_window(2)
+        assert len(window.messages) == 2
+        assert window.messages[0].content[0].text == "msg 3"
+        assert window.messages[1].content[0].text == "msg 4"
+
+    def test_rolling_sequence_window_with_thinking_messages(self):
+        sys_msg = SystemPromptMessage.create("system prompt")
+        ctx = Context.create(system_prompt_message=sys_msg)
+        ctx.append(Message.create("user", [ContentPart.create_text("msg1")]))
+        ctx.append(Message.create("assistant", [ContentPart.create_thinking("thinking")]))
+        ctx.append(Message.create("user", [ContentPart.create_text("msg2")]))
+        ctx.append(Message.create("assistant", [ContentPart.create_thinking("more")]))
+        ctx.append(Message.create("user", [ContentPart.create_text("msg3")]))
+        # Non-special msgs by seq: msg1(1), thinking(2), msg2(3), more(4), msg3(5)
+        # lo = entries[-2][0] = 4, hi = 6 (full sequence space)
+        window = ctx.rolling_sequence_window(2)
+        assert len(window.messages) == 3
+        assert window.messages[0].content[0].text == "system prompt"
+        assert window.messages[1].content[0].type == "thinking"
+        assert window.messages[2].content[0].text == "msg3"
+
+    def test_rolling_sequence_window_anchored_messages(self):
+        ctx = Context.create()
+        ctx.append(Message.create("user", [ContentPart.create_text("msg1")]))
+        ctx.add_anchor("insertion_point", 0)
+        ctx.append(Message.create("assistant", [ContentPart.create_text("before_all")]))
+        ctx.append(Message.create("user", [ContentPart.create_text("msg2")]))
+        ctx.append(Message.create("user", [ContentPart.create_text("msg3")]))
+        # Sorted by sequence: msg1(0), before_all(1), msg2(2), msg3(3)
+        window = ctx.rolling_sequence_window(2)
+        assert len(window.messages) == 2
+        assert window.messages[0].content[0].text == "msg2"
+        assert window.messages[1].content[0].text == "msg3"
+
+    def test_rolling_sequence_window_empty_context(self):
+        ctx = Context.create()
+        window = ctx.rolling_sequence_window(1)
+        assert len(window.messages) == 0
+
+    def test_strip_thinking_removes_thinking_parts(self):
+        ctx = Context.create()
+        ctx.append(Message.create("user", [ContentPart.create_text("hello")]))
+        ctx.append(Message.create("assistant", [ContentPart.create_thinking("thinking")]))
+        ctx.append(Message.create("assistant", [
+            ContentPart.create_thinking("more thinking"),
+            ContentPart.create_text("answer"),
+        ]))
+        result = ctx.strip_thinking()
+        assert len(result.messages) == 2
+        assert result.messages[0].content[0].text == "hello"
+        assert result.messages[1].content[0].text == "answer"
+
+    def test_strip_thinking_skips_empty_messages(self):
+        ctx = Context.create()
+        ctx.append(Message.create("user", [ContentPart.create_text("hello")]))
+        ctx.append(Message.create("assistant", [ContentPart.create_thinking("only thinking")]))
+        result = ctx.strip_thinking()
+        assert len(result.messages) == 1
+        assert result.messages[0].content[0].text == "hello"
+
+    def test_strip_thinking_removes_all_non_special(self):
+        ctx = Context.create()
+        ctx.append(Message.create("assistant", [ContentPart.create_thinking("only thinking")]))
+        result = ctx.strip_thinking()
+        assert len(result.messages) == 0
+
+    def test_strip_thinking_preserves_parent(self):
+        ctx = Context.create()
+        ctx.append(Message.create("user", [ContentPart.create_text("hello")]))
+        ctx.append(Message.create("assistant", [ContentPart.create_thinking("thinking")]))
+        result = ctx.strip_thinking()
+        assert len(ctx.messages) == 2
+        assert len(result.messages) == 1
+
+    def test_strip_thinking_copies_by_value(self):
+        ctx = Context.create()
+        msg = Message.create("user", [ContentPart.create_text("hello")])
+        ctx.append(msg)
+        result = ctx.strip_thinking()
+        result.messages[0].raw_dict["content"] = [{"type": "text", "text": "modified"}]
+        assert result.messages[0].content[0].text == "modified"
+        # Parent unchanged
+        assert ctx.messages[0].content[0].text == "hello"
+
+
 class TestContextGetSpecialMessages:
     """Tests for system_prompt_message and tool_definitions_message properties."""
 

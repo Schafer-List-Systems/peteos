@@ -131,6 +131,7 @@ class Context:
         self._json_dict.setdefault("message_sequence", 0)
         self._json_dict.setdefault("_message_sequence_counter", 0)
         self._json_dict.setdefault("_anchor_sequence_counter", 0)
+        self._json_dict.setdefault("children", [])
 
         # Inherit content map from parent if provided, otherwise start empty
         if parent_context is not None:
@@ -443,8 +444,13 @@ class Context:
                     anchor_point="messages",
                 )
 
-        # ── Restore child's message sequence counter to parent's final ─
-        child._json_dict["_message_sequence_counter"] = self._json_dict["_message_sequence_counter"]
+        # ── Set child's message sequence counter so new messages continue
+        #    from the end of the forked range (no remapping needed) ──
+        child._json_dict["_message_sequence_counter"] = hi
+
+        # ── Register child on parent ──────────────────────────────
+        self._json_dict["children"].append(child.id)
+
         return child
 
     def _gather_dynamic_messages(self) -> list[Message]:
@@ -457,3 +463,62 @@ class Context:
                     seen_ids.add(msg.id)
                     dynamic_messages.append(msg)
         return dynamic_messages
+
+    def rolling_sequence_window(self, count: int) -> "Context":
+        """Fork including the last *count* non-special messages by sequence number.
+
+        Special messages are always included if they fall within the sequence
+        range. All messages between the selected messages are also included.
+
+        Args:
+            count: Number of non-special messages to keep from the end.
+
+        Returns:
+            A new Context with the selected messages.
+        """
+        # 1. Early return: count covers all non-special messages
+        non_special_count = sum(
+            1 for msg in self.messages
+            if msg not in (self.system_prompt_message, self.tool_definitions_message)
+        )
+        if count >= non_special_count:
+            return self.fork()
+
+        # 2. Collect non-special messages with sequence numbers
+        entries: list[tuple[int, Message]] = []
+        for msg in self.messages:
+            if msg not in (self.system_prompt_message, self.tool_definitions_message):
+                seq = msg.raw_dict.get("_sequence_number")
+                if seq is not None:
+                    entries.append((seq, msg))
+
+        # 3. Sort by sequence number ascending
+        entries.sort(key=lambda e: e[0])
+
+        # 4. Determine sequence range on the full entity sequence space
+        lo = entries[-count][0]
+        hi = self._json_dict["_message_sequence_counter"]
+
+        # 5. Fork
+        return self.fork(start=lo, end=hi)
+
+    def strip_thinking(self) -> "Context":
+        """Fork removing thinking content parts from all messages.
+
+        Empty messages (no non-thinking content parts) are skipped.
+        Messages are copied by value, not shared.
+        """
+        child = self.fork()
+        stripped: list[Message] = []
+        for msg in child.messages:
+            raw = dict(msg.raw_dict)
+            raw_content = [
+                part.raw_dict for part in msg.content
+                if part.type != "thinking"
+            ]
+            if raw_content:
+                raw["content"] = raw_content
+                stripped.append(Message.from_dict(raw))
+        child._messages = stripped
+        child._json_dict["messages"] = [m.raw_dict for m in stripped]
+        return child
