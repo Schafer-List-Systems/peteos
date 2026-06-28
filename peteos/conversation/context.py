@@ -18,7 +18,7 @@ class Context:
     """Wrapper around a serialized context dict.
 
     The dict represents a single step in a session: a set of messages that form
-    one turn. Follows the agentic_process pattern — the dict is the source of truth.
+    one turn. Follows the agentic_process pattern  -  the dict is the source of truth.
 
     The internal _messages list is kept in sync with json_dict["messages"].
 
@@ -27,7 +27,7 @@ class Context:
 
     Anchor points partition the messages array. Each anchor stores a ``(name,
     index)`` pair where *index* is a non-negative absolute position acting as
-    an **end iterator** — it points to the first element *after* the partition.
+    an **end iterator**  -  it points to the first element *after* the partition.
     Appending at an anchor inserts at that position and shifts all subsequent
     messages and anchor indices by one.
 
@@ -35,6 +35,24 @@ class Context:
     factory methods (``create`` / ``fork``), never in ``__init__`` which is
     used for deserialization. System prompt is always at index 0; tool
     definitions message is always at index 1 (or index 0 if no system prompt).
+
+    **Invariants  -  guaranteed by the append/add_anchor methods and assumed by
+    fork(), rolling_sequence_window(), and rolling_token_window():**
+
+    1. **Anchor list is sorted ascending by position.** ``add_anchor`` always
+       inserts at the correct sorted position; ties are broken by insertion
+       order.
+    2. **The last anchor always has position equal to message_count.** This
+       is the end-of-all-messages sentinel. ``add_anchor`` bounds-checks
+       ``msg_index <= len(self._messages)`` and ``append`` increments
+       ``message_sequence`` in lockstep.
+    3. **Every message at index *I* has an anchor with position > *I*.**
+       The message's home anchor is the first anchor in the list with
+       position >= *I* + 1. The last sentinel (invariant 2) guarantees
+       such an anchor always exists.
+    4. **Messages within a partition maintain their insertion/display
+       order, which matches their sequence ordering.** ``append`` only
+       inserts  -  it never reorders existing messages.
 
     Example:
         >>> ctx = Context({"messages": [
@@ -89,7 +107,7 @@ class Context:
     def load_from_dict(json_dict: dict) -> "Context":
         """Load a context from a dictionary.
 
-        The context is built exactly as it was serialized — no system
+        The context is built exactly as it was serialized  -  no system
         prompt message is injected or modified.
         """
         return Context(json_dict)
@@ -143,8 +161,7 @@ class Context:
         self._json_dict.setdefault("content_map", {})
         self._json_dict.setdefault("anchor_points", [])
         self._json_dict.setdefault("message_sequence", 0)
-        self._json_dict.setdefault("_message_sequence_counter", 0)
-        self._json_dict.setdefault("_anchor_sequence_counter", 0)
+        self._json_dict.setdefault("_mutation_counter", 0)
         self._json_dict.setdefault("children", [])
 
         # Inherit content map from parent if provided, otherwise start empty
@@ -261,7 +278,7 @@ class Context:
         """Return the ordered list of (name, index) anchor points.
 
         Each index is a non-negative absolute position into the messages
-        array, acting as an **end iterator** — it points to the first
+        array, acting as an **end iterator**  -  it points to the first
         element *after* the partition.
         """
         return list(self._json_dict["anchor_points"])
@@ -299,9 +316,9 @@ class Context:
             f"[0, {len(self._messages)}]"
         )
 
-        # Record the current sequence number for this anchor
-        self._anchor_sequences.append(self._json_dict["_anchor_sequence_counter"])
-        self._json_dict["_anchor_sequence_counter"] += 1
+        # Record the current mutation count for this anchor
+        self._anchor_sequences.append(self._json_dict["_mutation_counter"])
+        self._json_dict["_mutation_counter"] += 1
 
         for pos, (_, existing_idx) in enumerate(self._json_dict["anchor_points"]):
             if after_existing and existing_idx > msg_index:
@@ -341,9 +358,9 @@ class Context:
         self._messages.insert(msg_index, message)
         self.raw_dict["messages"].insert(msg_index, message.raw_dict)
         self._json_dict["message_sequence"] += 1
-        # Assign sequence number from the message counter (0-based, no remapping)
-        message.raw_dict["_sequence_number"] = self._json_dict["_message_sequence_counter"]
-        self._json_dict["_message_sequence_counter"] += 1
+        # Assign sequence number from the mutation counter (0-based, no remapping)
+        message.raw_dict["_sequence_number"] = self._json_dict["_mutation_counter"]
+        self._json_dict["_mutation_counter"] += 1
         self._shift_anchors_after_insert(anchor_list_index)
         self._add_message_to_hook_index(message)
 
@@ -359,58 +376,41 @@ class Context:
 
         Forking uses a sequence counter system: every entity (message or anchor
         point) stores the sequence number it was assigned when inserted. The
-        context's ``_sequence_counter`` tracks the next value to assign.
+        context's ``_mutation_counter`` tracks every manipulation (message
+        append or anchor add) as a single unified timeline value.
 
-        **Fork algorithm (sequence range slicing):**
+        **Fork algorithm (two-phase, partition-preserving):**
 
-        1. Resolve slice semantics → absolute ``(lo, hi)`` bounds:
+        A partition is defined by a custom anchor: the anchor serves as an
+        end-iterator marking the boundary of messages belonging to it.
+        A message's **home anchor** is the first custom anchor with position
+        strictly greater than the message's parent position.
 
-           ``resolve_slice(start, end, max_seq)``:
-               if start is None:      start = 0
-               if end is None:         end = max_seq + 1        # exclusive past last
-               if start < 0:           start = max_seq + 1 + start   # -1 → last seq
-               if end < 0:             end = max_seq + 1 + end
-               return (start, end)
+        A partition (custom anchor) is **relevant** when:
 
-           Example: parent has seq 0..9, ``(-3, None)`` → ``(7, 10)``
+        1. Its anchor sequence number falls within [lo, hi), OR
+        2. At least one message in its partition has a sequence number
+           within [lo, hi).
 
-        2. Collect selected entities from parent, keyed by sequence number:
+        Phase 1 - Identify relevant custom anchors: iterate over parent
+        anchor points and select those whose sequence number is in [lo, hi).
 
-           ``selected_msgs = {seq: msg for (seq, msg) in parent._messages_by_seq
-                              if lo <= seq < hi}``
+        Phase 2 - Create child and add relevant custom anchors at position 0.
+        They are inserted at position 0 before any messages; they preserve
+        their relative ordering from the parent.
 
-           ``selected_anchors = {seq: anchor for (seq, anchor) in parent._anchors_by_seq
-                                 if lo <= seq < hi}``
+        Phase 3 - Assign each selected message to a partition anchor:
 
-        3. Create child with fresh special messages, continue parent's sequence
-           numbering:
+        - Find the message's home anchor (first custom anchor with pos >
+          message's parent position).
+        - If the home anchor is relevant, assign to it.
+        - Otherwise merge into the earliest surviving custom anchor
+          (partition merging).
+        - If no custom anchors are relevant, assign to "messages".
 
-           ``child = Context.create(system_prompt_message, tool_definitions_message, parent)``
-           ``child._sequence_counter = lo``  # no remapping needed
-
-        4. Re-insert selected entities in **display order** (not sequence order):
-
-           ``interleaved = []``
-           ``for idx, entity in enumerate(parent._ordered_entities):``
-           ``    seq = entity.sequence``
-           ``    if entity.type == "message"  and seq in selected_msgs:``
-           ``        interleaved.append((idx, "msg", seq))``
-           ``    if entity.type == "anchor"   and seq in selected_anchors:``
-           ``        interleaved.append((idx, "anchor", seq))``
-           ``interleaved.sort(by=idx)``  # preserve display order
-
-        5. Insert into child using append/add_anchor in display order:
-
-           ``for (display_idx, etype, seq) in interleaved:``
-           ``    if etype == "msg":``
-           ``        child.append(Message.from_dict(selected_msgs[seq].raw_dict),``
-           ``                     anchor_point="messages")``
-           ``    else:``
-           ``        child.add_anchor(selected_anchors[seq].name,``
-           ``                         child.get_anchor_msg_index(selected_anchors[seq].name))``
-
-        The forked context's sequence counter starts at ``lo`` so no sequence
-        remapping is necessary — entities retain their original sequence values.
+        Phase 4 - Append selected messages in sequence order via their
+        assigned anchor. Counter auto-assigns sequence numbers so no
+        remapping is needed.
 
         Args:
             system_prompt_message: Optional new system prompt for the fork.
@@ -425,7 +425,7 @@ class Context:
             A new Context with the selected messages.
         """
         # ── Resolve range to absolute (lo, hi) ────────────────────
-        max_seq = self._json_dict["_message_sequence_counter"]
+        max_seq = self._json_dict["_mutation_counter"]
         lo = 0 if start is None else (max_seq + start if start < 0 else start)
         hi = max_seq if end is None else (max_seq + end if end < 0 else end)
 
@@ -436,31 +436,76 @@ class Context:
             parent_context=self,
         )
         # Prevent counter conflict with messages added by Context.create()
-        child._json_dict["_message_sequence_counter"] = max(
-            lo, child._json_dict["_message_sequence_counter"]
+        child._json_dict["_mutation_counter"] = max(
+            lo, child._json_dict["_mutation_counter"]
         )
         child._anchor_sequences = []  # fresh state
 
-        # ── Build seq → Message lookup (non-special messages) ─────
+        # ── Phase 1: Identify relevant custom anchors ─────────────
+        # A custom anchor is relevant when its sequence number falls within
+        # the fork range [lo, hi).
+        relevant_anchors: list[tuple[str, int]] = []
+        for name, pos in self.anchor_points:
+            if name in ("system_prompt", "tools", "messages"):
+                continue
+            anchor_seq_idx = self.get_anchor_index(name)
+            if anchor_seq_idx < len(self._anchor_sequences):
+                anchor_seq = self._anchor_sequences[anchor_seq_idx]
+                if lo <= anchor_seq < hi:
+                    relevant_anchors.append((name, pos))
+
+        relevant_set: set[str] = {name for name, _ in relevant_anchors}
+
+        # ── Build non-special seq → Message lookup + parent positions ─
         msg_by_seq: dict[int, Message] = {}
-        for msg in self.messages:
+        parent_positions: dict[int, int] = {}  # seq → parent message index
+        for idx, msg in enumerate(self.messages):
             if msg not in (self.system_prompt_message, self.tool_definitions_message):
                 seq = msg.raw_dict.get("_sequence_number")
                 if seq is not None:
                     msg_by_seq[seq] = msg
+                    parent_positions[seq] = idx
 
-        # ── Append selected messages in sequence order ────────────
-        # Counter auto-assigns correct sequence numbers — no remapping.
+        # ── Phase 2: Add relevant custom anchors at position 0 ────
+        for name, _ in relevant_anchors:
+            child.add_anchor(name, 0)
+
+        # ── Phase 3: Assign each selected message to a partition anchor ─
+        first_relevant_name = relevant_anchors[0][0] if relevant_anchors else "messages"
+
+        msg_to_anchor: dict[int, str] = {}
         for seq in sorted(msg_by_seq.keys()):
-            if lo <= seq < hi:
-                child.append(
-                    Message.from_dict(dict(msg_by_seq[seq].raw_dict)),
-                    anchor_point="messages",
-                )
+            if not (lo <= seq < hi):
+                continue
+            msg_pos = parent_positions[seq]
+
+            # Find home anchor: first custom anchor with position > msg_pos
+            home_anchor = None
+            for anc_name, anc_pos in self.anchor_points:
+                if anc_name in ("system_prompt", "tools", "messages"):
+                    continue
+                if anc_pos > msg_pos:
+                    home_anchor = anc_name
+                    break
+
+            if home_anchor in relevant_set:
+                msg_to_anchor[seq] = home_anchor
+            elif relevant_anchors:
+                # Partition merging: merge into earliest surviving partition
+                msg_to_anchor[seq] = first_relevant_name
+            else:
+                msg_to_anchor[seq] = "messages"
+
+        # ── Phase 4: Append selected messages via their assigned anchor ─
+        for seq in sorted(msg_to_anchor.keys()):
+            child.append(
+                Message.from_dict(dict(msg_by_seq[seq].raw_dict)),
+                anchor_point=msg_to_anchor[seq],
+            )
 
         # ── Set child's message sequence counter so new messages continue
         #    from the end of the forked range (no remapping needed) ──
-        child._json_dict["_message_sequence_counter"] = hi
+        child._json_dict["_mutation_counter"] = hi
 
         # ── Register child on parent ──────────────────────────────
         self._json_dict["children"].append(child.id)
@@ -509,7 +554,7 @@ class Context:
 
         # 4. Determine sequence range on the full entity sequence space
         lo = entries[-count][0]
-        hi = self._json_dict["_message_sequence_counter"]
+        hi = self._json_dict["_mutation_counter"]
 
         # 5. Fork
         return self.fork(start=lo, end=hi)
@@ -569,8 +614,8 @@ class Context:
             kept += 1
 
         # Determine sequence range from the kept messages (last `kept`)
-        # When kept == 0, no non-special messages fit — fork with only special messages.
-        hi = self._json_dict["_message_sequence_counter"]
+        # When kept == 0, no non-special messages fit  -  fork with only special messages.
+        hi = self._json_dict["_mutation_counter"]
         if kept == 0:
             start_seq = hi  # empty range [hi, hi) → no non-special messages
         else:

@@ -148,7 +148,9 @@ class TestContextAppend:
         msg = Message.create("user", [ContentPart.create_text("seq")])
         ctx.append(msg)
         assert "_sequence_number" in msg.raw_dict
-        assert msg.raw_dict["_sequence_number"] == 0
+        # mutation_counter is 3 after 3 default anchor additions (system_prompt, tools, messages),
+        # so the first appended message gets sequence 3
+        assert msg.raw_dict["_sequence_number"] == 3
 
     def test_append_at_messages_anchor(self):
         ctx = Context.create()
@@ -319,9 +321,9 @@ class TestContextFork:
         fork = parent.fork()
         assert "hash_1" in fork.content_map
 
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
     def test_fork_inherits_anchor_points(self):
         ctx = Context.create()
+        ctx.append(Message.create("user", [ContentPart.create_text("msg")]))
         ctx.add_anchor("test", 1)
         fork = ctx.fork()
         assert ("test", 1) in fork.anchor_points
@@ -367,7 +369,9 @@ class TestContextFork:
             msg = Message.create("user", [ContentPart.create_text(text)])
             ids.append(msg.id)
             ctx.append(msg)
-        fork = ctx.fork(start=1, end=2)
+        # After 3 default anchors (mutation_counter=3), messages have values 3,4,5
+        # fork(start=4, end=5) captures the message with mutation_counter 4 (the 2nd message)
+        fork = ctx.fork(start=4, end=5)
         assert len(fork.messages) == 1
         assert fork.messages[0].id == ids[1]
 
