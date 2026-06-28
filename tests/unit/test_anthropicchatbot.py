@@ -3,7 +3,7 @@
 import json
 import pytest
 from peteos.chatbot import AnthropicChatBotResponse
-from peteos.chatbot import AnthropicChatBot, ChatHistory, Message, ContentPart
+from peteos.chatbot import AnthropicChatBot, Message, ContentPart
 from peteos.chatbot.chatbotconfig import ChatBotConfig
 from peteos.chatbot.httpclient import HTTPClient
 
@@ -74,7 +74,7 @@ class TestAnthropicChatBotResponse:
         assert "content" in response.data
         assert len(response.data["content"]) >= 1
         assert response.data["content"][0]["type"] == "tool_use"
-        assert response.data["content"][0]["id"] == "tc_1"
+        assert response.data["content"][0]["call_id"] == "tc_1"
         assert response.data["content"][0]["name"] == "calculator"
         assert "query" in response.data["content"][0]["arguments"]
 
@@ -151,7 +151,7 @@ class TestAnthropicChatBotResponse:
         response = AnthropicChatBotResponse.from_json(mock_data, AnthropicChatBot.RESPONSE_TRANSLATIONS)
 
         assert response.data["content"][0]["type"] == "tool_use"
-        assert response.data["content"][0]["id"] == "tc_1"
+        assert response.data["content"][0]["call_id"] == "tc_1"
         assert response.data["content"][0]["name"] == "calculator"
         assert response.data["content"][0]["arguments"] == json.dumps({"query": "1+1"})
 
@@ -179,13 +179,14 @@ class TestAnthropicRequestTranslation:
         http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = AnthropicChatBot(http_client, config)
-        chat_history = ChatHistory()
-        chat_history.append_message(Message(
+        from peteos.conversation import Context
+        context = Context.create()
+        context.append(Message.create(
             role="user",
-            content=[ContentPart(part_type="text", text="Hello")],
+            content_parts=[ContentPart.create_text("Hello")],
         ))
 
-        body = chatbot._build_body(chat_history)
+        body = chatbot._build_body(context)
         messages = body.get("messages", [])
         assert len(messages) >= 1
         user_msg = messages[0]
@@ -200,16 +201,17 @@ class TestAnthropicRequestTranslation:
         http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = AnthropicChatBot(http_client, config)
-        chat_history = ChatHistory()
-        chat_history.append_message(Message(
+        from peteos.conversation import Context
+        context = Context.create()
+        context.append(Message.create(
             role="assistant",
-            content=[
-                ContentPart(part_type="reasoning", reasoning="Let me think..."),
-                ContentPart(part_type="text", text="Here is the answer"),
+            content_parts=[
+                ContentPart.create_thinking("Let me think..."),
+                ContentPart.create_text("Here is the answer"),
             ]
         ))
 
-        body = chatbot._build_body(chat_history)
+        body = chatbot._build_body(context)
         messages = body.get("messages", [])
         assistant_msg = messages[0]
         assert assistant_msg["role"] == "assistant"

@@ -26,6 +26,7 @@ def tool(
 
 def agentic_object(
     imports: list[object] | None = None,
+    import_aliases: dict[str, str] | None = None,
     invoke_sub_agents: bool = False,
     allow_code_execution: bool = False,
 ) -> Callable[[type], type]:
@@ -34,6 +35,7 @@ def agentic_object(
     def decorator(cls: type) -> type:
         cls._oap_config = {
             "imports": list(imports) if imports else [],
+            "import_aliases": import_aliases or {},
             "invoke_sub_agents": invoke_sub_agents,
             "allow_code_execution": allow_code_execution,
         }

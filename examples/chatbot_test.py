@@ -15,10 +15,9 @@ import logging
 import os
 import random
 from peteos.chatbot.manager import ChatBotManager
-from peteos.chatbot.chatbot import GenericChatBot
+# GenericChatBot removed - subclasses derive from ChatBot directly
 from peteos.chatbot.chathistory import ChatHistory
-from peteos.chatbot.message import Message
-from peteos.chatbot.contentpart import ContentPart
+from peteos.conversation.message import ContentPart, Message
 from peteos.logger import setup_logging
 from peteos.toolmanager import Tool, ToolManager
 
@@ -106,7 +105,7 @@ async def main():
     chat_history = ChatHistory()
     chat_history.append_message(Message(
         role="system",
-        content=[ContentPart(part_type="text", text="You are a helpful assistant.")]
+        content=[ContentPart.create_text("You are a helpful assistant.")]
     ))
 
     # Add tool definitions to chat history
@@ -114,12 +113,7 @@ async def main():
     for tool in tool_list:
         chat_history.append_message(Message(
             role="tool",
-            content=[ContentPart(
-                part_type="tool",
-                name=tool.name,
-                description=tool.description,
-                parameters=tool.parameters
-            )]
+            content=[ContentPart.create_tool(tool.name, tool.description, tool.parameters)]
         ))
 
     # Interactive loop
@@ -141,7 +135,7 @@ async def main():
         # Add user message to history
         chat_history.append_message(Message(
             role="user",
-            content=[ContentPart(part_type="text", text=user_input)]
+            content=[ContentPart.create_text(user_input)]
         ))
 
         # Send to chatbot
@@ -188,12 +182,14 @@ async def main():
         # Add assistant response to history
         content_parts = []
         if text:
-            content_parts.append(ContentPart(part_type="text", text=text))
+            content_parts.append(ContentPart.create_text(text))
         if reasoning:
-            content_parts.append(ContentPart(part_type="reasoning", reasoning=reasoning))
+            content_parts.append(ContentPart.create_thinking(reasoning))
         if tool_calls:
-            # Convert uniform tool call format back to API-specific format if needed
-            content_parts.append(ContentPart(part_type="tool_calls", tool_calls=tool_calls))
+            for tc in tool_calls:
+                content_parts.append(
+                    ContentPart.create_tool_use(tc.get("id", ""), tc.get("name", ""), tc.get("arguments", "{}"))
+                )
 
         chat_history.append_message(Message(
             role="assistant",

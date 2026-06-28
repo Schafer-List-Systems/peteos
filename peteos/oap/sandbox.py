@@ -7,14 +7,102 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from peteos.oap.base import AgenticObjectBase
 
+# Safe builtins: pure functions for data manipulation and output.
+# No file I/O, no network, no type() metaclass tricks, no exec/eval.
+_SAFE_BUILTINS: dict[str, Any] = {
+    # Data creation / conversion
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "list": list,
+    "dict": dict,
+    "set": set,
+    "tuple": tuple,
+    # Iteration
+    "len": len,
+    "range": range,
+    "enumerate": enumerate,
+    "zip": zip,
+    "map": map,
+    "filter": filter,
+    "sorted": sorted,
+    "reversed": reversed,
+    # Math
+    "abs": abs,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "round": round,
+    "divmod": divmod,
+    # Logic
+    "any": any,
+    "all": all,
+    # Output
+    "print": print,
+    # Type helpers
+    "isinstance": isinstance,
+    "type": type,
+}
+
+
+def build_sandbox_description(imports: list[object] | None = None) -> str:
+    """Build the description string for the python_exec tool.
+
+    Args:
+        imports: List of modules available in the sandbox.
+
+    Returns:
+        Description string listing available modules if any.
+    """
+    if imports:
+        mods_list = ", ".join(
+            m.__name__ if hasattr(m, "__name__") else str(m) for m in imports
+        )
+        return (
+            f"Execute sandboxed Python code. Access the agentic object via `this`."
+            f" Agentic tools can also be called on this (e.g. `this.produce_output`). "
+            f" No __builtins__, no __import__, no network, no filesystem."
+            f" Available modules: {mods_list}."
+        )
+    return ""
+
 
 def create_sandbox_globals(
     self_obj: AgenticObjectBase,
-    imports: list[object] | None = None,
+    config: dict[str, Any],
 ) -> dict[str, Any]:
-    """Create a restricted globals dict for exec() in the sandbox."""
-    globals_dict: dict[str, Any] = {"__builtins__": {}, "self": self_obj}
+    """Create a restricted globals dict for exec() in the sandbox.
+
+    Args:
+        self_obj: The AgenticObjectBase instance to expose as `this`.
+        config: MRO-merged OAP config dict with 'imports' and 'import_aliases' keys.
+
+    Returns:
+        Globals dict ready for exec().
+    """
+    registry: dict[str, Any] = {}
+    imports = config.get("imports", [])
+    import_aliases = config.get("import_aliases", {})
+    globals_dict: dict[str, Any] = {
+        "__builtins__": {**_SAFE_BUILTINS, "__import__": lambda name, *_a, **_kw: _restricted_import(name, registry)},
+        "this": self_obj,
+    }
     if imports:
         for mod in imports:
+            registry[mod.__name__] = mod
             globals_dict[mod.__name__] = mod
+    if import_aliases:
+        for mod_name, alias in import_aliases.items():
+            obj = registry.get(mod_name)
+            if obj:
+                globals_dict[alias] = obj
     return globals_dict
+
+
+def _restricted_import(name: str, registry: dict[str, Any]) -> Any:
+    """Resolve import from the per-call registry only."""
+    resolved = registry.get(name)
+    if resolved is None:
+        raise ImportError(f"No module named {name!r}")
+    return resolved

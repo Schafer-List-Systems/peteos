@@ -16,7 +16,7 @@ import time
 from apps.agentic_process.app_main import AppMain
 from apps.agentic_process.email_client import search_emails
 from peteos.chatbot.manager import ChatBotManager
-from peteos.logger import setup_logging
+from peteos.utils.logger import setup_logging
 
 
 async def main() -> None:

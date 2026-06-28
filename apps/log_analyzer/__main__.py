@@ -33,15 +33,17 @@ import json
 import sys
 import uuid
 
-from peteos.agent import Agent
+from peteos.persona.agent import Agent
 from peteos.channels import NextcloudTalkChannel, ReadStdoutChannel
 from peteos.chatbot import Message, ContentPart
 from peteos.chatbot.manager import ChatBotManager
-from peteos.chatbot import FoldedMessage
-from peteos.logger import setup_logging
-from peteos.role import Role
-from peteos.rolemanager import RoleManager
-from peteos.toolmanager import ToolManager
+from peteos.engine.runner import Runner
+from peteos.utils.logger import setup_logging
+from peteos.persona.role import Role
+from peteos.persona.rolemanager import RoleManager
+from peteos.persona.toolmanager import ToolManager
+
+
 
 from apps.log_analyzer.tools import _state, register_filter_tools, register_state_tools, register_approval_tools
 
@@ -146,33 +148,35 @@ async def main():
 
     # Create the router agent
     router_role = role_manager.get_role("router")
-    agent = Agent(router_role, tm)
+    agent = Agent(router_role, tm, agent_dir="apps/log_analyzer/agents")
     _state.agent = agent
 
     # Create the pattern_reviewer sub-agent
     reviewer_role = role_manager.get_role("pattern_reviewer")
     if reviewer_role is not None:
-        reviewer_agent = Agent(reviewer_role, tm)
+        reviewer_agent = Agent(reviewer_role, tm, agent_dir="apps/log_analyzer/agents")
         _state.reviewer_agent = reviewer_agent
         print(f"Created pattern_reviewer agent with role: {reviewer_role.name}")
     else:
         print("Warning: pattern_reviewer role not found. Sub-agent approval calls will be disabled.")
 
+    # Create a shared session and runner that both channels attach to
+    session = await agent.create_session()
+    runner = Runner(agent, session.uuid)
+    await runner.start()
+
     # Create the stdout channel first so its methods are available for tool registration
     # (tools access the channel via _state.channel, not the tool manager)
     stdout_channel = ReadStdoutChannel(
         name="log-monitor",
-        agent=agent,
+        runner=runner,
         config=stdout_config,
     )
 
-    # Register all tools (before session creation so chat history includes them)
+    # Register all tools
     register_state_tools(tm)
     register_filter_tools(tm, stdout_channel)
     register_approval_tools(tm)
-
-    # Create a shared session that both channels attach to
-    session = await agent.create_session()
 
     # Set session reference for tools
     _state.session = session
@@ -186,55 +190,50 @@ async def main():
         max_tokens = 60000
 
     def _on_before_send_to_chatbot(_sess, _history, _max=max_tokens):
-        _, total_tokens = session.chat_history.rolling_window_discard(_max, _max // 2)
+        total_tokens = session.active_context.total_token_count()
+        if total_tokens > _max:
+            windowed = session.rolling_token_window(_max // 2)
+            total_tokens = windowed.total_token_count() if windowed else total_tokens
         _state.last_context_tokens = total_tokens
 
-    session.execution_environment.register_hook("before_send_to_chatbot", _on_before_send_to_chatbot)
+    runner.execution_environment.register_hook("before_send_to_chatbot", _on_before_send_to_chatbot)
 
     # Copy log state mute flag into message metadata
     def _on_before_notification_publish(_sess, message: Message) -> None:
         message.metadata["mute"] = _state.is_muted
 
-    session.execution_environment.register_hook("before_notification_publish", _on_before_notification_publish)
+    runner.execution_environment.register_hook("before_notification_publish", _on_before_notification_publish)
 
     # Inject message IDs into unanchored messages at creation time
     def _on_after_message_append(session, message: Message) -> None:
-        if isinstance(message, FoldedMessage):
-            return
         for part in message.content:
             if part.type == "text" and part.text:
                 token_count = message.count_tokens()
                 #part.data["text"] = f"[msg:{message.get_id()} ({token_count} tokens)]\n{part.text}"
                 break
 
-    session.execution_environment.register_hook("after_message_append", _on_after_message_append)
+    runner.execution_environment.register_hook("after_message_append", _on_after_message_append)
 
     print(f"Created session: {session.uuid}")
     print()
 
     # Create the Nextcloud Talk channel (user-facing, sends and receives)
-    nextcloud = NextcloudTalkChannel(name="nextcloud", agent=agent, config=nextcloud_config)
+    nextcloud = NextcloudTalkChannel(name="nextcloud", runner=runner, config=nextcloud_config)
 
     # Add context size awareness to the system prompt (reads cached count from _state)
-    from peteos.chatbot.message import SystemPromptMessage
-    for msg in session.chat_history.messages:
+    from peteos.conversation.system_prompt_message import SystemPromptMessage
+    for msg in session.active_context.messages:
         if isinstance(msg, SystemPromptMessage):
-            msg.add_hook(lambda: f"Context: {_state.last_context_tokens} of {max_tokens} tokens used.\n")
+            session.register_hook(msg, "context_size", lambda: f"Context: {_state.last_context_tokens} of {max_tokens} tokens used.\n" if hasattr(_state, 'last_context_tokens') else f"Context: 0 of {max_tokens} tokens used.\n")
             break
 
     # Add a persistent back-anchor reminder about updating topics for continuous roles
-    from peteos.chatbot import ContentPart
     if agent.role.behavior_policy == "continuous":
-        session.chat_history.append_message(
-            Message(
-                role="assistant",
-                content=[ContentPart(
-                    part_type="text",
-                    text="I need to use the update_topic() tool when the discussion no longer belongs to the current topic. I should update it to what the discussion is actually about. I should also use fold_topic() to fold completed topics to save context.",
-                )],
-            ),
-            anchor="back"
+        reminder = Message.create(
+            role="assistant",
+            content_parts=[ContentPart.create_text("I need to use the update_topic() tool when the discussion no longer belongs to the current topic. I should update it to what the discussion is actually about.")],
         )
+        session.active_context.append(reminder, anchor_point="back")
 
     # Register rooms with the session (app owns session lifecycle)
     auto_join_rooms = nextcloud_config.get("auto_join_rooms", [])
@@ -242,10 +241,19 @@ async def main():
         await nextcloud.register_room(session.uuid, room_token)
         print(f"Registered room {room_token} with session {session.uuid}")
 
-    # Callback for dynamic room joins
+    # Callback for dynamic room joins — create a new session, runner, and channel
     async def on_room_joined(room_token: str):
         new_session = await agent.create_session()
-        await nextcloud.register_room(new_session.uuid, room_token)
+        new_runner = Runner(agent, new_session.uuid)
+        await new_runner.start()
+        new_nextcloud = NextcloudTalkChannel(
+            name=f"nextcloud-{room_token}",
+            runner=new_runner,
+            config=nextcloud_config,
+        )
+        new_nextcloud.on_room_joined = on_room_joined
+        await new_nextcloud.register_room(new_session.uuid, room_token)
+        await new_nextcloud.start()
         print(f"Registered new room {room_token} with session {new_session.uuid}")
 
     nextcloud.on_room_joined = on_room_joined
@@ -282,10 +290,11 @@ async def main():
         print("\nSending goodbye message...")
         if nextcloud._rooms:
             for token, session_uuid in nextcloud._rooms.items():
-                await nextcloud.send(
-                    Message(role="assistant", content=[ContentPart(part_type="text", text="I am going offline.")]),
-                    session_uuid=session_uuid,
+                bye_message = Message.create(
+                    role="assistant",
+                    content_parts=[ContentPart.create_text("I am going offline.")],
                 )
+                await nextcloud.send(bye_message, session_uuid=session_uuid)
                 print(f"  Sent 'I am going offline.' to room {token}")
         await nextcloud.stop()
         await stdout_channel.stop()

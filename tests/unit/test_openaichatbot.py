@@ -4,8 +4,6 @@ import pytest
 from peteos.chatbot import OpenAIChatBotResponse, GenericChatBotResponse
 from peteos.chatbot.chatbotconfig import ChatBotConfig
 from peteos.chatbot.httpclient import HTTPClient
-from peteos.chatbot import ChatHistory
-
 from peteos.chatbot.openaichatbot import OpenAIChatBot
 
 
@@ -97,7 +95,7 @@ class TestOpenAIChatBotResponse:
         assert "content" in response.data
         assert len(response.data["content"]) >= 1
         assert response.data["content"][0]["type"] == "tool_use"
-        assert response.data["content"][0]["id"] == "tc_1"
+        assert response.data["content"][0]["call_id"] == "tc_1"
         assert response.data["content"][0]["name"] == "calculator"
         assert response.data["content"][0]["arguments"] == '{"query": "1+1"}2'
 
@@ -167,7 +165,7 @@ class TestOpenAIChatBotResponse:
         assert "content" in response.data
         assert len(response.data["content"]) >= 1
         assert response.data["content"][0]["type"] == "tool_use"
-        assert response.data["content"][0]["id"] == "tc_1"
+        assert response.data["content"][0]["call_id"] == "tc_1"
         assert response.data["content"][0]["name"] == "calculator"
         assert response.data["content"][0]["arguments"] == '{"query": "1+1"}'
 
@@ -221,13 +219,14 @@ class TestOpenAIRequestTranslation:
         http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
-        chat_history = ChatHistory()
-        chat_history.append_message(Message(
+        from peteos.conversation import Context
+        context = Context.create()
+        context.append(Message.create(
             role="user",
-            content=[ContentPart(part_type="text", text="Hello")],
+            content_parts=[ContentPart.create_text("Hello")],
         ))
 
-        body = chatbot._build_body(chat_history)
+        body = chatbot._build_body(context)
         messages = body.get("messages", [])
         assert len(messages) >= 1
         user_msg = messages[0]
@@ -243,16 +242,17 @@ class TestOpenAIRequestTranslation:
         http_client = HTTPClient(timeout=5.0)
         config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
         chatbot = OpenAIChatBot(http_client, config)
-        chat_history = ChatHistory()
-        chat_history.append_message(Message(
+        from peteos.conversation import Context
+        context = Context.create()
+        context.append(Message.create(
             role="assistant",
-            content=[
-                ContentPart(part_type="reasoning", reasoning="Let me think..."),
-                ContentPart(part_type="text", text="Here is the answer"),
+            content_parts=[
+                ContentPart.create_thinking("Let me think..."),
+                ContentPart.create_text("Here is the answer"),
             ]
         ))
 
-        body = chatbot._build_body(chat_history)
+        body = chatbot._build_body(context)
         messages = body.get("messages", [])
         assistant_msg = messages[0]
         assert assistant_msg["role"] == "assistant"

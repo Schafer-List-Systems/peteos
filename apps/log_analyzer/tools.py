@@ -4,10 +4,13 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
-from peteos.toolmanager import ToolManager
+from peteos.persona.toolmanager import ToolManager
+from peteos.engine.runner import invoke_agent
 
 if TYPE_CHECKING:
     from peteos.channels import NextcloudTalkChannel, ReadStdoutChannel
+    from peteos.conversation.session import Session
+    from peteos.persona.agent import Agent
 
 _logger = logging.getLogger(__name__)
 
@@ -110,8 +113,6 @@ async def add_exclude_pattern(pattern: str, reason: str = "", triggering_log_lin
         return "Error: pattern_reviewer agent not configured."
 
     try:
-        from peteos.session import invoke_agent
-
         existing_patterns = ""
         if ch is not None:
             patterns_list = ch.list_exclude_patterns()
@@ -279,147 +280,14 @@ def update_topic(old_topic_header: str, new_topic_name: str) -> str:
     _state.current_topic = _new_topic_header
 
     # Add a marker message to chat history with topic header in metadata
-    from peteos.chatbot.message import Message
-    from peteos.chatbot import ContentPart
-
-    marker = Message(
+    marker = Message.create(
         role="assistant",
-        content=[ContentPart(part_type="text", text=f"Unfolded Topic: {_new_topic_header}")],
-        metadata={"topic_header": _new_topic_header},
+        content_parts=[ContentPart.create_text(f"Topic: {_new_topic_header}")],
     )
-    sess.chat_history.append_message(marker)
+    marker.metadata["topic_header"] = _new_topic_header
+    sess.active_context.append(marker)
 
     return f"Topic updated: {_new_topic_header}"
-
-
-def fold_topic(topic_header: str, summary: str) -> str:
-    """Fold a previous topic to free up context. Use this when you have completed analysis of a topic and want to compact your chat history.
-
-    This tool folds all messages from the topic marker of the given topic up to (but not including) the next topic marker.
-    You can only fold topics from the past, never the current topic.
-
-    You must provide the full topic header including the section counter (e.g. "#1 Security scan") from your chat history as a safeguard,
-    and a summary of what this section contained.
-
-    Args:
-        topic_header: The full topic header from your chat history including section counter (e.g. "#1 Security scan").
-        summary: A brief summary of what was discussed in this topic section.
-
-    Returns:
-        Status message with fold results.
-    """
-    sess = _state.session
-    if not sess:
-        return "Error: session not configured."
-
-    from peteos.chatbot import FoldedMessage
-
-    if topic_header == _state.current_topic:
-        return f"Error: cannot fold the current topic {_state.current_topic!r}. Only fold completed topics."
-
-    unanchored = sess.chat_history._unanchored
-
-    # Find all sentinel messages by topic_header in metadata
-    sentinels: list[tuple[int, str]] = []
-    for i, msg in enumerate(unanchored):
-        th = msg.metadata.get("topic_header")
-        if th is not None:
-            sentinels.append((i, th))
-
-    # Find start of the topic to fold and end at the next sentinel
-    start_idx = None
-    end_idx = None
-    found = False
-    for i, (idx, header) in enumerate(sentinels):
-        if header == topic_header and not found:
-            start_idx = idx
-            found = True
-        elif found:
-            # Stop at any sentinel — a fresh marker or a folded topic message
-            end_idx = idx
-            break
-
-    if not found:
-        return f"Error: no topic marker found for topic {topic_header!r}."
-
-    if end_idx is None:
-        end_idx = len(unanchored)
-
-    if end_idx <= start_idx + 1:
-        return f"Error: no messages to fold for topic {topic_header!r}."
-
-    # Collect messages to fold (between start and end markers)
-    messages_to_fold = unanchored[start_idx:end_idx]
-
-    # Calculate token savings
-    original_token_count = sum(msg.count_tokens() for msg in messages_to_fold)
-
-    # Remove messages from unanchored
-    del unanchored[start_idx:end_idx]
-
-    # Create folded message
-    folded = FoldedMessage(
-        summary=f"Folded Topic: {topic_header}\nSummary: {summary}\nIf you need to remember the content, call unfold_topic({topic_header})",
-        original_messages=messages_to_fold,
-        message_id=str(uuid.uuid4()),
-        metadata={"topic_header": topic_header},
-    )
-    unanchored.insert(start_idx, folded)
-
-    # Calculate folded token count
-    folded_token_count = folded.count_tokens()
-    savings = original_token_count - folded_token_count
-
-    return (
-        f"Folded topic {topic_header!r}: {len(messages_to_fold)} messages folded. "
-        f"Token savings: {savings} (original: {original_token_count}, folded: {folded_token_count})."
-    )
-
-
-def unfold_topic(topic_header: str) -> str:
-    """Unfold a previously folded topic to restore the original messages.
-
-    Find the folded message for this topic and remove it, restoring all original messages.
-
-    You must provide the full topic header including the section counter (e.g. "#1 Security scan") from your chat history.
-
-    Args:
-        topic_header: The full topic header from your chat history including section counter (e.g. "#1 Security scan").
-
-    Returns:
-        Status message with number of restored messages.
-    """
-    sess = _state.session
-    if not sess:
-        return "Error: session not configured."
-
-    from peteos.chatbot import FoldedMessage
-
-    unanchored = sess.chat_history._unanchored
-
-    # Find the folded message by topic_header in metadata
-    folded_idx = None
-    folded_msg = None
-    for i, msg in enumerate(unanchored):
-        if isinstance(msg, FoldedMessage):
-            th = msg.metadata.get("topic_header")
-            if th == topic_header:
-                folded_idx = i
-                folded_msg = msg
-                break
-
-    if folded_msg is None:
-        return f"Error: No FoldedMessage found for topic {topic_header!r}."
-
-    # Remove the folded message
-    del unanchored[folded_idx]
-
-    # Insert original messages in order
-    for orig_msg in folded_msg._original_messages:
-        unanchored.insert(folded_idx, orig_msg)
-        folded_idx += 1
-
-    return f"Unfolded topic {topic_header!r}: restored {len(folded_msg._original_messages)} messages."
 
 
 def register_state_tools(tool_manager: ToolManager) -> None:
@@ -432,8 +300,6 @@ def register_state_tools(tool_manager: ToolManager) -> None:
     tool_manager.register_tool(func=unmute_router)
     tool_manager.register_tool(func=eval_python)
     tool_manager.register_tool(func=update_topic)
-    tool_manager.register_tool(func=fold_topic)
-    tool_manager.register_tool(func=unfold_topic)
     tool_manager.register_tool(func=proceed)
 
 
@@ -463,148 +329,26 @@ def register_filter_tools(
     tool_manager.register_tool(func=list_exclude_patterns)
 
 
-def fold(message_ids: list[str], summary: str) -> str:
-    """Fold consecutive messages into a single summary message.
-
-    Takes a list of message IDs, finds them in the session's unanchored
-    messages, verifies they are consecutive, removes them, and inserts
-    a single FoldedMessage with the provided summary.
-
-    Args:
-        message_ids: List of message IDs to fold (must be consecutive).
-        summary: Concise summary of the folded messages.
-
-    Returns:
-        Status message with token savings information.
-    """
-    from peteos.chatbot import FoldedMessage
-
-    sess = _state.session
-    if not sess:
-        return "Error: session not configured."
-
-    unanchored = sess.chat_history._unanchored
-
-    # Find the first matching message
-    first_idx = None
-    for i, msg in enumerate(unanchored):
-        if msg.get_id() == message_ids[0]:
-            first_idx = i
-            break
-
-    if first_idx is None:
-        return f"Error: Could not find message with ID {message_ids[0]!r} in unanchored history."
-
-    # Verify consecutive match
-    matched = []
-    for j, expected_id in enumerate(message_ids):
-        target_idx = first_idx + j
-        if target_idx >= len(unanchored):
-            return (
-                f"Error: Message at expected position {target_idx} does not exist. "
-                "Messages must be consecutive."
-            )
-        actual_id = unanchored[target_idx].get_id()
-        if actual_id != expected_id:
-            return (
-                f"Error: Messages must be consecutive. Expected ID {expected_id!r} "
-                f"at position {first_idx + j} but found {actual_id!r}."
-            )
-        matched.append(unanchored[target_idx])
-
-    # Calculate original token count
-    original_token_count = sum(msg.count_tokens() for msg in matched)
-
-    # Remove matched messages from unanchored
-    del unanchored[first_idx:first_idx + len(matched)]
-
-    # Create and insert FoldedMessage
-    folded = FoldedMessage(
-        summary=summary,
-        original_messages=matched,
-        message_id=str(uuid.uuid4()),
-    )
-    unanchored.insert(first_idx, folded)
-
-    # Calculate folded token count
-    folded_token_count = folded.count_tokens()
-    savings = original_token_count - folded_token_count
-
-    return (
-        f"Folded {len(matched)} messages into a summary. "
-        f"Token savings: {savings} (original: {original_token_count}, "
-        f"folded: {folded_token_count})."
-    )
-
-
-def unfold(message_id: str) -> str:
-    """Unfold a FoldedMessage, restoring the original messages.
-
-    Finds the FoldedMessage containing the specified message ID in the
-    session's unanchored messages, removes it, and inserts all original
-    messages at that position.
-
-    Args:
-        message_id: ID of a message that is inside a FoldedMessage.
-
-    Returns:
-        Status message with number of restored messages.
-    """
-    from peteos.chatbot import FoldedMessage
-
-    sess = _state.session
-    if not sess:
-        return "Error: session not configured."
-
-    unanchored = sess.chat_history._unanchored
-
-    # Find the folded message containing the target ID
-    folded_idx = None
-    folded_msg = None
-    for i, msg in enumerate(unanchored):
-        if isinstance(msg, FoldedMessage):
-            for orig in msg._original_messages:
-                if orig.get_id() == message_id:
-                    folded_idx = i
-                    folded_msg = msg
-                    break
-            if folded_msg:
-                break
-
-    if folded_msg is None:
-        return f"Error: No FoldedMessage contains a message with ID {message_id!r}."
-
-    # Remove the folded message
-    del unanchored[folded_idx]
-
-    # Insert original messages in order
-    for orig_msg in folded_msg._original_messages:
-        unanchored.insert(folded_idx, orig_msg)
-        folded_idx += 1
-
-    return f"Unfolded: restored {len(folded_msg._original_messages)} messages."
-
-
 def set_approval_result(
     approved: str = "",
     reason: str = "",
-    session: "Session | None" = None,
+    runner: "Runner | None" = None,
 ) -> str:
     """Set the review decision. Call with approved='yes' or 'no' and a reason.
 
-    Writes the decision to the reviewer session's AgenticState so the
+    Writes the decision to the reviewer runner's AgenticState so the
     invoking agent can read it out.
 
     Args:
         approved: 'yes' to approve the pattern, 'no' to deny it.
         reason: Detailed explanation of the decision.
-        session: The reviewer session (injected by the execution environment).
+        runner: The reviewer runner (injected by the execution environment).
 
     Returns:
         Confirmation string.
     """
-    if session is None:
-        return "Error: session not available."
+    if runner is None:
+        return "Error: runner not available."
 
     if approved not in ("yes", "no"):
         return "Error: approved must be 'yes' or 'no'."
@@ -612,8 +356,8 @@ def set_approval_result(
         return "Error: reason must be non-empty."
 
     try:
-        session.state.create("approved", approved)
-        session.state.create("reason", reason)
+        runner._state.create("approved", approved)
+        runner._state.create("reason", reason)
     except ValueError as e:
         return f"Error: {e}"
 
@@ -627,13 +371,3 @@ def register_approval_tools(tool_manager: ToolManager) -> None:
         tool_manager: The ToolManager to register the tool on.
     """
     tool_manager.register_tool(func=set_approval_result)
-
-
-def register_fold_tools(tool_manager: ToolManager) -> None:
-    """Register fold/unfold tools on the given tool manager.
-
-    Args:
-        tool_manager: The ToolManager to register the tools on.
-    """
-    tool_manager.register_tool(func=fold)
-    tool_manager.register_tool(func=unfold)

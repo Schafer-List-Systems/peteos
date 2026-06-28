@@ -4,7 +4,7 @@ import asyncio
 import httpx
 from typing import AsyncGenerator, Optional
 
-from peteos.logger import get_logger
+from peteos.utils import get_logger
 
 _logger = get_logger(__name__)
 

@@ -54,6 +54,8 @@ async def main():
     agent = Agent(role, tool_manager)
 
     session = await agent.create_session()
+    runner = agent.create_runner(session.uuid)
+    await runner.start()
 
     # Define the multi-turn conversation
     questions = [
@@ -66,23 +68,22 @@ async def main():
         print(f"Turn {i}: {question}")
         print('='*60)
 
-        # Add user question to session
-        session.push_event(Message(
+        # Add user question to runner
+        user_msg = Message.create(
             role="user",
-            content=[ContentPart(part_type="text", text=question)]
-        ))
+            content_parts=[ContentPart.create_text(question)],
+        )
+        await runner.queue_message(user_msg)
 
         # Wait for response
-        await asyncio.sleep(1)
+        await runner.wait_for_idle(timeout=30)
 
         # Print accumulated response
-        last_msg = session.chat_history.messages[-1]
+        last_msg = session.active_context.messages[-1]
         if last_msg.get_role() == "assistant" and last_msg.content:
             print(last_msg.content[0].text)
 
-        session.execution_environment.clear_interrupt()
-
-    await session.stop()
+    await runner.stop()
 
 
 if __name__ == "__main__":

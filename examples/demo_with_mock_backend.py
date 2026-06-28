@@ -126,10 +126,10 @@ async def main():
     print()
 
     # Create the shell channel
-    shell = InteractiveShellChannel("shell", agent)
+    shell = InteractiveShellChannel("shell", runner)
 
     print("-" * 60)
-    print("Commands: /new, /list, /select, /messages, /quit")
+    print("Commands: /new, /list, /switch, /approve, /deny, /pending, /image (or /file), /quit")
     print("Type any text to send a message to the active session.")
     print("-" * 60)
     print()

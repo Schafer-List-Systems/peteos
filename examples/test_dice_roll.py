@@ -7,8 +7,7 @@ from peteos.chatbot.manager import ChatBotManager
 from peteos.logger import setup_logging
 from peteos.role import Role
 from peteos.toolmanager import ToolManager, Tool
-from peteos.chatbot.message import Message
-from peteos.chatbot.contentpart import ContentPart
+from peteos.conversation.message import ContentPart, Message
 
 async def test():
     setup_logging(level='DEBUG', debug=True)
@@ -37,7 +36,7 @@ async def test():
     # Send message to roll dice
     msg = Message(
         role='user',
-        content=[ContentPart(part_type='text', text='Roll a dice')]
+        content=[ContentPart.create_text('Roll a dice')]
     )
     agent.post_message(session.uuid, msg)
     print('Posted: "Roll a dice"')

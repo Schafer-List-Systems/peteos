@@ -2,44 +2,120 @@
 
 from __future__ import annotations
 
-import asyncio
+import json
+import os
 import threading
 import time
-import uuid
 from dataclasses import dataclass, is_dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from peteos.chatbot import ContentPart, Message
-from peteos.executionenvironment import ExecStatus
-from peteos.logger import get_logger
+from peteos.conversation import ContentPart, Message
+from peteos.conversation.session import Session
+from peteos.engine import ExecStatus, Runner
+from peteos.persona.role import Role
+from peteos.persona.toolmanager import Tool, ToolManager
+from peteos.utils import get_logger
 from peteos.oap.error import Error
-from peteos.oap.sandbox import create_sandbox_globals
-from peteos.role import Role
-from peteos.toolmanager import Tool, ToolManager
+from peteos.oap.sandbox import build_sandbox_description, create_sandbox_globals
 
 from peteos.oap.decorators import tool
+from peteos.oap.agentic_registry import AgenticObjectRegistry
 
 _logger = get_logger(__name__)
+
+_AGENT_BASE_DIR = os.environ.get("PETEOS_AGENT_BASE_DIR", "/tmp/peteos")
+
+
+def _build_system_prompt(cls: type) -> str:
+    """Build the system prompt for a concrete agentic object class.
+
+    Collects docstrings from classes in the MRO that directly inherit
+    from AgenticObjectBase (concrete agentic objects), ordered from
+    most-derived to base. Prepends standard behaviour directives.
+    """
+    class_name = cls.__name__
+
+    # Collect only concrete agentic objects — classes that directly
+    # inherit from AgenticObjectBase — in MRO order (derived first).
+    doc_parts: list[str] = []
+    for parent in cls.__mro__:
+        if parent in (AgenticObjectBase, object):
+            continue
+        if AgenticObjectBase not in parent.__bases__:
+            continue
+        parent_doc = (parent.__doc__ or "").strip()
+        if parent_doc:
+            doc_parts.append(parent_doc)
+
+    if doc_parts:
+        # Return the combined class descriptions from the inheritance chain.
+        return "\n\n".join(doc_parts)
+    return (
+        f"You are an agent working on a {class_name} object. "
+        f"You have tools to read and modify the state of this object. "
+        f"Use those tools and the information you already have to fulfill the user's request. "
+        f"NEVER ask the user for more information or clarification. "
+        f"If you cannot produce the requested output, use the `produce_error` to return an error message explaining why. "
+    )
+
+
+def _collect_oap_config(cls: type) -> dict[str, Any]:
+    """Collect and merge OAP config from all classes in the MRO that directly inherit from AgenticObjectBase.
+
+    Mirrors the MRO iteration in _build_system_prompt. Collects the union of
+    all imports, merges import_aliases, and ORs all boolean flags across the
+    diamond hierarchy so that a class D(B, C) where both B and C define
+    @agentic_object with different imports gets all of them combined.
+    """
+    imports: set[object] = set()
+    import_aliases: dict[str, str] = {}
+    allow_code_execution = False
+    allow_media_access = False
+    invoke_sub_agents = False
+    for parent in cls.__mro__:
+        if parent in (AgenticObjectBase, object):
+            continue
+        if AgenticObjectBase not in parent.__bases__:
+            continue
+        cfg = getattr(parent, "_oap_config", None)
+        if cfg:
+            allow_code_execution |= cfg.get("allow_code_execution", False)
+            allow_media_access |= cfg.get("allow_media_access", False)
+            invoke_sub_agents |= cfg.get("invoke_sub_agents", False)
+            imports.update(cfg.get("imports", []))
+            import_aliases.update(cfg.get("import_aliases", {}))
+    return {
+        "allow_code_execution": allow_code_execution,
+        "allow_media_access": allow_media_access,
+        "invoke_sub_agents": invoke_sub_agents,
+        "imports": list(imports),
+        "import_aliases": import_aliases,
+    }
 
 
 from peteos.oap._schema import get_schema_description, parse_data
 
 
-if TYPE_CHECKING:
-    from peteos.session import Session
-
-from peteos.agent import Agent
+from peteos.persona.agent import Agent
 
 
 class AgenticObjectBase:
-    """Base class for all Object-Agentic Programming objects."""
+    """Base class for all Object-Agentic Programming objects.
+
+    All subclasses are auto-registered in AgenticObjectRegistry.
+    """
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        AgenticObjectRegistry.register(cls)
 
     def __init__(self) -> None:
+        super().__init__()
         self._oap_role: Role = self._create_role()
         self._oap_lock: threading.Lock = threading.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
-        self._oap_thread_store: dict[str, UUID] = {}
+        self._oap_thread_store: dict[str, str] = {}
         self._register_tools()
         self._register_output_schema_hook()
         self._register_sandbox_tool()
@@ -51,31 +127,24 @@ class AgenticObjectBase:
     def _create_role(self) -> Role:
         """Create the Role for this object."""
         cls = self.__class__
-        class_name = cls.__name__
-        doc = (cls.__doc__ or "").strip() if cls is not AgenticObjectBase else ""
-        if doc:
-            system_prompt = doc
-        else:
-            system_prompt = (
-                f"You are an agent working on a {class_name} object. "
-                f"You have tools to read and modify the state of this object. "
-                f"Use those tools and the information you already have to fulfill the user's request. "
-                f"NEVER ask the user for more information or clarification. "
-                f"If you cannot produce the requested output, use the `produce_error` to return an error message explaining why. "
-            )
+        system_prompt = _build_system_prompt(cls)
         return Role(
-            name=f"oap_{class_name}",
-            description=f"Agent for {class_name}",
+            name=f"oap_{cls.__name__}",
+            description=f"Agent for {cls.__name__}",
             tool_filter=[".*"],
             system_prompt=system_prompt,
         )
 
     def _create_agent(self) -> Agent:
         """Create an Agent wired to this object's role and tool_manager."""
-        # Auto-approve all registered tools so they pass Session.add_tool_call()
+        # Auto-approve all registered tools so they pass Runner.add_tool_call()
         for t in self._oap_tool_manager.get_tool_list():
             self._oap_role.auto_approve_tools.append(t.name)
-        return Agent(self._oap_role, self._oap_tool_manager)
+        return Agent(
+            self._oap_role,
+            self._oap_tool_manager,
+            "",
+        )
 
     def _register_tools(self) -> None:
         """Register @tool-decorated methods from this class and its parents."""
@@ -111,21 +180,22 @@ class AgenticObjectBase:
         )
 
     def _register_sandbox_tool(self) -> None:
-        """Register python_exec tool when allow_code_execution is enabled on the class."""
-        config = getattr(self.__class__, "_oap_config", {})
+        """Register python_exec tool when allow_code_execution is enabled on the class or any ancestor."""
+        config = _collect_oap_config(self.__class__)
         if not config.get("allow_code_execution", False):
             return
+        description = build_sandbox_description(config.get("imports"))
         self._oap_tool_manager.register_tool(
             Tool(
                 name="python_exec",
-                description="Execute sandboxed Python code. Access the object graph via `self`. No __builtins__, no __import__, no network, no filesystem.",
+                description=description,
                 func=self._python_exec,
             )
         )
 
     def _register_media_tool(self) -> None:
-        """Register read_media tool when allow_media_access is enabled on the class."""
-        config = getattr(self.__class__, "_oap_config", {})
+        """Register read_media tool when allow_media_access is enabled on the class or any ancestor."""
+        config = _collect_oap_config(self.__class__)
         if not config.get("allow_media_access", False):
             return
         self._oap_tool_manager.register_tool(
@@ -138,9 +208,8 @@ class AgenticObjectBase:
 
     def _python_exec(self, code: str) -> str:
         """Protected tool: executes sandboxed Python code."""
-        config = getattr(self.__class__, "_oap_config", {})
-        imports = config.get("imports", [])
-        sandbox_globals = create_sandbox_globals(self, imports)
+        config = _collect_oap_config(self.__class__)
+        sandbox_globals = create_sandbox_globals(self, config)
 
         try:
             exec(code, sandbox_globals)
@@ -149,7 +218,7 @@ class AgenticObjectBase:
             return f"Error: {type(e).__name__}: {e}"
 
     @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
-    def _produce_output(self, data: str, session: "Session | None" = None) -> str:
+    def _produce_output(self, data: str, runner: "Runner | None" = None) -> str:
         """Protected tool: signals the agent has produced its final answer.
 
         Parses the JSON string and validates it against the current output
@@ -158,113 +227,122 @@ class AgenticObjectBase:
 
         Args:
             data: The result as a JSON string.
-            session: The session (injected by the execution environment).
+            runner: The runner (injected by the execution environment).
 
         Returns:
             "OK" on success, or an error message the agent can fix.
         """
-        if session is None:
-            _logger.debug("_produce_output: session is None")
-            return "Error: session not available."
+        if runner is None:
+            _logger.debug("_produce_output: runner is None")
+            return "Error: runner not available."
         try:
             parsed = parse_data(data, self._oap_current_output_schema)
         except ValueError as e:
-            return str(e)
+            desc = get_schema_description(self._oap_current_output_schema)
+            if desc is None:
+                hint = f"Expected a value of type {self._oap_current_output_schema.__name__}."
+            else:
+                hint = f"Expected data matching: {desc[0]}."
+                if desc[1]:
+                    hint += f" {desc[1]}."
+            return f"{e} {hint}"
 
         try:
-            session.state.create("_oap_produced_data", parsed)
+            if runner.state.get("_oap_produced_data"):
+                runner.state.delete("_oap_produced_data")
+            runner.state.create("_oap_produced_data", data)
             _logger.debug(
-                "_produce_output: wrote to session %s, _oap_produced_data=%s",
-                session.uuid, parsed,
+                "_produce_output: wrote to runner %s, _oap_produced_data=%s",
+                runner.session_uuid, parsed,
             )
         except ValueError as e:
             return f"Error: {e}"
-        return "OK"
+        return None
 
-    async def _read_media(self, src: str, session: "Session | None" = None) -> str:
-        """Tool: load a media file and queue it back to the agent's session.
+    async def _read_media(self, src: str, runner: "Runner | None" = None) -> str:
+        """Tool: load a media file and queue it back to the agent's runner.
 
         Reads the file from disk or fetches from a URL, encodes it as a
         ContentPart (image/video/pdf), and queues a new user message into
-        the session's event queue. The session loop will drain this message
+        the runner's event queue. The runner loop will drain this message
         and add it to chat history before the next LLM call.
 
         Args:
             src: Local file path or HTTP(S) URL to the media file.
-            session: The session (injected by the execution environment).
+            runner: The runner (injected by the execution environment).
 
         Returns:
             Confirmation message with file info.
         """
-        from peteos.chatbot import ContentPart, Message
+        from peteos.conversation import ContentPart, Message
 
-        if session is None:
-            return "Error: session not available."
+        if runner is None:
+            return "Error: runner not available."
 
-        from peteos.utils.image import create_media_content_part_async
+        from peteos.conversation.media import create_media_content_part_async
         media_part = await create_media_content_part_async(src, timeout=30.0)
 
-        queued_msg = Message(
+        queued_msg = Message.create(
             role="user",
-            content=[
-                ContentPart(part_type="text", text=f"Media loaded from {src}."),
+            content_parts=[
+                ContentPart.create_text(f"Media loaded from {src}."),
                 media_part,
             ],
         )
-        await session.queue_message(queued_msg)
-        _logger.debug("_read_media: queued media from %s for session %s", src, session.uuid)
+        await runner.queue_message(queued_msg)
+        _logger.debug("_read_media: queued media from %s for runner %s", src, runner.session_uuid)
         return f"OK: media queued from {src}"
 
-    async def _send_media(self, data: bytes, mime_type: str, session: "Session | None", *, text: str | None = None) -> None:
-        """Send in-memory media bytes as a user message to the session.
+    async def _send_media(self, data: bytes, mime_type: str, runner: "Runner | None", *, text: str | None = None) -> None:
+        """Send in-memory media bytes as a user message to the runner.
 
         Encodes the bytes as base64, creates a ContentPart, and queues it
-        as a user message in the session's event queue. Useful for passing
+        as a user message in the runner's event queue. Useful for passing
         media captured from cameras, memory, or other non-file sources.
 
         Args:
             data: Raw media bytes (e.g. JPEG/PNG file data).
             mime_type: MIME type of the media (e.g. "image/jpeg", "video/mp4").
-            session: The session (injected by the execution environment).
+            runner: The runner (injected by the execution environment).
             text: Optional text message to include alongside the media.
         """
-        from peteos.chatbot import ContentPart, Message
+        from peteos.conversation import ContentPart, Message
 
-        if session is None:
+        if runner is None:
             return
 
-        from peteos.utils.image import create_media_content_part_async
+        from peteos.conversation.media import create_media_content_part_async
         media_part = await create_media_content_part_async(data, mime_type=mime_type)
 
         msg_text = text or "Media sent."
-        queued_msg = Message(
+        queued_msg = Message.create(
             role="user",
-            content=[
-                ContentPart(part_type="text", text=msg_text),
+            content_parts=[
+                ContentPart.create_text(msg_text),
                 media_part,
             ],
         )
-        await session.queue_message(queued_msg)
-        _logger.debug("_send_media: queued media (type=%s) for session %s", mime_type, session.uuid)
+        await runner.queue_message(queued_msg)
+        _logger.debug("_send_media: queued media (type=%s) for runner %s", mime_type, runner.session_uuid)
 
     @tool(name="produce_error", description="Signal that you could not produce the requested output. Pass an error message explaining why (e.g., missing required data or an invalid state).")
-    def _produce_error(self, message: str, session: "Session | None" = None) -> str:
+    def _produce_error(self, message: str, runner: "Runner | None" = None) -> str:
         """Protected tool: signals the agent could not fulfill the task.
 
-        Writes the error message to the session's AgenticState so that
+        Writes the error message to the runner's AgenticState so that
         invoke_agent returns an Error object.
 
         Args:
             message: Human-readable error explanation.
-            session: The session (injected by the execution environment).
+            runner: The runner (injected by the execution environment).
 
         Returns:
-            "OK" on success, or an error message if the session is missing.
+            "OK" on success, or an error message if the runner is missing.
         """
-        if session is None:
-            return "Error: session not available."
+        if runner is None:
+            return "Error: runner not available."
         try:
-            session.state.create("_oap_error", message)
+            runner.state.create("_oap_error", message)
         except ValueError as e:
             return f"Error: {e}"
         return "OK"
@@ -341,9 +419,9 @@ class AgenticObjectBase:
     ) -> Any:
         """Invoke this object's agent.
 
-        Acquires the invocation lock, creates or reuses a Session, queues the
-        prompt, waits for produce_output (via after_step hook), extracts
-        structured output, then releases the lock.
+        Acquires the invocation lock, creates or reuses a Session and Runner,
+        queues the prompt, waits for produce_output (via after_step hook),
+        extracts structured output, then releases the lock.
 
         Args:
             prompt: Task description for the agent.
@@ -366,35 +444,47 @@ class AgenticObjectBase:
         # --- Gatekeeper checks ---
         if self._oap_agent is None:
             raise ValueError("No Agent available")
+        _logger.debug("invoke_agent[%s]: gatekeeper passed", self.__class__.__name__)
 
         # --- Acquire lock with timeout ---
         self.acquire(timeout)
+        _logger.debug("invoke_agent[%s]: lock acquired", self.__class__.__name__)
 
         # --- Update output schema (serialized by lock) ---
         self._oap_current_output_schema = output_schema
 
-        # --- Create or reuse session ---
+        # --- Create or reuse runner (session + runner pair) ---
         session: Session | None = None
+        runner: Runner | None = None
         if persistent_thread_id is not None:
             stored_uuid = self._oap_thread_store.get(persistent_thread_id)
             if stored_uuid is not None:
+                _logger.debug("invoke_agent[%s]: reusing thread %s", self.__class__.__name__, persistent_thread_id)
                 session = self._oap_agent.get_session(stored_uuid)
-        if session is None:
+                if session is not None:
+                    runner = Runner(self._oap_agent, session.uuid)
+                    _logger.debug("invoke_agent[%s]: starting existing runner", self.__class__.__name__)
+                    await runner.start()
+        if session is None or runner is None:
+            _logger.debug("invoke_agent[%s]: creating new session and runner", self.__class__.__name__)
             session = await self._oap_agent.create_session()
+            runner = Runner(self._oap_agent, session.uuid)
+            _logger.debug("invoke_agent[%s]: starting new runner", self.__class__.__name__)
+            await runner.start()
             if persistent_thread_id is not None:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
 
         try:
-            async def _on_step_done(sess: "Session", status: ExecStatus) -> ExecStatus | None:
-                produced = sess.state._data.get("_oap_produced_data")
-                errored = sess.state._data.get("_oap_error")
+            async def _on_step_done(r: Runner, status: ExecStatus) -> ExecStatus | None:
+                produced = r.state.get("_oap_produced_data")
+                errored = r.state.get("_oap_error")
                 if errored is not None:
                     _logger.debug("_on_step_done: error found, returning FINISHED")
                     return ExecStatus.FINISHED
                 elif produced is not None:
                     _logger.debug("_on_step_done: produced data found, returning FINISHED")
                     return ExecStatus.FINISHED
-                else:
+                elif status == ExecStatus.FINISHED:
                     schema_desc = ""
                     desc = get_schema_description(self._oap_current_output_schema)
                     if desc is not None:
@@ -410,38 +500,50 @@ class AgenticObjectBase:
                         f"It looks like you finished a step without calling `produce_output` or `produce_error`. "
                         f"If you have your final answer, call `produce_output` with your result in the following schema: {schema_desc} "
                     )
-                    await session.queue_message(Message(
+                    await r.queue_message(Message.create(
                         role="user",
-                        content=[ContentPart(part_type="text", text=reminder)],
+                        content_parts=[ContentPart.create_text(reminder)],
                     ))
-                    return None
+                return None
 
-            session.execution_environment.register_hook(
-                "after_step", _on_step_done, session
+            runner.execution_environment.register_hook(
+                "after_step", _on_step_done, runner
             )
+            _logger.debug("invoke_agent[%s]: after_step hook registered", self.__class__.__name__)
 
-            content: list[ContentPart] = [ContentPart(part_type="text", text=prompt)]
+            content: list[ContentPart] = [ContentPart.create_text(prompt)]
             if image is not None:
-                from peteos.utils.image import create_media_content_part_async
+                from peteos.conversation.media import create_media_content_part_async
                 image_part = await create_media_content_part_async(image, timeout=timeout or 30.0)
                 content.append(image_part)
 
-            await session.queue_message(Message(
+            _logger.debug("invoke_agent[%s]: queuing prompt message", self.__class__.__name__)
+            await runner.queue_message(Message.create(
                 role="user",
-                content=content,
+                content_parts=content,
             ))
 
             reminder_msg = f"PRODUCE YOUR FINAL OUTPUT USING THE `produce_output` OR `produce_error` TOOL!\n" \
                            f"MIND THE OUTPUT SCHEMA!"
             start_time = time.time()
 
+            iteration = 0
             while True:
-                await session.wait_for_idle(timeout=timeout)
-                produced_data = session.state._data.get("_oap_produced_data")
+                iteration += 1
+                _logger.debug("invoke_agent[%s]: waiting for idle (iter %d)", self.__class__.__name__, iteration)
+                await runner.wait_for_idle(timeout=timeout)
+                _logger.debug("invoke_agent[%s]: idle reached (iter %d), checking state", self.__class__.__name__, iteration)
+                produced_data = runner.state.get("_oap_produced_data")
                 if produced_data is not None:
-                    return produced_data
-                error_msg = session.state._data.get("_oap_error")
+                    _logger.debug("invoke_agent[%s]: produced_data found, returning", self.__class__.__name__)
+                    try:
+                        return parse_data(produced_data, self._oap_current_output_schema)
+                    except ValueError as e:
+                        _logger.warning("invoke_agent[%s]: produced data failed to parse: %s", self.__class__.__name__, e)
+                        return Error(f"Agent produced data that failed schema validation: {e}")
+                error_msg = runner.state.get("_oap_error")
                 if error_msg is not None:
+                    _logger.debug("invoke_agent[%s]: error found, returning", self.__class__.__name__)
                     return Error(error_msg)
 
                 elapsed = time.time() - start_time
@@ -454,21 +556,29 @@ class AgenticObjectBase:
                     )
                     return Error(f"Agent did not produce output within {timeout}s timeout")
 
-                await session.queue_message(Message(
+                _logger.debug("invoke_agent[%s]: queuing reminder (iter %d)", self.__class__.__name__, iteration)
+                await runner.queue_message(Message.create(
                     role="user",
-                    content=[ContentPart(part_type="text", text=reminder_msg)],
+                    content_parts=[ContentPart.create_text(reminder_msg)],
                 ))
         finally:
             # Clear OAP state variables so the next invocation starts fresh
-            if session is not None:
+            if runner is not None:
                 try:
-                    session.state._data.pop("_oap_produced_data", None)
-                    session.state._data.pop("_oap_error", None)
-                except Exception:
+                    produced = runner.state.get("_oap_produced_data")
+                    if produced is not None:
+                        runner.state.delete("_oap_produced_data")
+                except KeyError:
+                    pass
+                try:
+                    error = runner.state.get("_oap_error")
+                    if error is not None:
+                        runner.state.delete("_oap_error")
+                except KeyError:
                     pass
             if persistent_thread_id is None:
                 try:
-                    await session.stop()
+                    await runner.stop()
                     await self._oap_agent.destroy_session(session.uuid)
                 except Exception:
                     pass
@@ -502,7 +612,7 @@ class AgenticObjectBase:
             TimeoutError: Lock not acquired within timeout.
         """
         # --- Gatekeeper: verify self allows sub-agent invocation ---
-        config = getattr(self, "_oap_config", {})
+        config = _collect_oap_config(self.__class__)
         if not config.get("invoke_sub_agents", False):
             return Error("Sub-agent invocation not enabled")
 

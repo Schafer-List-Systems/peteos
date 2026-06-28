@@ -3,10 +3,10 @@
 import json
 from typing import Any, Dict, AsyncGenerator, AsyncIterator
 
-from peteos.utils import get_value_at_path as _get_value_at_path
 from peteos.utils.delta_merge import merge_delta_into_target as _merge_delta_into_target
 from peteos.utils.delta_merge import translate_delta_event as _translate_delta_event
-from peteos.logger import get_logger
+from peteos.utils import get_logger
+from peteos.conversation.message import Message, ContentPart
 
 _logger = get_logger(__name__)
 
@@ -42,11 +42,38 @@ class ChatBotResponse:
         """
         self._stream = stream
         self._data: Dict[str, Any] = {}
+        self._message_cache: Message | None = None
+        self._has_text_part: bool = False
+
+    @property
+    def has_text_part(self) -> bool:
+        """Whether the response contained any text content part."""
+        return self._has_text_part
 
     @property
     def data(self) -> Dict[str, Any]:
         """Access raw accumulated data dict."""
         return self._data
+
+    @property
+    def message(self) -> Message:
+        """Access the normalized response as a Message built via factories.
+
+        Override in subclasses to provide API-specific construction.
+        """
+        if self._message_cache is None:
+            self._message_cache = self._build_message()
+        return self._message_cache
+
+    def _build_message(self) -> Message:
+        """Convert accumulated data into a Message via factories.
+
+        Override in subclasses for API-specific conversion.
+        """
+        raise NotImplementedError(
+            "Subclasses must override _build_message() to convert "
+            "their API-specific data into a Message using factories."
+        )
 
     def __getitem__(self, key: str) -> Any:
         """Access response fields by key."""

@@ -17,7 +17,7 @@ from peteos.oap.decorators import tool
 from peteos.oap.error import Error
 
 if TYPE_CHECKING:
-    from peteos.session import Session
+    from peteos.engine import Runner
 
 
 class BenchmarkRow:

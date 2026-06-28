@@ -50,6 +50,7 @@ class TestAgenticObjectDecorator:
 
         assert MyObj._oap_config == {
             "imports": [],
+            "import_aliases": {},
             "invoke_sub_agents": False,
             "allow_code_execution": False,
         }
@@ -65,6 +66,7 @@ class TestAgenticObjectDecorator:
 
         assert MyObj._oap_config == {
             "imports": ["os", "sys"],
+            "import_aliases": {},
             "invoke_sub_agents": True,
             "allow_code_execution": True,
         }
