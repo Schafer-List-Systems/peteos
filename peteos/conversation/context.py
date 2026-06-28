@@ -88,6 +88,10 @@ class Context:
             A new Context instance.
         """
         ctx = cls({}, parent_context=parent_context)
+        # Add default anchor points via append (not in __init__ for clean deserialization)
+        ctx.add_anchor("system_prompt", 0)
+        ctx.add_anchor("tools", 0)
+        ctx.add_anchor("messages", 0)
         if system_prompt_message is not None:
             ctx.append(system_prompt_message, anchor_point="system_prompt")
             ctx.raw_dict["system_prompt_message_id"] = system_prompt_message.id
@@ -168,22 +172,16 @@ class Context:
         if parent_context is not None:
             self._json_dict["content_map"] = dict(parent_context._json_dict["content_map"])
             self._json_dict["origin_context_id"] = parent_context.id
+            self._json_dict["parent_mutation_counter"] = self._json_dict["_mutation_counter"]
 
-        # Add default anchor points only for fresh contexts (empty anchor list = no serialization)
-        if not self._json_dict["anchor_points"]:
-            assert(not self._json_dict["messages"])
-            self._messages: list[Message] = []
-            self._anchor_sequences: list[int] = []
-            self.add_anchor("system_prompt", 0)
-            self.add_anchor("tools", 0)
-            self.add_anchor("messages", 0)
-        else:
-            self._anchor_sequences: list[int] = list(
-                self._json_dict.get("_anchor_sequences", [])
-            )
-            self._messages: list[Message] = [
-                Message.from_dict(msg) for msg in self._json_dict["messages"]
-            ]
+        # __init__ is purely a deserializer — no side effects, no default anchors.
+        # Default anchors are added by Context.create() for fresh contexts.
+        self._messages: list[Message] = [
+            Message.from_dict(msg) for msg in self._json_dict.get("messages", [])
+        ]
+        self._anchor_sequences: list[int] = list(
+            self._json_dict.get("_anchor_sequences", [])
+        )
 
         self._hook_index: dict[str, list[Message]] = {}
         self._update_hook_index()
@@ -364,7 +362,98 @@ class Context:
         self._shift_anchors_after_insert(anchor_list_index)
         self._add_message_to_hook_index(message)
 
-    def fork(
+    def _fork(
+        self,
+        selected_messages: set[Message],
+        anchor_point_names: set[str] | None = None,
+        *,
+        system_prompt_message: SystemPromptMessage | None = None,
+        tool_definitions_message: ToolDefinitionsMessage | None = None,
+    ) -> Context:
+        """Mechanical forking given selected Message objects and anchor point names.
+
+        The mutation counter is managed automatically by the child's append()
+        and add_anchor() calls  -  no manual manipulation.
+
+        Args:
+            selected_messages: Message objects to copy into the fork.
+            anchor_point_names: Set of anchor point names to copy.
+            system_prompt_message: Optional new system prompt for the fork.
+            tool_definitions_message: Optional new tool definitions message.
+
+        Returns:
+            A new Context with the selected messages and anchors.
+        """
+        # Ensure completeness: consistent special messages in selected_messages.
+        # If an arg replaces the parent's special message, remove the old one first.
+        system_prompt_message = system_prompt_message or self.system_prompt_message
+        if self.system_prompt_message in selected_messages:
+            selected_messages.discard(self.system_prompt_message)
+        if system_prompt_message is not None:
+            selected_messages.add(system_prompt_message)
+        system_prompt_id = system_prompt_message.id if system_prompt_message else None
+
+        tool_definitions_message = tool_definitions_message or self.tool_definitions_message
+        if self.tool_definitions_message in selected_messages:
+            selected_messages.discard(self.tool_definitions_message)
+        if tool_definitions_message is not None:
+            selected_messages.add(tool_definitions_message)
+        tool_definitions_id = tool_definitions_message.id if tool_definitions_message else None
+
+        # Ensure completeness: start with anchor_point_names or empty set
+        if anchor_point_names is None:
+            anchor_point_names_set: set[str] = set()
+        else:
+            anchor_point_names_set = set(anchor_point_names)
+        anchor_point_names_set.add("system_prompt")
+        anchor_point_names_set.add("tools")
+        anchor_point_names_set.add("messages")
+
+        # Find each message's home anchor: first anchor with position > msg position
+        for msg_index, msg in enumerate(self.messages):
+            if msg in selected_messages:
+                for anchor_name, anchor_msg_index in self.anchor_points:
+                    if anchor_msg_index > msg_index:
+                        anchor_point_names_set.add(anchor_name)
+                        break
+
+        # Build ordered list preserving parent anchor order
+        anchor_point_names_ordered: list[str] = [
+            name for name, _ in self.anchor_points
+            if name in anchor_point_names_set
+        ]
+
+        # Create child — build from scratch via __init__
+        child = Context(json_dict={}, parent_context=self)
+        child._json_dict["system_prompt_message_id"] = system_prompt_id
+        child._json_dict["tool_definitions_message_id"] = tool_definitions_id
+
+        # Add anchors in parent order
+        for name in anchor_point_names_ordered:
+            child.add_anchor(name, 0)
+
+        # Append selected messages from parent in display order via their home anchor
+        for msg_index, msg in enumerate(self.messages):
+            if msg in selected_messages:
+                home = None
+                for anchor_name, anchor_msg_index in self.anchor_points:
+                    if anchor_msg_index > msg_index:
+                        home = anchor_name
+                        break
+                child.append(Message.from_dict(dict(msg.raw_dict)), anchor_point=home)
+
+        # Append replacement special messages not present in parent
+        if system_prompt_message and system_prompt_message not in self.messages:
+            child.append(Message.from_dict(dict(system_prompt_message.raw_dict)), anchor_point="system_prompt")
+        if tool_definitions_message and tool_definitions_message not in self.messages:
+            child.append(Message.from_dict(dict(tool_definitions_message.raw_dict)), anchor_point="tools")
+
+        # Register child on parent
+        self._json_dict["children"].append(child.id)
+
+        return child
+
+    def fork_insert_sequence(
         self,
         *,
         system_prompt_message: SystemPromptMessage | None = None,
@@ -372,145 +461,54 @@ class Context:
         start: int | None = None,
         end: int | None = None,
     ) -> Context:
-        """Fork this context with Python-style slice semantics on sequence numbers.
-
-        Forking uses a sequence counter system: every entity (message or anchor
-        point) stores the sequence number it was assigned when inserted. The
-        context's ``_mutation_counter`` tracks every manipulation (message
-        append or anchor add) as a single unified timeline value.
-
-        **Fork algorithm (two-phase, partition-preserving):**
-
-        A partition is defined by a custom anchor: the anchor serves as an
-        end-iterator marking the boundary of messages belonging to it.
-        A message's **home anchor** is the first custom anchor with position
-        strictly greater than the message's parent position.
-
-        A partition (custom anchor) is **relevant** when:
-
-        1. Its anchor sequence number falls within [lo, hi), OR
-        2. At least one message in its partition has a sequence number
-           within [lo, hi).
-
-        Phase 1 - Identify relevant custom anchors: iterate over parent
-        anchor points and select those whose sequence number is in [lo, hi).
-
-        Phase 2 - Create child and add relevant custom anchors at position 0.
-        They are inserted at position 0 before any messages; they preserve
-        their relative ordering from the parent.
-
-        Phase 3 - Assign each selected message to a partition anchor:
-
-        - Find the message's home anchor (first custom anchor with pos >
-          message's parent position).
-        - If the home anchor is relevant, assign to it.
-        - Otherwise merge into the earliest surviving custom anchor
-          (partition merging).
-        - If no custom anchors are relevant, assign to "messages".
-
-        Phase 4 - Append selected messages in sequence order via their
-        assigned anchor. Counter auto-assigns sequence numbers so no
-        remapping is needed.
+        """Fork this context with Python-style slice semantics on mutation counter values.
 
         Args:
             system_prompt_message: Optional new system prompt for the fork.
             tool_definitions_message: Optional new tool definitions message.
-            start: Start of sequence range (inclusive, supports negative indices).
-                None means from the first sequence.
-            end: End of sequence range (exclusive, supports negative indices).
-                None means up to the last sequence.
+            start: Start of mutation counter range (inclusive, supports negative indices).
+                None means from the first mutation.
+            end: End of mutation counter range (exclusive, supports negative indices).
+                None means up to the last mutation.
                 Both ``start`` and ``end`` being None copies the entire context.
 
         Returns:
             A new Context with the selected messages.
         """
-        # ── Resolve range to absolute (lo, hi) ────────────────────
-        max_seq = self._json_dict["_mutation_counter"]
-        lo = 0 if start is None else (max_seq + start if start < 0 else start)
-        hi = max_seq if end is None else (max_seq + end if end < 0 else end)
+        max_mutation = self._json_dict["_mutation_counter"]
+        lo = 0 if start is None else (max_mutation + start if start < 0 else start)
+        hi = max_mutation if end is None else (max_mutation + end if end < 0 else end)
 
-        # ── Create child with fresh special messages ──────────────
-        child = Context.create(
-            system_prompt_message or self.system_prompt_message,
-            tool_definitions_message or self.tool_definitions_message,
-            parent_context=self,
-        )
-        # Prevent counter conflict with messages added by Context.create()
-        child._json_dict["_mutation_counter"] = max(
-            lo, child._json_dict["_mutation_counter"]
-        )
-        child._anchor_sequences = []  # fresh state
+        # Select messages within range
+        selected: set[Message] = set()
+        for msg in self.messages:
+            seq = msg.raw_dict.get("_sequence_number")
+            if seq is not None and lo <= seq < hi:
+                selected.add(msg)
 
-        # ── Phase 1: Identify relevant custom anchors ─────────────
-        # A custom anchor is relevant when its sequence number falls within
-        # the fork range [lo, hi).
-        relevant_anchors: list[tuple[str, int]] = []
-        for name, pos in self.anchor_points:
-            if name in ("system_prompt", "tools", "messages"):
-                continue
-            anchor_seq_idx = self.get_anchor_index(name)
-            if anchor_seq_idx < len(self._anchor_sequences):
-                anchor_seq = self._anchor_sequences[anchor_seq_idx]
-                if lo <= anchor_seq < hi:
-                    relevant_anchors.append((name, pos))
+        # Select anchors whose mutation counter falls within range
+        anchor_names: set[str] = set()
+        for idx, (name, _) in enumerate(self.anchor_points):
+            if idx < len(self._anchor_sequences):
+                if lo <= self._anchor_sequences[idx] < hi:
+                    anchor_names.add(name)
 
-        relevant_set: set[str] = {name for name, _ in relevant_anchors}
-
-        # ── Build non-special seq → Message lookup + parent positions ─
-        msg_by_seq: dict[int, Message] = {}
-        parent_positions: dict[int, int] = {}  # seq → parent message index
-        for idx, msg in enumerate(self.messages):
-            if msg not in (self.system_prompt_message, self.tool_definitions_message):
-                seq = msg.raw_dict.get("_sequence_number")
-                if seq is not None:
-                    msg_by_seq[seq] = msg
-                    parent_positions[seq] = idx
-
-        # ── Phase 2: Add relevant custom anchors at position 0 ────
-        for name, _ in relevant_anchors:
-            child.add_anchor(name, 0)
-
-        # ── Phase 3: Assign each selected message to a partition anchor ─
-        first_relevant_name = relevant_anchors[0][0] if relevant_anchors else "messages"
-
-        msg_to_anchor: dict[int, str] = {}
-        for seq in sorted(msg_by_seq.keys()):
-            if not (lo <= seq < hi):
-                continue
-            msg_pos = parent_positions[seq]
-
-            # Find home anchor: first custom anchor with position > msg_pos
-            home_anchor = None
+        # Ensure completeness: add home anchors for selected messages
+        home_anchors: set[str] = set()
+        for msg in selected:
+            parent_idx = self.messages.index(msg)
             for anc_name, anc_pos in self.anchor_points:
-                if anc_name in ("system_prompt", "tools", "messages"):
-                    continue
-                if anc_pos > msg_pos:
-                    home_anchor = anc_name
+                if anc_pos > parent_idx:
+                    home_anchors.add(anc_name)
                     break
+        anchor_names = anchor_names | home_anchors
 
-            if home_anchor in relevant_set:
-                msg_to_anchor[seq] = home_anchor
-            elif relevant_anchors:
-                # Partition merging: merge into earliest surviving partition
-                msg_to_anchor[seq] = first_relevant_name
-            else:
-                msg_to_anchor[seq] = "messages"
-
-        # ── Phase 4: Append selected messages via their assigned anchor ─
-        for seq in sorted(msg_to_anchor.keys()):
-            child.append(
-                Message.from_dict(dict(msg_by_seq[seq].raw_dict)),
-                anchor_point=msg_to_anchor[seq],
-            )
-
-        # ── Set child's message sequence counter so new messages continue
-        #    from the end of the forked range (no remapping needed) ──
-        child._json_dict["_mutation_counter"] = hi
-
-        # ── Register child on parent ──────────────────────────────
-        self._json_dict["children"].append(child.id)
-
-        return child
+        return self._fork(
+            selected,
+            anchor_names,
+            system_prompt_message=system_prompt_message,
+            tool_definitions_message=tool_definitions_message,
+        )
 
     def _gather_dynamic_messages(self) -> list[Message]:
         """Gather all unique messages that have at least one hook from the hook index."""
@@ -556,8 +554,14 @@ class Context:
         lo = entries[-count][0]
         hi = self._json_dict["_mutation_counter"]
 
-        # 5. Fork
-        return self.fork(start=lo, end=hi)
+        # 5. Select messages
+        selected: set[Message] = set()
+        for seq, msg in entries:
+            if lo <= seq < hi:
+                selected.add(msg)
+
+        # 6. Fork via private method
+        return self._fork(selected)
 
     def rolling_token_window(
         self,
@@ -621,7 +625,14 @@ class Context:
         else:
             start_seq = msg_tokens[len(msg_tokens) - kept][0]
 
-        return self.fork(start=start_seq, end=hi)
+        # Select messages
+        selected: set[Message] = set()
+        for seq, msg in non_special:
+            if start_seq <= seq < hi:
+                selected.add(msg)
+
+        # Fork via private method
+        return self._fork(selected)
 
     def strip_thinking(self) -> "Context":
         """Fork removing thinking content parts from all messages.
@@ -629,7 +640,7 @@ class Context:
         Empty messages (no non-thinking content parts) are skipped.
         Messages are copied by value, not shared.
         """
-        child = self.fork()
+        child = self.fork_insert_sequence()
         stripped: list[Message] = []
         for msg in child.messages:
             raw = dict(msg.raw_dict)

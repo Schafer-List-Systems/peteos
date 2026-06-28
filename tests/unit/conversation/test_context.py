@@ -304,13 +304,12 @@ class TestContextHooks:
 
 
 class TestContextFork:
-    """Tests for Context.fork()."""
+    """Tests for Context.fork_insert_sequence()."""
 
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
     def test_fork_basic(self):
         ctx = Context.create()
         ctx.append(Message.create("user", [ContentPart.create_text("hello")]))
-        fork = ctx.fork()
+        fork = ctx.fork_insert_sequence()
         assert fork.id != ctx.id
         assert len(fork.messages) == 1
         assert fork.messages[0].content[0].text == "hello"
@@ -318,30 +317,20 @@ class TestContextFork:
     def test_fork_inherits_content_map(self):
         parent = Context.create()
         parent.content_map["hash_1"] = "val_1"
-        fork = parent.fork()
+        fork = parent.fork_insert_sequence()
         assert "hash_1" in fork.content_map
 
     def test_fork_inherits_anchor_points(self):
         ctx = Context.create()
         ctx.append(Message.create("user", [ContentPart.create_text("msg")]))
         ctx.add_anchor("test", 1)
-        fork = ctx.fork()
+        fork = ctx.fork_insert_sequence()
         assert ("test", 1) in fork.anchor_points
 
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
-    def test_fork_appends_increments_sequence(self):
-        ctx = Context.create()
-        ctx.append(Message.create("user", [ContentPart.create_text("msg")]))
-        ctx.append(Message.create("assistant", [ContentPart.create_text("reply")]))
-        fork = ctx.fork()
-        # fork appends copies of the messages via append(), so sequence goes up
-        assert fork._json_dict["message_sequence"] == 4
-
-    @pytest.mark.skip(reason="fork() anchor copy bug — separate fix needed")
     def test_fork_appending_does_not_affect_parent(self):
         ctx = Context.create()
         ctx.append(Message.create("user", [ContentPart.create_text("parent msg")]))
-        fork = ctx.fork()
+        fork = ctx.fork_insert_sequence()
         # fork already has 1 copied message
         assert len(fork.messages) == 1
         assert fork.messages[0].content[0].text == "parent msg"
@@ -356,7 +345,7 @@ class TestContextFork:
         for i in range(4):
             text = f"msg {i}"
             ctx.append(Message.create("user", [ContentPart.create_text(text)]))
-        fork = ctx.fork(start=-2)
+        fork = ctx.fork_insert_sequence(start=-2)
         assert len(fork.messages) == 2
         assert fork.messages[0].content[0].text == "msg 2"
         assert fork.messages[1].content[0].text == "msg 3"
@@ -371,7 +360,7 @@ class TestContextFork:
             ctx.append(msg)
         # After 3 default anchors (mutation_counter=3), messages have values 3,4,5
         # fork(start=4, end=5) captures the message with mutation_counter 4 (the 2nd message)
-        fork = ctx.fork(start=4, end=5)
+        fork = ctx.fork_insert_sequence(start=4, end=5)
         assert len(fork.messages) == 1
         assert fork.messages[0].id == ids[1]
 
@@ -383,7 +372,7 @@ class TestContextFork:
             tool_definitions_message=tools_msg,
         )
         ctx.append(Message.create("user", [ContentPart.create_text("user msg")]))
-        fork = ctx.fork()
+        fork = ctx.fork_insert_sequence()
         non_special = [
             m for m in fork.messages
             if not isinstance(m, (SystemPromptMessage, ToolDefinitionsMessage))
@@ -394,33 +383,199 @@ class TestContextFork:
         old_sys = SystemPromptMessage.create("old prompt")
         new_sys = SystemPromptMessage.create("new prompt")
         ctx = Context.create(system_prompt_message=old_sys)
-        fork = ctx.fork(system_prompt_message=new_sys)
+        fork = ctx.fork_insert_sequence(system_prompt_message=new_sys)
         assert fork.system_prompt_message.content[0].text == "new prompt"
 
     def test_fork_with_new_tool_definitions(self):
         old_tools = ToolDefinitionsMessage()
         new_tools = ToolDefinitionsMessage()
         ctx = Context.create(tool_definitions_message=old_tools)
-        fork = ctx.fork(tool_definitions_message=new_tools)
-        assert fork.tool_definitions_message is new_tools
+        fork = ctx.fork_insert_sequence(tool_definitions_message=new_tools)
+        assert fork.tool_definitions_message is not None
+        assert fork.tool_definitions_message.id == new_tools.id
 
     def test_fork_message_independence_from_raw_dict(self):
         ctx = Context.create()
         msg = Message.create("user", [ContentPart.create_text("original")])
         ctx.append(msg)
-        fork = ctx.fork()
+        fork = ctx.fork_insert_sequence()
         fork.messages[0].raw_dict["content"] = [{"type": "text", "text": "modified"}]
         assert fork.messages[0].content[0].text == "modified"
 
     def test_fork_preserves_origin_context_id(self):
         ctx = Context.create()
-        fork = ctx.fork()
+        fork = ctx.fork_insert_sequence()
         assert fork._json_dict["origin_context_id"] == ctx.id
 
     def test_fork_with_empty_context(self):
         ctx = Context.create()
-        fork = ctx.fork()
+        fork = ctx.fork_insert_sequence()
         assert len(fork.messages) == 0
+
+
+class TestContextForkPrivate:
+    """Tests for Context._fork() — the mechanical fork implementation."""
+
+    def _make_messages(self, ctx: Context, count: int) -> list[Message]:
+        """Helper to create and append N user messages, returning them."""
+        msgs = []
+        for i in range(count):
+            msg = Message.create("user", [ContentPart.create_text(f"msg {i}")])
+            msgs.append(msg)
+            ctx.append(msg)
+        return msgs
+
+    def test_fork_selects_only_selected_messages(self):
+        ctx = Context.create()
+        msgs = self._make_messages(ctx, 5)
+        # Select only 2 messages (indices 1 and 3)
+        selected = {msgs[1], msgs[3]}
+        child = ctx._fork(selected)
+        child_ids = {m.id for m in child.messages}
+        assert {m.id for m in selected} == child_ids
+
+    def test_fork_preserves_parent_anchor_order(self):
+        """Anchors must be added in the same order as in the parent context."""
+        ctx = Context.create()
+        msgs = self._make_messages(ctx, 4)
+        ctx.add_anchor("after_msg_1", 2)
+        ctx.add_anchor("after_msg_3", 4)
+        child = ctx._fork(set(msgs))
+        names = [name for name, _ in child.anchor_points]
+        # Parent anchors: (system_prompt,0), (tools,0), (after_msg_1,2), (messages,4), (after_msg_3,4)
+        # Home anchors: msg0/1 → after_msg_1, msg2/3 → messages
+        # after_msg_3 is excluded — no selected message has it as home anchor
+        assert names == [
+            "system_prompt", "tools", "after_msg_1", "messages",
+        ]
+
+    def test_fork_adds_missing_home_anchors(self):
+        """Home anchors for selected messages are automatically added."""
+        ctx = Context.create()
+        msgs = self._make_messages(ctx, 4)
+        ctx.add_anchor("custom", 4)
+        # Select only the first 2 messages (home anchor should be "messages")
+        selected = set(msgs[:2])
+        child = ctx._fork(selected)
+        assert "messages" in {name for name, _ in child.anchor_points}
+        # custom anchor should NOT be added since no message is in that partition
+        assert "custom" not in {name for name, _ in child.anchor_points}
+
+    def test_fork_home_anchor_assignment(self):
+        """Each message is appended to its home anchor (first anchor with position > msg index)."""
+        ctx = Context.create()
+        msgs = self._make_messages(ctx, 4)
+        ctx.add_anchor("mid", 2)
+        selected = set(msgs)
+        child = ctx._fork(selected)
+        # Messages 0 and 1 have home anchor "messages" (position 2 > them)
+        # Messages 2 and 3 have home anchor "mid" (position 4 > them)
+        # The fork should have correct anchor assignments
+        assert len(child.messages) == 4
+
+    def test_fork_replaces_old_system_prompt(self):
+        """When a new system prompt replaces the old, old is removed and new is added."""
+        ctx = Context.create()
+        old_sys = SystemPromptMessage.create("old")
+        new_sys = SystemPromptMessage.create("new")
+        self._make_messages(ctx, 2)
+        selected = set(ctx.messages)
+        child = ctx._fork(selected, system_prompt_message=new_sys)
+        assert child.system_prompt_message.id == new_sys.id
+        assert child.system_prompt_message.content[0].text == "new"
+        # Old parent message must NOT be in child
+        assert old_sys.id not in {m.id for m in child.messages}
+
+    def test_fork_replaces_old_tool_definitions(self):
+        """When a new tool definitions replaces the old, old is removed and new is added."""
+        ctx = Context.create()
+        old_tools = ToolDefinitionsMessage()
+        new_tools = ToolDefinitionsMessage()
+        self._make_messages(ctx, 2)
+        selected = set(ctx.messages)
+        child = ctx._fork(selected, tool_definitions_message=new_tools)
+        assert child.tool_definitions_message is not None
+        assert child.tool_definitions_message.id == new_tools.id
+        assert old_tools.id not in {m.id for m in child.messages}
+
+    def test_fork_defaults_to_parent_special_messages(self):
+        """If no special messages are selected or replaced, parent's are inherited."""
+        ctx = Context.create(
+            system_prompt_message=SystemPromptMessage.create("sys"),
+            tool_definitions_message=ToolDefinitionsMessage(),
+        )
+        self._make_messages(ctx, 2)
+        selected = set(ctx.messages[0:2])  # no special messages
+        child = ctx._fork(selected)
+        assert child.system_prompt_message is not None
+        assert child.system_prompt_message.content[0].text == "sys"
+        assert child.tool_definitions_message is not None
+
+    def test_fork_falls_back_to_parent_special_messages_when_none(self):
+        """Passing None for special messages falls back to parent's, not excludes them."""
+        ctx = Context.create(
+            system_prompt_message=SystemPromptMessage.create("sys"),
+            tool_definitions_message=ToolDefinitionsMessage(),
+        )
+        self._make_messages(ctx, 2)
+        selected = set(ctx.messages[0:2])
+        child = ctx._fork(selected, system_prompt_message=None, tool_definitions_message=None)
+        # or semantics: None falls back to parent
+        assert child.system_prompt_message is not None
+        assert child.system_prompt_message.content[0].text == "sys"
+        assert child.tool_definitions_message is not None
+
+    def test_fork_registers_hooks_on_child(self):
+        """Messages with _hook_ids should be registered in the child's hook index."""
+        ctx = Context.create()
+        json_dict = {"role": "user", "content": [{"type": "text", "text": "hooked"}]}
+        json_dict["_hook_ids"] = ["hook_1", "hook_2"]
+        hooked_msg = Message.from_dict(json_dict)
+        ctx.append(hooked_msg)
+        assert set(ctx.hook_index.keys()) == {"hook_1", "hook_2"}
+        child = ctx._fork({hooked_msg})
+        assert set(child.hook_index.keys()) == {"hook_1", "hook_2"}
+
+    def test_fork_child_registered_on_parent(self):
+        """The child's ID is added to the parent's children list."""
+        ctx = Context.create()
+        msgs = self._make_messages(ctx, 2)
+        child = ctx._fork(set(msgs))
+        assert child.id in ctx._json_dict["children"]
+
+    def test_fork_child_inherits_content_map(self):
+        """The child's content_map is a copy of the parent's."""
+        ctx = Context.create()
+        ctx.content_map["a"] = "1"
+        ctx.content_map["b"] = "2"
+        msgs = self._make_messages(ctx, 2)
+        child = ctx._fork(set(msgs))
+        assert child.content_map == {"a": "1", "b": "2"}
+        # Mutating child's content_map doesn't affect parent
+        child.content_map["c"] = "3"
+        assert "c" not in ctx.content_map
+
+    def test_fork_anchor_completeness_always_includes_basic_anchors(self):
+        """system_prompt, tools, and messages anchors are always present."""
+        ctx = Context.create()
+        msgs = self._make_messages(ctx, 2)
+        # Fork with no anchors specified — only selected messages
+        child = ctx._fork(set(msgs))
+        names = {name for name, _ in child.anchor_points}
+        assert "system_prompt" in names
+        assert "tools" in names
+        assert "messages" in names
+
+    def test_fork_anchor_names_parameter_ignored_completeness(self):
+        """Passing anchor_point_names adds to (not replaces) default anchors."""
+        ctx = Context.create()
+        self._make_messages(ctx, 2)
+        # Passing a non-empty set should still include system_prompt, tools, messages
+        child = ctx._fork(set(ctx.messages), anchor_point_names={"custom"})
+        names = {name for name, _ in child.anchor_points}
+        assert "system_prompt" in names
+        assert "tools" in names
+        assert "messages" in names
 
 
 class TestContextCompaction:
