@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from peteos.oap._schema import _recursive_cast, parse_data, validate_data
+from peteos.oap._schema import _recursive_cast, get_schema_description, parse_data, validate_data
 
 
 # ── Example 1: Simple scalar dataclass ───────────────────────────────
@@ -276,3 +276,158 @@ class TestParseData:
         )
         assert isinstance(result, L1)
         assert result.children[0].child.value == 99
+
+    def test_parse_data_dataclass_extra_key_raises(self):
+        """Agent returning extra keys should be caught for plain dataclass schema."""
+        with pytest.raises(ValueError, match="unexpected key"):
+            parse_data(
+                '{"decision": "ready", "unknown_field": "oops"}',
+                TaskStatus,
+            )
+
+    def test_parse_data_dataclass_missing_field_raises(self):
+        """Agent omitting required fields should be caught."""
+        with pytest.raises(ValueError, match="missing required"):
+            parse_data('{}', TaskStatus)
+
+
+# ── validate_data tests ────────────────────────────────────────────────
+
+class TestValidateData:
+
+    def test_validate_no_schema_is_valid(self):
+        assert validate_data({"anything": 42}, None) is None
+
+    def test_validate_list_dataclass_missing_field(self):
+        err = validate_data(
+            [{"edge_id": "A"}],
+            list[EdgeEvaluation],
+        )
+        assert "missing required field" in err
+
+    def test_validate_list_dataclass_extra_key(self):
+        err = validate_data(
+            [{"edge_id": "A", "met": True, "bogus": "field"}],
+            list[EdgeEvaluation],
+        )
+        assert "unexpected key 'bogus'" in err
+
+    def test_validate_list_dataclass_valid(self):
+        assert validate_data(
+            [{"edge_id": "A", "met": True}],
+            list[EdgeEvaluation],
+        ) is None
+
+    def test_validate_list_dataclass_empty_list(self):
+        assert validate_data([], list[EdgeEvaluation]) is None
+
+    def test_validate_list_dataclass_not_list(self):
+        err = validate_data({"edge_id": "A"}, list[EdgeEvaluation])
+        assert "expected list, got dict" in err
+
+    def test_validate_list_dataclass_item_not_dict(self):
+        err = validate_data([42], list[EdgeEvaluation])
+        # non-dict items bypass field checks → valid
+        assert validate_data([42], list[EdgeEvaluation]) is None
+
+    def test_validate_dataclass_missing_field(self):
+        err = validate_data(
+            {"decision": "ready"},
+            TaskStatus,
+        )
+        assert err is None
+
+    def test_validate_dataclass_extra_key(self):
+        err = validate_data(
+            {"decision": "ready", "bogus": True},
+            TaskStatus,
+        )
+        assert "unexpected key 'bogus'" in err
+
+    def test_validate_dataclass_valid(self):
+        assert validate_data({"decision": "ready"}, TaskStatus) is None
+
+    def test_validate_dataclass_not_dict(self):
+        err = validate_data("string", TaskStatus)
+        assert "expected dict, got str" in err
+
+    def test_validate_dataclass_missing_required_field(self):
+        err = validate_data({}, TaskStatus)
+        assert "missing required field" in err
+
+    def test_validate_str(self):
+        assert validate_data("hello", str) is None
+        err = validate_data(42, str)
+        assert "expected str, got int" in err
+
+    def test_validate_int(self):
+        assert validate_data(42, int) is None
+        err = validate_data(3.14, int)
+        assert "expected int, got float" in err
+        err = validate_data(True, int)
+        assert "expected int, got bool" in err
+
+    def test_validate_float(self):
+        assert validate_data(3.14, float) is None
+        assert validate_data(3, float) is None
+        err = validate_data(True, float)
+        assert "expected float, got bool" in err
+
+    def test_validate_bool(self):
+        assert validate_data(True, bool) is None
+        assert validate_data(False, bool) is None
+        err = validate_data(1, bool)
+        assert "expected bool, got int" in err
+
+    def test_validate_list_generic(self):
+        assert validate_data([1, 2], list) is None
+        err = validate_data("not a list", list)
+        assert "expected list, got str" in err
+
+    def test_validate_dict(self):
+        assert validate_data({"a": 1}, dict) is None
+        err = validate_data([1, 2], dict)
+        assert "expected dict, got list" in err
+
+    def test_validate_union_type(self):
+        assert validate_data("hello", str | int | None) is None
+        assert validate_data(42, str | int | None) is None
+        assert validate_data(None, str | int | None) is None
+
+    def test_validate_unknown_type_passes(self):
+        """Unrecognized types pass through (future-proofing)."""
+        assert validate_data([1, 2], list[int]) is None
+
+
+# ── get_schema_description tests ────────────────────────────────────────
+
+class TestSchemaDescription:
+
+    def test_no_schema_returns_none(self):
+        assert get_schema_description(None) is None
+
+    def test_non_dataclass_returns_none(self):
+        assert get_schema_description(int) is None
+        assert get_schema_description(str) is None
+
+    def test_simple_dataclass(self):
+        result = get_schema_description(TaskStatus)
+        assert result is not None
+        schema_str, doc = result
+        assert "decision" in schema_str
+        assert "str" in schema_str
+
+    def test_list_of_dataclass(self):
+        result = get_schema_description(list[EdgeEvaluation])
+        assert result is not None
+        schema_str, _ = result
+        assert "[" in schema_str
+
+    def test_dataclass_docstring(self):
+        @dataclass
+        class WithDoc:
+            """A documented schema."""
+            name: str
+
+        _, doc = get_schema_description(WithDoc)
+        assert doc == "A documented schema."

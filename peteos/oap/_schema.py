@@ -115,10 +115,25 @@ def validate_data(data: Any, schema: type | None) -> str | None:
         inner_type = args[0]
         for item in data:
             if isinstance(item, dict):
-                for field in dataclasses.fields(inner_type):
-                    if field.name not in item:
-                        return f"Error: missing required field '{field.name}' in list item"
+                declared = [f.name for f in dataclasses.fields(inner_type)]
+                for name in declared:
+                    if name not in item:
+                        return f"Error: missing required field '{name}' in list item"
+                for key in item:
+                    if key not in declared:
+                        return f"Error: unexpected key '{key}' in list item for schema {inner_type.__name__}. Expected fields: {', '.join(sorted(declared))}"
                 return None
+        return None
+    if is_dataclass(schema):
+        if not isinstance(data, dict):
+            return "Error: expected dict, got " + type(data).__name__
+        declared = [f.name for f in dataclasses.fields(schema)]
+        for name in declared:
+            if name not in data:
+                return f"Error: missing required field '{name}' in schema {schema.__name__}"
+        for key in data:
+            if key not in declared:
+                return f"Error: unexpected key '{key}' in schema {schema.__name__}. Expected fields: {', '.join(sorted(declared))}"
         return None
     if schema is str:
         if not isinstance(data, str):

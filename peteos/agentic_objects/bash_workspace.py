@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING
 
 from peteos.oap.base import AgenticObjectBase
 from peteos.oap.decorators import tool
+from peteos.utils import get_logger
+
+_logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from peteos.engine import Runner
@@ -117,7 +120,7 @@ class BashWorkspace(AgenticObjectBase):
             command: The bash command to execute.
 
         Returns:
-            A string containing stdout, stderr, and exit code information.
+            A string containing exit code, stdout, and stderr information.
         """
         ws = self._setup_workspace()
 
@@ -142,6 +145,7 @@ class BashWorkspace(AgenticObjectBase):
             base = os.path.basename(command.strip().split()[0])
             return f"Error: Command '{base}' is not allowed in the sandbox."
 
+        _logger.debug("[bash_exec] ws=%s, command=%r", ws, command)
         try:
             result = subprocess.run(
                 ["/bin/sh", "-c", command],
@@ -151,14 +155,14 @@ class BashWorkspace(AgenticObjectBase):
                 text=True,
                 timeout=30,
             )
-            output = ""
+            _logger.debug("[bash_exec] stdout=%r, stderr=%r, returncode=%d", result.stdout, result.stderr, result.returncode)
+            output = f"exit_code: {result.returncode}"
             if result.stdout:
-                output += f"stdout:\n{result.stdout}"
+                output += f"\nstdout:\n{result.stdout}"
             if result.stderr:
-                output += f"stderr:\n{result.stderr}"
-            if not output:
+                output += f"\nstderr:\n{result.stderr}"
+            if not result.stdout and not result.stderr:
                 output = "(no output)"
-            output += f"\nexit_code: {result.returncode}"
             return output
         except subprocess.TimeoutExpired:
             return "Error: Command timed out after 30 seconds."
@@ -186,7 +190,7 @@ class BashWorkspace(AgenticObjectBase):
             return f"Error: File name '{name}' is not allowed."
         try:
             filepath.write_text(content)
-            return f"OK: File '{name}' placed in workspace."
+            return f"OK: File '{name}' successfully written."
         except Exception as e:
             return f"Error: Failed to write '{name}': {e}"
 

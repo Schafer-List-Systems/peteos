@@ -173,26 +173,112 @@ class TestBashWorkspace:
         assert obj.workspace_dir.is_dir()
 
 
-class TestBashWorkspaceIntegration:
-    """End-to-end tests using invoke_agent with a mock backend.
+class TestBashWorkspaceMultiStepWorkflows:
+    """Manual tool-call workflows simulating what an agent would do.
 
-    These tests require a live LLM backend (same as PdfTranscriber tests).
+    These prove the tools compose correctly — the agent can just call them
+    in the right order. This isolates LLM failures from tool failures.
     """
 
-    @pytest.mark.oap
-    async def test_agent_can_read_and_transform_file(self):
-        """Test the agent can use put_file + bash_exec + get_file together."""
+    def test_put_then_count_lines(self):
+        """Simulates agent: put file → wc -l → parse count."""
         obj = BashWorkspace()
-        result = await obj.invoke_agent(
-            prompt=(
-                "Place a file called 'numbers.txt' with content "
-                "'10\\n20\\n30\\n40\\n50'. Then count how many lines "
-                "it has using bash and put the count into 'count.txt'. "
-                "Return the content of count.txt using produce_output."
-            ),
-            output_schema=str,
-            timeout=60,
-        )
-        assert isinstance(result, (str, Error))
-        if isinstance(result, str):
-            assert "5" in result
+        obj.put_file("nums.txt", "10\n20\n30\n40\n50\n")
+        result = obj.bash_exec("wc -l nums.txt")
+        assert "5" in result
+
+    def test_put_then_grep_then_sort(self):
+        """Simulates agent: put file → grep lines → sort → return list."""
+        obj = BashWorkspace()
+        obj.put_file("words.txt", "apple\nbanana\napricot\ncherry\navocado\n")
+        result = obj.bash_exec("grep '^a' words.txt | sort")
+        assert "apple" in result
+        assert "apricot" in result
+        assert "avocado" in result
+        assert "banana" not in result
+
+    def test_put_then_sha256(self):
+        """Simulates agent: put file → sha256sum → return hex digest."""
+        obj = BashWorkspace()
+        obj.put_file("hashme.txt", "hello")
+        result = obj.bash_exec("sha256sum hashme.txt")
+        assert "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" in result
+
+    def test_put_then_wc_words(self):
+        """Simulates agent: put file → wc -w → count words."""
+        obj = BashWorkspace()
+        obj.put_file("text.txt", "the quick brown fox jumps over the lazy dog")
+        result = obj.bash_exec("wc -w text.txt")
+        assert "9" in result
+
+    def test_put_then_subdir_move(self):
+        """Simulates agent: put file → mkdir → mv → ls to verify."""
+        obj = BashWorkspace()
+        obj.put_file("data.txt", "hello")
+        obj.bash_exec("mkdir out && mv data.txt out/")
+        result = obj.bash_exec("ls out/")
+        assert "data.txt" in result
+
+    def test_put_then_cat_verify(self):
+        """Simulates agent: put file → bash exec → get_file to verify."""
+        obj = BashWorkspace()
+        obj.put_file("verify.txt", "original content")
+        obj.bash_exec("cat verify.txt | tr 'a-z' 'A-Z' > upper.txt")
+        result = obj.get_file("upper.txt")
+        assert result == "ORIGINAL CONTENT"
+
+    def test_put_then_grep_count(self):
+        """Simulates agent: put file → grep → wc -l to count matches."""
+        obj = BashWorkspace()
+        obj.put_file("data.txt", "line with error\nall good\nbad line\nalso good\n")
+        result = obj.bash_exec("grep -i 'error\\|bad' data.txt | wc -l")
+        assert "2" in result
+
+    def test_put_then_base64_encode_decode(self):
+        """Simulates agent: put file → base64 encode → decode → verify."""
+        obj = BashWorkspace()
+        obj.put_file("original.txt", "secret data")
+        obj.bash_exec("base64 original.txt > encoded.txt")
+        result = obj.get_file("encoded.txt")
+        assert len(result) > 10  # base64 output is longer than input
+        # Decode and verify roundtrip
+        obj.bash_exec("base64 -d encoded.txt > decoded.txt")
+        result = obj.get_file("decoded.txt")
+        assert result == "secret data"
+
+    def test_full_line_count_workflow(self):
+        """Full workflow: write 5-line file, count lines, get_file to read it."""
+        obj = BashWorkspace()
+        obj.put_file("lines.txt", "one\ntwo\nthree\nfour\nfive\n")
+        count_result = obj.bash_exec("wc -l lines.txt")
+        assert "5" in count_result
+        content = obj.get_file("lines.txt")
+        assert content == "one\ntwo\nthree\nfour\nfive\n"
+
+    def test_full_grep_workflow(self):
+        """Full workflow: write words, grep for matches, verify output."""
+        obj = BashWorkspace()
+        obj.put_file("items.txt", "cat\ndog\ncamel\ncow\nelephant\n")
+        result = obj.bash_exec("grep '^c' items.txt | sort")
+        assert "camel" in result
+        assert "cat" in result
+        assert "cow" in result
+        assert "dog" not in result
+
+    def test_workspace_persistence_across_tools(self):
+        """Multiple tool calls on the same workspace should see the same state."""
+        obj = BashWorkspace()
+        obj.put_file("file1.txt", "first")
+        obj.put_file("file2.txt", "second")
+        files = obj.bash_exec("ls")
+        assert "file1.txt" in files
+        assert "file2.txt" in files
+        # get_file should see both
+        assert obj.get_file("file1.txt") == "first"
+        assert obj.get_file("file2.txt") == "second"
+
+    def test_bash_exec_chained_commands(self):
+        """Test that && chains work within the sandbox."""
+        obj = BashWorkspace()
+        result = obj.bash_exec("mkdir -p a/b/c && echo 'deep' > a/b/c/deep.txt && cat a/b/c/deep.txt")
+        assert "deep" in result
