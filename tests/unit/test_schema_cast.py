@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 import pytest
 
-from peteos.oap._schema import _recursive_cast, get_schema_description, parse_data, validate_data
+from peteos.oap._schema import _recursive_cast, get_schema_description, parse_data
 
 
 # ── Example 1: Simple scalar dataclass ───────────────────────────────
@@ -236,6 +237,13 @@ class TestRecursiveCast:
         """Unrecognised types pass through unchanged."""
         assert _recursive_cast([1, 2, 3], list) == [1, 2, 3]
         assert _recursive_cast({"a": 1}, dict) == {"a": 1}
+        # list[int] now validates and casts elements
+        assert _recursive_cast([1, 2, 3], list[int]) == [1, 2, 3]
+
+    def test_11c_no_schema_match_raises(self):
+        """No matching schema type raises ValueError."""
+        with pytest.raises(ValueError, match="no matching schema"):
+            _recursive_cast(42, object)
 
 
 class TestParseData:
@@ -291,112 +299,160 @@ class TestParseData:
             parse_data('{}', TaskStatus)
 
 
-# ── validate_data tests ────────────────────────────────────────────────
+# ── Scalar and shape validation via parse_data ─────────────────────────
+# Validation moved into _recursive_cast; these tests exercise it
+# through parse_data (the entry point).
 
-class TestValidateData:
+class TestScalarValidation:
 
-    def test_validate_no_schema_is_valid(self):
-        assert validate_data({"anything": 42}, None) is None
+    def test_parse_data_no_schema_returns_raw(self):
+        assert parse_data("hello", None) == "hello"
 
-    def test_validate_list_dataclass_missing_field(self):
-        err = validate_data(
-            [{"edge_id": "A"}],
-            list[EdgeEvaluation],
-        )
-        assert "missing required field" in err
+    def test_parse_str_valid(self):
+        assert parse_data('"hello"', str) == "hello"
 
-    def test_validate_list_dataclass_extra_key(self):
-        err = validate_data(
-            [{"edge_id": "A", "met": True, "bogus": "field"}],
-            list[EdgeEvaluation],
-        )
-        assert "unexpected key 'bogus'" in err
+    def test_parse_str_invalid(self):
+        with pytest.raises(ValueError, match="expected str, got int"):
+            parse_data("42", str)
 
-    def test_validate_list_dataclass_valid(self):
-        assert validate_data(
-            [{"edge_id": "A", "met": True}],
-            list[EdgeEvaluation],
-        ) is None
+    def test_parse_int_valid(self):
+        assert parse_data("42", int) == 42
 
-    def test_validate_list_dataclass_empty_list(self):
-        assert validate_data([], list[EdgeEvaluation]) is None
+    def test_parse_int_not_float(self):
+        with pytest.raises(ValueError, match="expected int, got float"):
+            parse_data("3.14", int)
 
-    def test_validate_list_dataclass_not_list(self):
-        err = validate_data({"edge_id": "A"}, list[EdgeEvaluation])
-        assert "expected list, got dict" in err
+    def test_parse_int_not_bool(self):
+        with pytest.raises(ValueError, match="expected int, got bool"):
+            parse_data("true", int)
 
-    def test_validate_list_dataclass_item_not_dict(self):
-        err = validate_data([42], list[EdgeEvaluation])
-        # non-dict items bypass field checks → valid
-        assert validate_data([42], list[EdgeEvaluation]) is None
+    def test_parse_float_valid(self):
+        assert parse_data("3.14", float) == 3.14
+        assert parse_data("3", float) == 3
 
-    def test_validate_dataclass_missing_field(self):
-        err = validate_data(
-            {"decision": "ready"},
-            TaskStatus,
-        )
-        assert err is None
+    def test_parse_float_not_bool(self):
+        with pytest.raises(ValueError, match="expected float, got bool"):
+            parse_data("true", float)
 
-    def test_validate_dataclass_extra_key(self):
-        err = validate_data(
-            {"decision": "ready", "bogus": True},
-            TaskStatus,
-        )
-        assert "unexpected key 'bogus'" in err
+    def test_parse_bool_valid(self):
+        assert parse_data("true", bool) is True
+        assert parse_data("false", bool) is False
 
-    def test_validate_dataclass_valid(self):
-        assert validate_data({"decision": "ready"}, TaskStatus) is None
+    def test_parse_bool_not_int(self):
+        with pytest.raises(ValueError, match="expected bool, got int"):
+            parse_data("1", bool)
 
-    def test_validate_dataclass_not_dict(self):
-        err = validate_data("string", TaskStatus)
-        assert "expected dict, got str" in err
+    def test_parse_list_valid(self):
+        assert parse_data("[1, 2]", list) == [1, 2]
 
-    def test_validate_dataclass_missing_required_field(self):
-        err = validate_data({}, TaskStatus)
-        assert "missing required field" in err
+    def test_parse_list_not_str(self):
+        with pytest.raises(ValueError, match="expected list, got str"):
+            parse_data('"not a list"', list)
 
-    def test_validate_str(self):
-        assert validate_data("hello", str) is None
-        err = validate_data(42, str)
-        assert "expected str, got int" in err
+    def test_parse_dict_valid(self):
+        assert parse_data('{"a": 1}', dict) == {"a": 1}
 
-    def test_validate_int(self):
-        assert validate_data(42, int) is None
-        err = validate_data(3.14, int)
-        assert "expected int, got float" in err
-        err = validate_data(True, int)
-        assert "expected int, got bool" in err
+    def test_parse_dict_not_list(self):
+        with pytest.raises(ValueError, match="expected dict, got list"):
+            parse_data('[1, 2]', dict)
 
-    def test_validate_float(self):
-        assert validate_data(3.14, float) is None
-        assert validate_data(3, float) is None
-        err = validate_data(True, float)
-        assert "expected float, got bool" in err
+    def test_parse_union_type(self):
+        assert parse_data('"hello"', str | int | None) == "hello"
+        assert parse_data("42", str | int | None) == 42
+        assert parse_data("null", str | int | None) is None
 
-    def test_validate_bool(self):
-        assert validate_data(True, bool) is None
-        assert validate_data(False, bool) is None
-        err = validate_data(1, bool)
-        assert "expected bool, got int" in err
+    def test_parse_list_int(self):
+        """list[int] validates container and casts elements."""
+        assert parse_data("[1, 2, 3]", list[int]) == [1, 2, 3]
 
-    def test_validate_list_generic(self):
-        assert validate_data([1, 2], list) is None
-        err = validate_data("not a list", list)
-        assert "expected list, got str" in err
+    def test_parse_dataclass_extra_key_raises(self):
+        with pytest.raises(ValueError, match="unexpected key"):
+            parse_data('{"decision": "ready", "unknown_field": "oops"}', TaskStatus)
 
-    def test_validate_dict(self):
-        assert validate_data({"a": 1}, dict) is None
-        err = validate_data([1, 2], dict)
-        assert "expected dict, got list" in err
+    def test_parse_dataclass_missing_field_raises(self):
+        with pytest.raises(ValueError, match="missing required"):
+            parse_data('{}', TaskStatus)
 
-    def test_validate_union_type(self):
-        assert validate_data("hello", str | int | None) is None
-        assert validate_data(42, str | int | None) is None
-        assert validate_data(None, str | int | None) is None
+    def test_parse_dataclass_valid(self):
+        result = parse_data('{"decision": "ready"}', TaskStatus)
+        assert isinstance(result, TaskStatus)
+        assert result.decision == "ready"
 
-    def test_validate_unknown_type_passes(self):
-        """Unrecognized types pass through (future-proofing)."""
-        assert validate_data([1, 2], list[int]) is None
+    def test_parse_dataclass_not_dict(self):
+        with pytest.raises(ValueError):
+            parse_data('"string"', TaskStatus)
+
+    def test_parse_list_dataclass_extra_key_raises(self):
+        with pytest.raises(ValueError, match="unexpected key"):
+            parse_data('[{"edge_id": "A", "met": true, "bogus": "field"}]', list[EdgeEvaluation])
+
+    def test_parse_list_dataclass_missing_field_raises(self):
+        with pytest.raises(ValueError, match="missing required"):
+            parse_data('[{"edge_id": "A"}]', list[EdgeEvaluation])
+
+    def test_parse_list_dataclass_not_list_raises(self):
+        with pytest.raises(ValueError, match="expected list, got dict"):
+            parse_data('{"edge_id": "A"}', list[EdgeEvaluation])
+
+    def test_parse_list_dataclass_empty_list(self):
+        result = parse_data('[]', list[EdgeEvaluation])
+        assert result == []
+
+    def test_parse_list_dataclass_valid(self):
+        result = parse_data('[{"edge_id": "A", "met": true}]', list[EdgeEvaluation])
+        assert len(result) == 1
+        assert isinstance(result[0], EdgeEvaluation)
+
+
+# ── Enum support ───────────────────────────────────────────────────────
+
+class Color(Enum):
+    RED = "red"
+    GREEN = "green"
+    BLUE = "blue"
+
+
+class TestEnumSupport:
+
+    def test_recursive_cast_enum_valid(self):
+        result = _recursive_cast("red", Color)
+        assert result is Color.RED
+
+    def test_recursive_cast_enum_invalid_raises(self):
+        with pytest.raises(ValueError, match="expected Color, got str"):
+            _recursive_cast("purple", Color)
+
+    def test_parse_data_enum_valid(self):
+        result = parse_data('"red"', Color)
+        assert result is Color.RED
+
+    def test_parse_data_enum_invalid_raises(self):
+        with pytest.raises(ValueError, match="expected Color"):
+            parse_data('"purple"', Color)
+
+    def test_recursive_cast_enum_in_dataclass(self):
+        @dataclass
+        class Ticket:
+            color: Color
+
+        result = _recursive_cast({"color": "blue"}, Ticket)
+        assert isinstance(result, Ticket)
+        assert result.color is Color.BLUE
+
+    def test_parse_data_enum_in_dataclass(self):
+        @dataclass
+        class Task:
+            priority: str
+            color: Color
+
+        result = parse_data('{"priority": "high", "color": "green"}', Task)
+        assert isinstance(result, Task)
+        assert result.color is Color.GREEN
+        assert result.priority == "high"
+
+    def test_recursive_cast_enum_in_list(self):
+        result = _recursive_cast(["red", "blue"], list[Color])
+        assert result == [Color.RED, Color.BLUE]
 
 
 # ── get_schema_description tests ────────────────────────────────────────
@@ -406,9 +462,11 @@ class TestSchemaDescription:
     def test_no_schema_returns_none(self):
         assert get_schema_description(None) is None
 
-    def test_non_dataclass_returns_none(self):
-        assert get_schema_description(int) is None
-        assert get_schema_description(str) is None
+    def test_scalar_schema_description(self):
+        assert get_schema_description(int) == ("123", "integer type")
+        assert get_schema_description(str) == ('"string"', "string type")
+        assert get_schema_description(bool) == ("true", "boolean type")
+        assert get_schema_description(float) == ("1.0", "float type")
 
     def test_simple_dataclass(self):
         result = get_schema_description(TaskStatus)
