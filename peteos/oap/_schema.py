@@ -34,6 +34,12 @@ def parse_data(raw: str, schema: type | None) -> Any:
     Returns the parsed data cast to the schema type (dataclass instances,
     list[dataclass], etc.) or raises ValueError on any failure.
 
+    When JSON parsing fails and the schema is a scalar type (str, int,
+    float, bool, Enum), treats the raw string as the actual value and
+    casts it directly. This handles LLMs that return bare strings
+    (e.g. ``"string_argument"``) instead of JSON-encoded strings
+    (e.g. ``"\"string_argument\""``).
+
     Args:
         raw: The raw JSON string from the agent.
         schema: The expected output schema type.
@@ -49,8 +55,17 @@ def parse_data(raw: str, schema: type | None) -> Any:
 
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"invalid JSON: {e}") from e
+    except json.JSONDecodeError:
+        # Fallback for scalar schemas: interpret raw string directly.
+        # Complex types (dataclass, list) fundamentally need JSON syntax,
+        # so we only handle scalars and Enums here.
+        origin = get_origin(schema)
+        args = get_args(schema)
+        is_enum = origin is None and isinstance(schema, type) and issubclass(schema, Enum)
+        is_scalar = schema in (str, int, float, bool)
+        if is_enum or is_scalar:
+            return _recursive_cast(raw, schema)
+        raise
 
     return _recursive_cast(parsed, schema)
 
@@ -99,7 +114,7 @@ def get_schema_description(schema: type | None) -> tuple[str, str] | None:
         allowed = ", ".join(f'"{m.value}"' for m in schema)
         docstring = (schema.__doc__ or "").strip()
         return (
-            f'{schema.__name__} is one of the following strings: {allowed}.',
+            f'{schema.__name__} is a placeholder for one of the following strings: {allowed}.',
             docstring if docstring else ''
         )
 
@@ -268,33 +283,33 @@ def _recursive_cast(data: Any, schema: type) -> Any:
             return schema(data)
         except (ValueError, TypeError):
             raise ValueError(
-                f"expected {schema.__name__}, got {type(data).__name__}"
+                f"Expected a {schema.__name__} string. Got instead: {type(data).__name__} {data!r}"
             )
 
     # Scalar: strict type checks
     if schema is int:
         if not isinstance(data, int) or isinstance(data, bool):
-            raise ValueError(f"expected int, got {type(data).__name__}")
+            raise ValueError(f"expected int. Got instead: {type(data).__name__} {data!r}")
         return data
     if schema is float:
         if not isinstance(data, (int, float)) or isinstance(data, bool):
-            raise ValueError(f"expected float, got {type(data).__name__}")
+            raise ValueError(f"expected float. Got instead: {type(data).__name__} {data!r}")
         return data
     if schema is bool:
         if not isinstance(data, bool):
-            raise ValueError(f"expected bool, got {type(data).__name__}")
+            raise ValueError(f"expected bool. Got instead: {type(data).__name__} {data!r}")
         return data
     if schema is str:
         if not isinstance(data, str):
-            raise ValueError(f"expected str, got {type(data).__name__}")
+            raise ValueError(f"expected str. Got instead: {type(data).__name__} {data!r}")
         return data
     if schema is list:
         if not isinstance(data, list):
-            raise ValueError(f"expected list, got {type(data).__name__}")
+            raise ValueError(f"expected list. Got instead: {type(data).__name__} {data!r}")
         return data
     if schema is dict:
         if not isinstance(data, dict):
-            raise ValueError(f"expected dict, got {type(data).__name__}")
+            raise ValueError(f"expected dict. Got instead: {type(data).__name__} {data!r}")
         return data
     if schema is str | int | float | bool | list | dict | type(None):
         return data

@@ -260,7 +260,7 @@ class TestParseData:
         assert result.decision == "ready"
 
     def test_parse_data_invalid_json_raises(self):
-        with pytest.raises(ValueError, match="invalid JSON"):
+        with pytest.raises(ValueError, match="Expecting value"):
             parse_data("not json", TaskStatus)
 
     def test_parse_data_validation_failure_raises(self):
@@ -312,18 +312,18 @@ class TestScalarValidation:
         assert parse_data('"hello"', str) == "hello"
 
     def test_parse_str_invalid(self):
-        with pytest.raises(ValueError, match="expected str, got int"):
+        with pytest.raises(ValueError, match="expected str. Got instead: int"):
             parse_data("42", str)
 
     def test_parse_int_valid(self):
         assert parse_data("42", int) == 42
 
     def test_parse_int_not_float(self):
-        with pytest.raises(ValueError, match="expected int, got float"):
+        with pytest.raises(ValueError, match="expected int. Got instead: float"):
             parse_data("3.14", int)
 
     def test_parse_int_not_bool(self):
-        with pytest.raises(ValueError, match="expected int, got bool"):
+        with pytest.raises(ValueError, match="expected int. Got instead: bool"):
             parse_data("true", int)
 
     def test_parse_float_valid(self):
@@ -331,7 +331,7 @@ class TestScalarValidation:
         assert parse_data("3", float) == 3
 
     def test_parse_float_not_bool(self):
-        with pytest.raises(ValueError, match="expected float, got bool"):
+        with pytest.raises(ValueError, match="expected float. Got instead: bool"):
             parse_data("true", float)
 
     def test_parse_bool_valid(self):
@@ -339,21 +339,21 @@ class TestScalarValidation:
         assert parse_data("false", bool) is False
 
     def test_parse_bool_not_int(self):
-        with pytest.raises(ValueError, match="expected bool, got int"):
+        with pytest.raises(ValueError, match="expected bool. Got instead: int"):
             parse_data("1", bool)
 
     def test_parse_list_valid(self):
         assert parse_data("[1, 2]", list) == [1, 2]
 
     def test_parse_list_not_str(self):
-        with pytest.raises(ValueError, match="expected list, got str"):
+        with pytest.raises(ValueError, match="expected list. Got instead: str"):
             parse_data('"not a list"', list)
 
     def test_parse_dict_valid(self):
         assert parse_data('{"a": 1}', dict) == {"a": 1}
 
     def test_parse_dict_not_list(self):
-        with pytest.raises(ValueError, match="expected dict, got list"):
+        with pytest.raises(ValueError, match="expected dict. Got instead: list"):
             parse_data('[1, 2]', dict)
 
     def test_parse_union_type(self):
@@ -391,7 +391,7 @@ class TestScalarValidation:
             parse_data('[{"edge_id": "A"}]', list[EdgeEvaluation])
 
     def test_parse_list_dataclass_not_list_raises(self):
-        with pytest.raises(ValueError, match="expected list, got dict"):
+        with pytest.raises(ValueError, match="expected list"):
             parse_data('{"edge_id": "A"}', list[EdgeEvaluation])
 
     def test_parse_list_dataclass_empty_list(self):
@@ -404,7 +404,48 @@ class TestScalarValidation:
         assert isinstance(result[0], EdgeEvaluation)
 
 
-# ── Enum support ───────────────────────────────────────────────────────
+# ── Bare-string fallback (parse_data) ──────────────────────────────────
+
+class JobRole(Enum):
+    FRONTEND = "frontend-developer"
+    BACKEND = "backend-developer"
+    FULLSTACK = "fullstack-developer"
+    NOT_FITTING = "not-fitting"
+
+
+class TestBareStringFallback:
+    """When the LLM sends a bare string instead of JSON-encoded, parse_data
+    should fall back to treating it as the raw value for scalar/Enum schemas."""
+
+    def test_parse_enum_bare_string(self):
+        """LLM sends fullstack-developer instead of \"fullstack-developer\"."""
+        result = parse_data("fullstack-developer", JobRole)
+        assert result is JobRole.FULLSTACK
+
+    def test_parse_str_bare_string(self):
+        """LLM sends hello instead of \"hello\"."""
+        result = parse_data("hello", str)
+        assert result == "hello"
+
+    def test_parse_int_bare_number(self):
+        """json.loads handles this normally, but fallback should also work."""
+        result = parse_data("42", int)
+        assert result == 42
+
+    def test_parse_dataclass_still_requires_json(self):
+        """Complex types still need JSON syntax; bare string should fail."""
+        with pytest.raises(ValueError, match="Expecting value"):
+            parse_data("hello", TaskStatus)
+
+    def test_parse_dict_still_requires_json(self):
+        """Dict schema requires JSON syntax."""
+        with pytest.raises(ValueError, match="Expecting value"):
+            parse_data("hello", dict)
+
+    def test_parse_enum_dict_value_shows_value(self):
+        """When LLM sends a dict instead of string, error shows the dict."""
+        with pytest.raises(ValueError, match="JobRole string"):
+            parse_data('{"role": "fullstack-developer"}', JobRole)
 
 class Color(Enum):
     RED = "red"
@@ -419,15 +460,19 @@ class TestEnumSupport:
         assert result is Color.RED
 
     def test_recursive_cast_enum_invalid_raises(self):
-        with pytest.raises(ValueError, match="expected Color, got str"):
+        with pytest.raises(ValueError, match="Color string"):
             _recursive_cast("purple", Color)
+
+    def test_recursive_cast_enum_invalid_shows_value(self):
+        with pytest.raises(ValueError, match="dict.*role"):
+            _recursive_cast({"role": "red"}, Color)
 
     def test_parse_data_enum_valid(self):
         result = parse_data('"red"', Color)
         assert result is Color.RED
 
     def test_parse_data_enum_invalid_raises(self):
-        with pytest.raises(ValueError, match="expected Color"):
+        with pytest.raises(ValueError, match="Color string"):
             parse_data('"purple"', Color)
 
     def test_recursive_cast_enum_in_dataclass(self):
