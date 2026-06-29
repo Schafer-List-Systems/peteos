@@ -242,10 +242,10 @@ class AgenticObjectBase:
             if desc is None:
                 hint = f"Expected a value of type {self._oap_current_output_schema.__name__}."
             else:
-                hint = f"Expected data matching: {desc[0]}."
+                hint = f"Expected data matching schema: {desc[0]}."
                 if desc[1]:
-                    hint += f" {desc[1]}."
-            return f"{e} {hint}"
+                    hint += f"\nSchema description: {desc[1]}."
+            return f"{e}\n{hint}"
 
         try:
             if runner.state.get("_oap_produced_data"):

@@ -364,6 +364,8 @@ class Runner(ActiveClass):
                 _logger.debug("[runner] step():   content_part[%d] text=%s", i, json.dumps(part.text))
             elif part.type == "tool_use":
                 _logger.debug("[runner] step():   content_part[%d] tool_use(name=%s, arguments=%s)", i, part.name, part.arguments)
+            elif part.type == "thinking":
+                _logger.debug("[runner] step():   content_part[%d] thinking=%s", i, json.dumps(part.text))
 
         # --- Phase 2: Error handling ---
         if "error" in response.data:
