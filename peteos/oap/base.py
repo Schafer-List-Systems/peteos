@@ -93,7 +93,7 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     }
 
 
-from peteos.oap._schema import get_schema_description, parse_data
+from peteos.utils._schema import get_schema_description, parse_data
 
 
 from peteos.persona.agent import Agent

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
@@ -370,7 +371,11 @@ class ExecutionEnvironment:
             _logger.warning("Tool '%s' not found", tool_name)
             return f"Error: Tool '{tool_name}' not found", False
 
-        casted_args = _cast_args_to_types(tool.func, args)
+        try:
+            casted_args = _cast_args_to_types(tool.func, args)
+        except ValueError as e:
+            _logger.debug("Tool %s argument coercion failed: %s", tool_name, e)
+            return f"Error: {e}", False
         hook_result = await self.call_hooks_deny("before_tool_execution", tool_call)
         if hook_result is not None:
             allow, message = hook_result
@@ -416,7 +421,10 @@ def _cast_args_to_types(func: Callable, args: Dict[str, Any]) -> Dict[str, Any]:
     Only casts values for parameters the LLM included in its call.
     Does not inject defaults or hallucinate missing arguments.
     """
+    from peteos.utils._schema import _recursive_cast, _resolve_type
+
     signature = inspect.signature(func)
+    globalns = dict(sys.modules[func.__module__].__dict__)
     casted_args: Dict[str, Any] = {}
 
     for param_name, value in args.items():
@@ -425,48 +433,19 @@ def _cast_args_to_types(func: Callable, args: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
         param = signature.parameters[param_name]
-        annotation = param.annotation
+        raw_annotation = param.annotation
 
-        if annotation == inspect.Parameter.empty or annotation == Any:
+        if raw_annotation == inspect.Parameter.empty or raw_annotation == Any:
             casted_args[param_name] = value
             continue
 
-        if annotation == int and isinstance(value, str):
-            try:
-                value = int(value)
-            except ValueError:
-                pass
-        elif annotation == float and isinstance(value, str):
-            try:
-                value = float(value)
-            except ValueError:
-                pass
-        elif annotation == bool and isinstance(value, str):
-            value = value.lower() in ("true", "1", "yes")
-        elif annotation == str and not isinstance(value, str):
-            value = str(value)
-        else:
-            value = _try_cast_value(value, annotation)
+        annotation = _resolve_type(raw_annotation, globalns)
 
-        casted_args[param_name] = value
+        try:
+            casted_args[param_name] = _recursive_cast(value, annotation)
+        except ValueError as e:
+            raise ValueError(
+                f"Parameter '{param_name}' of tool '{func.__name__}': {e}"
+            ) from e
 
     return casted_args
-
-
-def _try_cast_value(value: Any, target_type: type) -> Any:
-    if target_type == int and isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return value
-    elif target_type == float and isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return value
-    elif target_type == bool and isinstance(value, str):
-        return value.lower() in ("true", "1", "yes")
-    elif target_type == str:
-        return str(value)
-    else:
-        return value

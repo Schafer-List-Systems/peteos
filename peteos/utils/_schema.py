@@ -165,6 +165,7 @@ def get_schema_description(schema: type | None) -> tuple[str, str] | None:
 
 def _recursive_cast(data: Any, schema: type) -> Any:
     """Recursively cast data to a schema, handling nested dataclasses.
+    Resolves string annotations (e.g. 'str') to actual types when needed.
 
     Walks the parsed data tree and instantiates dataclass objects at every
     level.  Supports scalar types, dicts, lists, and arbitrary nesting depth.
@@ -283,7 +284,9 @@ def _recursive_cast(data: Any, schema: type) -> Any:
             return schema(data)
         except (ValueError, TypeError):
             raise ValueError(
-                f"Expected a {schema.__name__} string. Got instead: {type(data).__name__} {data!r}"
+                f"Expected {schema.__name__}, which is one of the following strings: "
+                f"{', '.join(repr(m.value) for m in schema)}. "
+                f"Got instead {type(data).__name__}: {data!r}."
             )
 
     # Scalar: strict type checks
