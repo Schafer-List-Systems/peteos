@@ -140,6 +140,20 @@ def get_schema_description(schema: type | None) -> tuple[str, str] | None:
                 parts.append(_type_name(t))
         return " | ".join(parts), ""
 
+    # Generic dict: describe as key-type → value-type
+    if origin is dict and args:
+        key_desc = get_schema_description(args[0])
+        val_desc = get_schema_description(args[1])
+        key_str = key_desc[0] if key_desc else _type_name(args[0])
+        val_str = val_desc[0] if val_desc else _type_name(args[1])
+        return (f'{{"{key_str}": {val_str}}}', f"dict with {key_str} keys and {val_str} values")
+
+    # Generic list: describe as list of inner type
+    if origin is list and args:
+        inner = get_schema_description(args[0])
+        if inner:
+            return (f"[{inner[0]}, ...]", inner[1])
+
     # Scalar primitives
     if schema is str:
         return '"string"', "string type"
@@ -261,12 +275,6 @@ def _recursive_cast(data: Any, schema: type) -> Any:
             **{f.name: _recursive_cast(data[f.name], _resolve_type(f.type, ns)) for f in dataclasses.fields(schema)}
         )
 
-    # List with inner type: validate container and cast each element
-    if origin is list:
-        if not isinstance(data, list):
-            raise ValueError(f"expected list, got {type(data).__name__}")
-        return [_recursive_cast(item, args[0]) for item in data]
-
     # Union type (e.g. Node | None): extract non-None type and cast
     is_union = origin is types.UnionType or (args and type(None) in args)
     if is_union:
@@ -291,6 +299,27 @@ def _recursive_cast(data: Any, schema: type) -> Any:
                 f"Got instead {type(data).__name__}: {data!r}."
             )
 
+    # Bare and typed list
+    if schema is list:
+        if not isinstance(data, list):
+            raise ValueError(f"expected list. Got instead: {type(data).__name__} {data!r}")
+        return data
+    if origin is list:
+        if not isinstance(data, list):
+            raise ValueError(f"expected list, got {type(data).__name__}")
+        return [_recursive_cast(item, args[0]) for item in data]
+
+    # Bare and typed dict
+    if schema is dict:
+        if not isinstance(data, dict):
+            raise ValueError(f"expected dict. Got instead: {type(data).__name__} {data!r}")
+        return data
+    if origin is dict and args:
+        if not isinstance(data, dict):
+            raise ValueError(f"expected dict, got {type(data).__name__}")
+        val_schema = args[1]
+        return {k: _recursive_cast(v, val_schema) for k, v in data.items()}
+
     # Scalar: strict type checks
     if schema is int:
         if not isinstance(data, int) or isinstance(data, bool):
@@ -307,14 +336,6 @@ def _recursive_cast(data: Any, schema: type) -> Any:
     if schema is str:
         if not isinstance(data, str):
             raise ValueError(f"expected str. Got instead: {type(data).__name__} {data!r}")
-        return data
-    if schema is list:
-        if not isinstance(data, list):
-            raise ValueError(f"expected list. Got instead: {type(data).__name__} {data!r}")
-        return data
-    if schema is dict:
-        if not isinstance(data, dict):
-            raise ValueError(f"expected dict. Got instead: {type(data).__name__} {data!r}")
         return data
     if schema is str | int | float | bool | list | dict | type(None):
         return data
