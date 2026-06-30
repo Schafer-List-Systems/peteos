@@ -166,7 +166,6 @@ class PdfTranscriber(AgenticObjectBase):
             "transcription. Preserve all text that appears in either source. "
             "If the two disagree, prefer the more complete and accurate version. "
             "Return only the unified text, nothing else. "
-            "Use the `produce_output` tool to return your result."
         )
         result = await self.invoke_agent(
             prompt=prompt,
