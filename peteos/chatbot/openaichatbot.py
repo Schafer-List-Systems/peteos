@@ -21,6 +21,7 @@ class OpenAIChatBot(ChatBot):
 
     DEFAULT_CHAT_ENDPOINT = "/v1/chat/completions"
     DEFAULT_MODELS_ENDPOINT = "/v1/models"
+    DEFAULT_MAX_TOKENS = 4096
 
     # Default translation configuration for OpenAI API
     # Translates OpenAI SSE events to uniform delta format
@@ -112,6 +113,8 @@ class OpenAIChatBot(ChatBot):
             bot_cfg["response_translations"] = self.RESPONSE_TRANSLATIONS
         if bot_cfg.get("request_translations") is None:
             bot_cfg["request_translations"] = self.REQUEST_TRANSLATIONS
+        if bot_cfg.get("max_tokens") is None:
+            bot_cfg["max_tokens"] = self.DEFAULT_MAX_TOKENS
         super().__init__(http_client, ChatBotConfig.from_dict(bot_cfg))
         self._models: List[str] = []
 
@@ -187,11 +190,10 @@ class OpenAIChatBot(ChatBot):
                     if part.type == "tool_result":
                         msg_dict = {
                             "role": "tool",
-                            "name": part.name or "unknown",
-                            "content": part.content or ""
+                            "tool_call_id": part.call_id,
+                            "content": part.content
                         }
                         messages.append(msg_dict)
-                        break
             elif role in ("user", "assistant", "system"):
                 # Conversation messages
                 msg_dict = {"role": role}
@@ -200,16 +202,15 @@ class OpenAIChatBot(ChatBot):
 
                 for part in msg.content:
                     raw = part.raw_dict
-                    if raw.get("type") == "tool_calls":
-                        for tool_call in raw.get("tool_calls", []):
-                            tool_calls.append({
-                                "type": "function",
-                                "id": tool_call.get("id"),
-                                "function": {
-                                    "name": tool_call.get("name"),
-                                    "arguments": tool_call.get("arguments", "")
-                                }
-                            })
+                    if raw.get("type") == "tool_use":
+                        tool_calls.append({
+                            "type": "function",
+                            "id": raw["call_id"],
+                            "function": {
+                                "name": raw["name"],
+                                "arguments": raw["arguments"]
+                            }
+                        })
                     elif raw.get("type") == "image":
                         # Transform Anthropic image format to OpenAI image_url format
                         source = raw.get("source", {})
