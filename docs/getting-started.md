@@ -167,7 +167,7 @@ Returning a value makes the result visible to the agent; if the function returns
 
 Enable the agent to run Python code in a restricted sandbox by decorating the class with `@agentic_object(allow_code_execution=True)`.
 This enables a hidden tool called `python_exec` that the agent can call.
-Code executed in the sandbox can access the agentic object through the `this` variable:
+Code executed in the sandbox can access the agentic object through the `self` parameter:
 
 ```python
 @agentic_object(allow_code_execution=True)
