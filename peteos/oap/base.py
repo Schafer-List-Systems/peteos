@@ -118,6 +118,7 @@ class AgenticObjectBase:
         self._oap_thread_store: dict[str, str] = {}
         self._register_tools()
         self._register_output_schema_hook()
+        self._register_sandbox_hook()
         self._register_sandbox_tool()
         self._register_media_tool()
         self._oap_agent: Agent = self._create_agent()
@@ -179,6 +180,33 @@ class AgenticObjectBase:
             "Any value (string, array, or dict) is acceptable."
         )
 
+    def _register_sandbox_hook(self) -> None:
+        """Register the python_exec system prompt hook when code execution is enabled."""
+        config = _collect_oap_config(self.__class__)
+        if not config.get("allow_code_execution", False):
+            return
+        self._oap_role.add_system_prompt_hook(self._python_exec_system_prompt_hook)
+
+    def _python_exec_system_prompt_hook(self) -> str:
+        """System prompt hook: instructs the agent on using the python_exec tool."""
+        imports = _collect_oap_config(self.__class__).get("imports")
+        imports_str = ""
+        if imports:
+            mods_list = ", ".join(
+                m.__name__ if hasattr(m, "__name__") else str(m) for m in imports
+            )
+            imports_str = f"\nAvailable modules: {mods_list}."
+        return (
+            "# Code Execution\n\n"
+            "You have the `python_exec` tool that runs Python code in a restricted sandbox.\n"
+            "Usage: call `python_exec(code='...')` where `code` contains exactly one function.\n"
+            "The function must be named `func` and have the signature `func(self)`.\n"
+            "`self` refers to the agentic object instance — you can call its tools and access its attributes.\n"
+            "The function must return the final result (not print it).\n"
+            f"{imports_str}\n"
+            "Forbidden: __builtins__, __import__, network access, filesystem I/O."
+        )
+
     def _register_sandbox_tool(self) -> None:
         """Register python_exec tool when allow_code_execution is enabled on the class or any ancestor."""
         config = _collect_oap_config(self.__class__)
@@ -225,6 +253,8 @@ class AgenticObjectBase:
                 except AttributeError:
                     continue
                 if argcount in (0, 1):
+                    if argcount == 1 and obj.__code__.co_varnames[0] != "self":
+                        continue
                     new_funcs.append(k)
             if len(new_funcs) != 1:
                 return (
