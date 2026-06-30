@@ -9,6 +9,40 @@ Finally, you will see how to set up an agentic object and use it.
 
 ## Installation
 
+Create a Python virtual environment and activate it:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Clone the repository, then install Peteos:
+
+```bash
+git clone https://github.com/yourusername/peteos.git
+cd peteos
+pip install .
+```
+
+This installs Peteos as a package so you can `import peteos` from your own code.
+
+Peteos requires Python 3.10 or later. Its core dependencies are `aiohttp`, `httpx`, and `tiktoken` (for token counting). If you plan to use camera-related agentic objects, install the optional extras:
+
+```bash
+pip install ".[camera]"
+```
+
+For development, install the test and lint dependencies:
+
+```bash
+pip install -e ".[dev]"
+```
+
+The `-e` flag installs Peteos in editable (development) mode, so changes to the source are reflected immediately without needing to reinstall.
+
+
+## Setting Up the Environment
+
 > _[Placeholder: Install instructions._]
 
 ## Setting Up the Environment
