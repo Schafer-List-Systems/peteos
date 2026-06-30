@@ -25,7 +25,9 @@ def _resolve_type(hint: Any, globalns: dict | None = None) -> type:
     """
     if isinstance(hint, type):
         return hint
-    return eval(hint, globalns or {}, {})  # noqa: S307
+    if isinstance(hint, str):
+        return eval(hint, globalns or {}, {})  # noqa: S307
+    return hint  # generic alias (list[...], dict[...], etc.) — already a valid type
 
 
 def parse_data(raw: str, schema: type | None) -> Any:
