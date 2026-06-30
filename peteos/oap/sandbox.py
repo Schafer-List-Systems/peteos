@@ -56,10 +56,12 @@ def build_sandbox_description(imports: list[object] | None = None) -> str:
         Description string listing available modules if any.
     """
     prompt = (
-        "Write a function `func(self)` that returns the result. "
-        "`self` refers to the agentic object. "
-        "Define exactly one function — the harness will find and execute it."
-        " No __builtins__, no __import__, no network, no filesystem."
+        "The value must be a Python function with the exact signature "
+        "`func(self)` where `self` is the agentic object instance. "
+        "Define exactly one function named `func` — the harness will find "
+        "and execute it. The function must return the final result (not print it). "
+        "Alternatively, you can `return self.produce_output(result)` directly. "
+        "Forbidden: __builtins__, __import__, network, filesystem."
     )
     if imports:
         mods_list = ", ".join(
