@@ -7,11 +7,15 @@ name = "peteos"
 version = "0.0.1"
 description = "Agentic application framework"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "aiohttp>=3.9.0",
+    "httpx>=0.27.0",
+    "tiktoken>=0.7.0",
+]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "aiohttp"]
-tiktoken = ["tiktoken>=0.7.0"]
+dev = ["pytest", "pytest-asyncio"]
+camera = ["opencv-python>=4.8.0", "numpy>=1.24.0"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
