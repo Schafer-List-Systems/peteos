@@ -79,7 +79,7 @@ def create_sandbox_globals(
     """Create a restricted globals dict for exec() in the sandbox.
 
     Args:
-        self_obj: The AgenticObjectBase instance to expose as `this`.
+        self_obj: The AgenticObjectBase instance, available as `self` in sandbox functions.
         runner: The Runner instance used to inject into produce_output / produce_error.
         config: MRO-merged OAP config dict with 'imports' and 'import_aliases' keys.
 
@@ -97,7 +97,6 @@ def create_sandbox_globals(
     import_aliases = config.get("import_aliases", {})
     globals_dict: dict[str, Any] = {
         "__builtins__": {**_SAFE_BUILTINS, "__import__": lambda name, *_a, **_kw: _restricted_import(name, registry)},
-        "this": self_obj,
         "produce_output": produce_output,
         "produce_error": produce_error,
     }
