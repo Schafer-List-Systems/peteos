@@ -93,7 +93,7 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     }
 
 
-from peteos.oap._schema import get_schema_description, parse_data
+from peteos.utils._schema import get_schema_description, parse_data
 
 
 from peteos.persona.agent import Agent
@@ -210,10 +210,30 @@ class AgenticObjectBase:
         """Protected tool: executes sandboxed Python code."""
         config = _collect_oap_config(self.__class__)
         sandbox_globals = create_sandbox_globals(self, config)
+        original_keys = set(sandbox_globals.keys())
 
         try:
             exec(code, sandbox_globals)
-            return "OK"
+            new_keys = set(sandbox_globals.keys()) - original_keys
+            new_funcs: list[str] = []
+            for k in new_keys:
+                obj = sandbox_globals[k]
+                if not callable(obj) or not hasattr(obj, "__code__"):
+                    continue
+                try:
+                    argcount = obj.__code__.co_argcount
+                except AttributeError:
+                    continue
+                if argcount in (0, 1):
+                    new_funcs.append(k)
+            if len(new_funcs) != 1:
+                return (
+                    "Error: expected exactly one new function. "
+                    f"Found: {new_funcs}."
+                )
+            name = new_funcs[0]
+            obj = sandbox_globals[name]
+            return obj(self) if obj.__code__.co_argcount == 1 else obj()
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
 

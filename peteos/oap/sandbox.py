@@ -55,17 +55,18 @@ def build_sandbox_description(imports: list[object] | None = None) -> str:
     Returns:
         Description string listing available modules if any.
     """
+    prompt = (
+        "Write a function `func(self)` that returns the result. "
+        "`self` refers to the agentic object. "
+        "Define exactly one function — the harness will find and execute it."
+        " No __builtins__, no __import__, no network, no filesystem."
+    )
     if imports:
         mods_list = ", ".join(
             m.__name__ if hasattr(m, "__name__") else str(m) for m in imports
         )
-        return (
-            f"Execute sandboxed Python code. Access the agentic object via `this`."
-            f" Agentic tools can also be called on this (e.g. `this.produce_output`). "
-            f" No __builtins__, no __import__, no network, no filesystem."
-            f" Available modules: {mods_list}."
-        )
-    return ""
+        prompt += f" Imported modules: {mods_list}."
+    return prompt
 
 
 def create_sandbox_globals(
