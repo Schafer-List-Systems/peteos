@@ -19,7 +19,7 @@ class BackendConfig:
         chat_endpoint: Custom chat endpoint (default: API-specific).
         models_endpoint: Custom models endpoint (default: API-specific).
         streaming: Use streaming mode by default.
-        max_tokens: Maximum tokens to generate (Anthropic default: 4096).
+        max_tokens: Maximum tokens to generate (set per-API-type in chatbot __init__).
     """
 
     name: str
@@ -27,8 +27,8 @@ class BackendConfig:
     api_type: Optional[str] = None
     chat_endpoint: Optional[str] = None
     models_endpoint: Optional[str] = None
-    streaming: bool = True
-    max_tokens: int = 4096
+    streaming: bool = False
+    max_tokens: Optional[int] = None
     retry_delays: Optional[list[float]] = None
 
     @classmethod
