@@ -60,7 +60,7 @@ def build_sandbox_description(imports: list[object] | None = None) -> str:
         "`func(self)` where `self` is the agentic object instance. "
         "Define exactly one function named `func` — the harness will find "
         "and execute it. The function must return the final result (not print it). "
-        "Alternatively, you can `return self.produce_output(result)` directly. "
+        "Use `produce_output(result)` or `produce_error(message)` to return data or signal failure. "
         "Forbidden: __builtins__, __import__, network, filesystem."
     )
     if imports:
@@ -73,23 +73,33 @@ def build_sandbox_description(imports: list[object] | None = None) -> str:
 
 def create_sandbox_globals(
     self_obj: AgenticObjectBase,
+    runner: Any,
     config: dict[str, Any],
 ) -> dict[str, Any]:
     """Create a restricted globals dict for exec() in the sandbox.
 
     Args:
         self_obj: The AgenticObjectBase instance to expose as `this`.
+        runner: The Runner instance used to inject into produce_output / produce_error.
         config: MRO-merged OAP config dict with 'imports' and 'import_aliases' keys.
 
     Returns:
         Globals dict ready for exec().
     """
+    def produce_output(data: str) -> str:
+        return self_obj._produce_output(data, runner=runner)
+
+    def produce_error(message: str) -> str:
+        return self_obj._produce_error(message, runner=runner)
+
     registry: dict[str, Any] = {}
     imports = config.get("imports", [])
     import_aliases = config.get("import_aliases", {})
     globals_dict: dict[str, Any] = {
         "__builtins__": {**_SAFE_BUILTINS, "__import__": lambda name, *_a, **_kw: _restricted_import(name, registry)},
         "this": self_obj,
+        "produce_output": produce_output,
+        "produce_error": produce_error,
     }
     if imports:
         for mod in imports:

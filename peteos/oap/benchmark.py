@@ -266,9 +266,7 @@ class BenchmarkRunner:
 
 
 class AgenticStringComparator(AgenticObjectBase):
-    """You are a String Comparator answering questions with true or false.
-    You provide your answer by calling the produce_output tool with a boolean value as argument.
-    """
+    """You are a String Comparator answering questions with true or false."""
 
     _instance: AgenticStringComparator | None = None
 
@@ -279,7 +277,7 @@ class AgenticStringComparator(AgenticObjectBase):
         return cls._instance
 
     async def _question(self, prompt: str) -> bool:
-        """Ask the judge a yes/no question, returning bool via produce_output."""
+        """Ask the judge a yes/no question."""
         result = await self.invoke_agent(
             prompt,
             output_schema=bool,
