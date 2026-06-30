@@ -40,6 +40,7 @@ pip install .
 - **Sandboxed code execution** — let agents run Python in a restricted sandbox.
 - **Persistent sessions** — threads, memory, and sub-agent coordination via `persistent_thread_id`.
 - **Chatbot backends** — configure OpenAI and Anthropic-compatible local AI servers via a singleton manager.
+- **Test-driven development** — OOP-aligned unit but Monte Carlo iterations for non-deterministic behavior.
 
 ## Resources
 
