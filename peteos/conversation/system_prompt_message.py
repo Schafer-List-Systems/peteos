@@ -15,6 +15,7 @@ class SystemPromptMessage(Message):
     """
 
     def __init__(self, json_dict: dict) -> None:
+        json_dict.setdefault("role", "system")
         super().__init__(json_dict)
 
     @staticmethod
