@@ -389,6 +389,10 @@ class Runner(ActiveClass):
             msg_index = self._session.active_context.get_anchor_msg_index("messages")
             self._session.active_context.add_anchor(anchor_name, msg_index, after_existing=False)
 
+        if any(cp.type == "tool_use" for cp in content_parts):
+            _logger.debug("[runner] step(): Tool calls present, returning CONTINUE for tool execution.")
+            return (ExecStatus.CONTINUE, response_msg)
+
         if not has_text_part:
             _logger.debug("[runner] step(): Response contained only reasoning part(s).")
             return (ExecStatus.CONTINUE, response_msg)

@@ -199,9 +199,9 @@ class AgenticObjectBase:
         return (
             "# Code Execution\n\n"
             "You have the `python_exec` tool that runs Python code in a restricted sandbox.\n"
-            "Usage: call `python_exec(code='...')` where `code` contains exactly one function.\n"
-            "The function must be named `func` and have the signature `func(self)`.\n"
-            "`self` refers to the agentic object instance — you can call its tools and access its attributes.\n"
+            "Usage: call `python_exec(function='...')` where `function` contains the Python `func(self)` definition.\n"
+            "The function must be named exactly `func` and have the signature `func(self)`.\n"
+            "Inside the function, `self` refers to the agentic object — you can call its tools and access its attributes.\n"
             "The function must return the final result (not print it).\n"
             f"{imports_str}\n"
             "Forbidden: __builtins__, __import__, network access, filesystem I/O."
@@ -234,14 +234,14 @@ class AgenticObjectBase:
             )
         )
 
-    def _python_exec(self, code: str) -> str:
+    def _python_exec(self, function: str) -> str:
         """Protected tool: executes sandboxed Python code."""
         config = _collect_oap_config(self.__class__)
         sandbox_globals = create_sandbox_globals(self, config)
         original_keys = set(sandbox_globals.keys())
 
         try:
-            exec(code, sandbox_globals)
+            exec(function, sandbox_globals)
             new_keys = set(sandbox_globals.keys()) - original_keys
             new_funcs: list[str] = []
             for k in new_keys:
