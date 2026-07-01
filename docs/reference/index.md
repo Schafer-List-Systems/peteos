@@ -2,14 +2,13 @@
 
 An index of all reference pages in this directory. Each page documents a single class or module completely.
 
-## Core Classes
+## Core API
 
 | Reference | Description |
 |---|---|
 | [AgenticObjectBase](./agentic-object-base.md) | Base class for all agentic objects |
-| [Session](./session.md) | Interaction thread with context |
-| [Context](./context.md) | Mutable chat history, forking, and compaction |
-| [Message](./message.md) | Message and ContentPart wrappers |
+| [ChatBotManager](./chatbot-manager.md) | Configure LLM backends |
+| [Error](./error.md) | Value object returned by `invoke_agent` on failure |
 
 ## Configuration
 
@@ -17,17 +16,11 @@ An index of all reference pages in this directory. Each page documents a single 
 |---|---|
 | [Decorator Arguments](./decorator-args.md) | `@agentic_object` and `@tool` options |
 
-## Media
+## Conversation Primitives
 
 | Reference | Description |
 |---|---|
-| [ContentMedia](./content-media.md) | Attaching images, video, and PDFs |
-
-## Error Handling
-
-| Reference | Description |
-|---|---|
-| [Error](./error.md) | `Error` value object returned by `invoke_agent` |
+| [Message & ContentPart](./message.md) | Message and ContentPart factories — for steering the agent |
 
 ## Concrete Agentic Objects
 
