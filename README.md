@@ -46,5 +46,7 @@ pip install .
 
 - [Introduction](docs/introduction.md) — the sOAP paradigm
 - [Getting Started](docs/getting-started.md) — installation and first example
-- [Concepts](docs/concepts/) — composition, invocation, state, testing
-- [Reference](docs/reference/) — API docs, agentic objects
+- [Concepts](docs/concepts/index.md) — composition, invocation, state, testing
+- [Reference](docs/reference/index.md) — API docs, agentic objects
+- [Best Practices](docs/best-practices/index.md) — Best practices when using PeteOS
+- [Examples](docs/examples/) — Examples show-casing some features
