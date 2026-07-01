@@ -43,10 +43,6 @@ The `-e` flag installs Peteos in editable (development) mode, so changes to the 
 
 ## Setting Up the Environment
 
-> _[Placeholder: Install instructions._]
-
-## Setting Up the Environment
-
 Configure the LLM backend using the `ChatBotManager` singleton:
 
 ```python

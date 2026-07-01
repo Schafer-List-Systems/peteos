@@ -433,18 +433,6 @@ class AgenticObjectBase:
         """
         self._oap_lock.release()
 
-    def update_system_prompt(self, prompt: str) -> None:
-        """Update the agent's system prompt.
-
-        Updates the `_oap_role` with the new prompt so future invocations
-        use the updated system prompt.
-
-        Args:
-            prompt: New system prompt text.
-        """
-        if self._oap_role is not None:
-            self._oap_role.system_prompt = prompt
-
     @property
     def agent(self) -> Agent | None:
         """The Agent instance used for LLM invocations."""
