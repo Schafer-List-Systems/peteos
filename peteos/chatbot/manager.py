@@ -10,6 +10,7 @@ from .openaichatbot import OpenAIChatBot
 from .anthropicchatbot import AnthropicChatBot
 from .backendconfig import BackendConfig
 from .chatbotconfig import ChatBotConfig
+from .geminichatbot import GeminiChatBot
 
 
 @dataclass
@@ -78,8 +79,8 @@ class ChatBotManager:
         if name in cls._backends:
             raise ValueError(f"Backend '{name}' already exists")
 
-        if api_type is not None and api_type not in ("openai", "anthropic"):
-            raise ValueError(f"Invalid api_type: {api_type}. Must be 'openai' or 'anthropic'")
+        if api_type is not None and api_type not in ("openai", "anthropic", "gemini"):
+            raise ValueError(f"Invalid api_type: {api_type}. Must be 'openai', 'anthropic', or 'gemini'")
 
         config = BackendConfig.from_dict({
             "name": name,
@@ -231,6 +232,8 @@ class ChatBotManager:
             return OpenAIChatBot(client, chatbot_config)
         elif config.api_type == "anthropic":
             return AnthropicChatBot(client, chatbot_config)
+        elif config.api_type == "gemini":
+            return GeminiChatBot(client, chatbot_config)
         else:
             raise ValueError(f"Unknown API type: {config.api_type}")
 
@@ -282,7 +285,7 @@ class ChatBotManager:
         for backend_config in json_obj.get("backends", []):
             config = BackendConfig.from_dict(backend_config)
 
-            if config.api_type is not None and config.api_type not in ("openai", "anthropic"):
+            if config.api_type is not None and config.api_type not in ("openai", "anthropic", "gemini"):
                 raise ValueError(f"Invalid api_type in config: {config.api_type}")
 
             cls._clients[config.name] = HTTPClient(

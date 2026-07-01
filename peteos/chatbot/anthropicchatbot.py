@@ -328,6 +328,11 @@ class AnthropicChatBotResponse(GenericChatBotResponse):
         response = cls(augmented_yield(), translations)
         response._data = {}
 
+        if "error" in data:
+            response._data["error"] = str(data["error"])
+            _logger.error("Anthropic error: %s", data["error"])
+            return response
+
         # Extract role
         if "role" in data:
             response._data["role"] = data["role"]

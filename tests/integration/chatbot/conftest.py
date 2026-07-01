@@ -153,6 +153,51 @@ async def live_anthropic_chatbot(anthropic_client):
 # Helper for building contexts with the conversation package API
 # ---------------------------------------------------------------------------
 
+@pytest_asyncio.fixture
+async def gemini_client():
+    """Create a Gemini-compatible aiohttp ClientSession.
+
+    Gemini uses ?key=API_KEY query param for auth (not a header).
+    The GeminiChatBot appends it to the URL, so the fixture needs no special auth.
+    """
+    cfg = _get_config()
+    url = cfg["url"]
+
+    async with ClientSession(
+        base_url=url,
+        headers={"Content-Type": "application/json"},
+        timeout=ClientTimeout(total=120),
+    ) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def live_gemini_chatbot(gemini_client):
+    """Create a live Gemini ChatBot instance connected to the test backend."""
+    cfg = _get_config()
+
+    from peteos.chatbot.geminichatbot import GeminiChatBot
+    from peteos.chatbot.chatbotconfig import ChatBotConfig
+
+    config = ChatBotConfig(
+        name=cfg["name"],
+        url=cfg["url"],
+        api_type="gemini",
+        model=cfg["model"],
+        streaming=False,
+        api_key=cfg["api_key"],
+    )
+
+    SessionHTTPClient = _session_http_client_factory(gemini_client, cfg["url"])
+    http_client = SessionHTTPClient(gemini_client)
+    chatbot = GeminiChatBot(http_client, config)
+    yield chatbot
+
+
+# ---------------------------------------------------------------------------
+# Helper for building contexts with the conversation package API
+# ---------------------------------------------------------------------------
+
 def _make_context(messages):
     """Build a Context from Message instances."""
     from peteos.conversation.context import Context

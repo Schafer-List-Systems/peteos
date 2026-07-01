@@ -15,7 +15,7 @@ class BackendConfig:
     Attributes:
         name: Unique backend identifier.
         url: API base URL.
-        api_type: "openai" or "anthropic".
+        api_type: "openai", "anthropic", or "gemini".
         chat_endpoint: Custom chat endpoint (default: API-specific).
         models_endpoint: Custom models endpoint (default: API-specific).
         streaming: Use streaming mode by default.
@@ -30,6 +30,7 @@ class BackendConfig:
     streaming: bool = False
     max_tokens: Optional[int] = None
     retry_delays: Optional[list[float]] = None
+    api_key: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "BackendConfig":
