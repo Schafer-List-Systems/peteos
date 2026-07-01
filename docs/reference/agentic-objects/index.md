@@ -7,4 +7,5 @@ Reference documentation for the concrete agentic objects provided by Peteos.
 | [BashWorkspace](./bash-workspace.md) | Secure sandbox for executing shell commands |
 | [CameraObserver](./camera-observer.md) | Webcam access via a pluggable camera driver |
 | [PdfTranscriber](./pdf-transcriber.md) | High-quality PDF transcription via tesseract + LLM vision |
+| [TextEditor](./text-editor.md) | Line-based text editing with mtime-based safety |
 | [WebNavigator](./web-navigator.md) | Web fetching, rendering, and screenshot capture |
