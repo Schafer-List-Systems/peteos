@@ -56,7 +56,7 @@ The backend URL is passed at runtime — no hardcoded endpoints.
 
 Additional options such as `streaming` and `max_tokens` can be configured per backend.
 A single backend may expose multiple models, and the agent harness automatically selects one if the backend supports more than one.
-Model patterns can be used to restrict which models are considered, and in case of ambiguity the harness picks a default. Details on configuration, model selection, and the full set of options are covered in the **[reference](./reference/api-overview.md)**.
+Model patterns can be used to restrict which models are considered, and in case of ambiguity the harness picks a default. Details on configuration, model selection, and the full set of options are covered in the **[ChatBotManager reference](./reference/chatbot-manager.md)**.
 
 ---
 
@@ -185,7 +185,7 @@ The sandbox provides pure functions and builtins but blocks file I/O, network ac
 
 The `@agentic_object` decorator offers additional options such as `imports` to add modules to the sandbox, and `import_aliases` for module aliases. Providing more imports adds functionality but also increases the attack surface.
 
-Beyond single objects, agentic systems can compose into hierarchies of agents and sub-agents for more complex tasks. Within the sandbox, the Python code can access the agentic object directly as if it were a member function. See the **[reference](./reference/api-overview.md)** for details.
+Beyond single objects, agentic systems can compose into hierarchies of agents and sub-agents for more complex tasks. Within the sandbox, the Python code can access the agentic object directly as if it were a member function. See the **[Decorator Arguments reference](./reference/decorator-args.md)** for details.
 
 ### Example: Stock Portfolio Analyzer
 
@@ -316,6 +316,6 @@ The agent reasons about the portfolio, calls its tools to inspect data, and uses
 
 ### Where to Go Next
 
-- See the **[concepts](./concepts/agentic-objects.md)** section to understand how agentic objects work under the hood
-- Explore the **[guide](./guide/creating-agents.md)** for topic-based walkthroughs
-- Look at the **[agentic-objects module](https://github.com/schpe/peetos/tree/main/peteos/agentic_objects)** for real-world examples, including [BashWorkspace](https://github.com/schpe/peetos/tree/main/peteos/agentic_objects/bash_workspace.py) and [PDFTranscriber](https://github.com/schpe/peetos/tree/main/peteos/agentic_objects/pdf_transcriber.py)
+- See the **[Concepts](./concepts/index.md)** section to understand how agentic objects work under the hood
+- See the **[Best Practices](./best-practices/index.md)** section for proven patterns
+- Look at the **[pre-built agentic objects](./reference/agentic-objects/)** for real-world examples, including [BashWorkspace](./reference/agentic-objects/bash-workspace.md) and [PdfTranscriber](./reference/agentic-objects/pdf-transcriber.md)
