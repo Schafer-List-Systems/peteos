@@ -124,6 +124,13 @@ class OpenAIChatBot(ChatBot):
             return self._models
         return [self._config.model]
 
+    def get_headers(self) -> Dict[str, str]:
+        """Return API auth headers when an API key is configured."""
+        headers: Dict[str, str] = {}
+        if self._config.api_key:
+            headers["Authorization"] = f"Bearer {self._config.api_key}"
+        return headers
+
     async def send_context(
         self,
         context: Context,
@@ -137,10 +144,10 @@ class OpenAIChatBot(ChatBot):
         _logger.debug("OpenAI request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
 
         if streaming_mode:
-            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body, self.get_headers())
             return OpenAIChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body, self.get_headers())
             return OpenAIChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(self, context: Context, generation_config: Optional[Dict[str, Any]] = None, streaming: bool | None = None) -> Dict[str, Any]:

@@ -71,3 +71,10 @@ class ChatBot(ABC):
     def model(self, value: str) -> None:
         """Set a new model identifier."""
         self._config.model = value
+
+    def get_headers(self) -> Dict[str, str]:
+        """Return extra HTTP headers to include with every API request.
+
+        Override in subclasses to provide API-specific auth/version headers.
+        """
+        return {}

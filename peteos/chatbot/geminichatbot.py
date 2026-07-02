@@ -73,10 +73,10 @@ class GeminiChatBot(ChatBot):
         _logger.debug("Gemini endpoint: %s", url)
 
         if streaming_mode:
-            stream = self._http_client.stream_post(url, body)
+            stream = self._http_client.stream_post(url, body, self.get_headers())
             return GeminiChatBotResponse(stream, {})
         else:
-            response_data = await self._http_client.post(url, body)
+            response_data = await self._http_client.post(url, body, self.get_headers())
             return GeminiChatBotResponse.from_json(response_data)
 
     @staticmethod

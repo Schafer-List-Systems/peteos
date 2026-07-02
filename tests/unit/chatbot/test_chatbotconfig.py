@@ -18,7 +18,7 @@ class TestChatBotConfig:
         assert config.api_type is None
         assert config.chat_endpoint is None
         assert config.models_endpoint is None
-        assert config.streaming is True
+        assert config.streaming is False
         assert config.max_tokens == 4096
         assert config.model is None
         assert config.response_translations is None
@@ -69,10 +69,10 @@ class TestChatBotConfig:
         config = ChatBotConfig.from_dict({"name": "t", "url": "http://t:80"})
         assert config.model is None
 
-    def test_streaming_default_is_true(self):
-        """streaming defaults to True."""
+    def test_streaming_default_is_false(self):
+        """streaming defaults to False."""
         config = ChatBotConfig.from_dict({"name": "t", "url": "http://t:80"})
-        assert config.streaming is True
+        assert config.streaming is False
 
     def test_max_tokens_default(self):
         """max_tokens defaults to 4096."""

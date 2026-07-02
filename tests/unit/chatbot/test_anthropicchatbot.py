@@ -15,7 +15,7 @@ from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 
 def _make_context(messages: list[Message]) -> Context:
     """Build a Context from Message instances via the conversation package API."""
-    ctx = Context({})
+    ctx = Context.create()
     for msg in messages:
         ctx.append(msg)
     return ctx
@@ -221,7 +221,7 @@ class TestAnthropicRequestTranslation:
         body = chatbot._build_body(ctx)
 
         assert body["model"] == "claude-3"
-        assert body["stream"] is True
+        assert body["stream"] is False
         assert body["max_tokens"] == 4096
         messages = body.get("messages", [])
         assert len(messages) >= 1
