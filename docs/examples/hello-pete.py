@@ -1,4 +1,7 @@
-"""Minimalistic Hello Pete example."""
+"""Minimalistic Hello Pete example.
+
+    Usage: python docs/examples/hello-pete.py <URL> [api_type] [api_key]
+"""
 
 import asyncio
 import sys
@@ -11,10 +14,11 @@ class HelloPete(AgenticObjectBase):
 
 
 async def main():
-    #rom peteos.utils.logger import setup_logging
+    #from peteos.utils.logger import setup_logging
     #setup_logging(level="DEBUG", debug=True)
-    url = sys.argv[1]
-    await ChatBotManager.add_backend("local", url)
+    args = sys.argv[1:] + [None] * 3
+    url, api_type, api_key = args[:3]
+    await ChatBotManager.add_backend("local", url, api_type=api_type, api_key=api_key)
     pete = HelloPete()
     result = await pete.invoke_agent("Hello, what's your name?")
     print(result)

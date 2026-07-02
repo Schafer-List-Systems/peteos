@@ -1,6 +1,6 @@
 """Example: Candidate Profile — minimal sOAP example.
 
-Usage: python candidate-profile.py <backend-url>
+Usage: python candidate-profile.py <backend-url> [api_type] [api_key]
 """
 
 from enum import Enum
@@ -37,8 +37,9 @@ class CandidateProfile(AgenticObjectBase):
 
 
 async def main():
-    url = sys.argv[1]
-    await ChatBotManager.add_backend("local", url)
+    args = sys.argv[1:] + [None] * 3
+    url, api_type, api_key = args[:3]
+    await ChatBotManager.add_backend("local", url, api_type=api_type, api_key=api_key)
 
     biography = (
         "Sarah spent 5 years building React dashboards and recently "

@@ -167,12 +167,12 @@ Code executed in the sandbox can access the agentic object through the `self` pa
 
 ```python
 @agentic_object(allow_code_execution=True)
-class FibonacciSeries(AgenticObjectBase):
+class FibonacciSquared(AgenticObjectBase):
     """You are a helpful assistant."""
 ```
 
 ```python
-seq = FibonacciSeries()
+seq = FibonacciSquared()
 result = await seq.invoke_agent(
     f"Compute the sequence where each element is the sum of the squares of its two predecessors."
     f" Start with 0, 1. And compute the 10-th element.",
