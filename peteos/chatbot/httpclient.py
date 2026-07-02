@@ -73,7 +73,8 @@ class HTTPClient:
     async def stream_post(
         self,
         url: str,
-        body: dict
+        body: dict,
+        headers: Optional[dict] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Send a POST request and stream SSE events.
@@ -84,6 +85,7 @@ class HTTPClient:
         Args:
             url: Endpoint URL.
             body: Request body.
+            headers: Optional HTTP headers to include.
 
         Yields:
             Raw SSE lines as strings.
@@ -92,7 +94,7 @@ class HTTPClient:
             RuntimeError: If the response status code is not 2xx.
         """
         for attempt in range(self._max_retries + 1):
-            client = httpx.AsyncClient(timeout=self._timeout)
+            client = httpx.AsyncClient(timeout=self._timeout, headers=headers or {})
             try:
                 async with client:
                     response = await self._ensure_response(client, "POST", url, body)
@@ -125,12 +127,13 @@ class HTTPClient:
                 _logger.error("HTTP POST to %s failed after %d retries: %s: %s", url, self._max_retries, type(e).__name__, e)
                 raise
 
-    async def get(self, url: str) -> dict:
+    async def get(self, url: str, headers: Optional[dict] = None) -> dict:
         """
         Send a GET request and return the parsed JSON response.
 
         Args:
             url: Endpoint URL.
+            headers: Optional HTTP headers to include.
 
         Returns:
             Parsed JSON response.
@@ -138,7 +141,7 @@ class HTTPClient:
         Raises:
             RuntimeError: If the response status code is not 2xx.
         """
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=headers or {}) as client:
             response = await self._ensure_response(client, "GET", url)
             if response.status_code >= 300:
                 error_text = response.content.decode(errors='replace')
@@ -148,13 +151,14 @@ class HTTPClient:
                 )
             return response.json()
 
-    async def post(self, url: str, body: dict) -> dict:
+    async def post(self, url: str, body: dict, headers: Optional[dict] = None) -> dict:
         """
         Send a POST request and return the parsed JSON response.
 
         Args:
             url: Endpoint URL.
             body: Request body.
+            headers: Optional HTTP headers to include.
 
         Returns:
             Parsed JSON response.
@@ -162,7 +166,7 @@ class HTTPClient:
         Raises:
             RuntimeError: If the response status code is not 2xx.
         """
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=headers or {}) as client:
             response = await self._ensure_response(client, "POST", url, body)
             if response.status_code >= 300:
                 error_text = response.content.decode(errors='replace')

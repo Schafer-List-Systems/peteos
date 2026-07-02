@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional
 
 from peteos.utils import get_logger
 from .chatbot import ChatBot
@@ -160,6 +160,14 @@ class AnthropicChatBot(ChatBot):
             return self._models
         return [self._config.model]
 
+    def get_headers(self) -> Dict[str, str]:
+        """Return Anthropic API auth headers when an API key is configured."""
+        headers: Dict[str, str] = {}
+        if self._config.api_key:
+            headers["x-api-key"] = self._config.api_key
+        headers["anthropic-version"] = "2023-06-01"
+        return headers
+
     async def send_context(
         self,
         context: Context,
@@ -175,10 +183,10 @@ class AnthropicChatBot(ChatBot):
         _logger.debug("Anthropic request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
 
         if streaming_mode:
-            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body, self.get_headers())
             return AnthropicChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body)
+            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body, self.get_headers())
             return AnthropicChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(

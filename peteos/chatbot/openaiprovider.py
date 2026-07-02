@@ -15,11 +15,11 @@ from .openaichatbot import OpenAIChatBot
 class OpenAIChatBotProvider(BackendProvider):
 
     async def list_models(self, url: str, api_key: Optional[str] = None) -> list[str]:
-        models_url = f"{url}/v1/models"
+        headers: dict = {}
         if api_key:
-            models_url += f"?key={api_key}"
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(models_url)
+            headers["Authorization"] = f"Bearer {api_key}"
+        async with httpx.AsyncClient(headers=headers) as client:
+            resp = await client.get(f"{url}/v1/models")
             resp.raise_for_status()
             data = resp.json()
             return [m["id"] for m in data.get("data", []) if "id" in m]
