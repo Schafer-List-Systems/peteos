@@ -3,14 +3,15 @@
 import json
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 from .httpclient import HTTPClient
-from .openaichatbot import OpenAIChatBot
-from .anthropicchatbot import AnthropicChatBot
 from .backendconfig import BackendConfig
 from .chatbotconfig import ChatBotConfig
-from .geminichatbot import GeminiChatBot
+from .backendprovider import BackendProvider
+from .openaiprovider import OpenAIChatBotProvider
+from .anthropicprovider import AnthropicChatBotProvider
+from .geminiprovider import GeminiChatBotProvider
 
 
 @dataclass
@@ -18,7 +19,7 @@ class BackendInfo:
     """Information about a backend provider."""
     name: str
     url: str
-    api_type: str  # "openai" or "anthropic"
+    api_type: str  # "openai", "anthropic", or "gemini"
     models: Dict[str, Any]  # model_id -> ChatBot instance
 
 
@@ -26,13 +27,19 @@ class ChatBotManager:
     """Manager for multiple LLM backend providers.
 
     Uses class-level state so backends are globally accessible without
-    passing an instance around.
+    passing an instance around. API-specific model listing and chatbot
+    creation are delegated to BackendProvider instances.
     """
 
     # Class-level state
     _backends: Dict[str, BackendInfo] = {}
     _clients: Dict[str, HTTPClient] = {}
     _timeout: Optional[float] = None
+    _providers: Dict[str, BackendProvider] = {
+        "openai": OpenAIChatBotProvider(),
+        "anthropic": AnthropicChatBotProvider(),
+        "gemini": GeminiChatBotProvider(),
+    }
 
     def __init__(self, timeout: Optional[float] = None) -> None:
         """Update the default timeout for backward compatibility.
@@ -65,9 +72,9 @@ class ChatBotManager:
         Args:
             name: Unique identifier for the backend.
             url: Base URL of the API (e.g., "http://localhost:8000").
-            api_type: Optional API type override ("openai" or "anthropic").
+            api_type: Optional API type override ("openai", "anthropic", or "gemini").
                      If not provided, API type is auto-detected.
-            **kwargs: Configuration options (streaming, max_tokens, etc.).
+            **kwargs: Configuration options (streaming, max_tokens, api_key, etc.).
 
         Returns:
             BackendInfo with detected API type and discovered models.
@@ -93,7 +100,7 @@ class ChatBotManager:
             retry_delays=config.retry_delays,
         )
 
-        # Add placeholder before detection so _detect methods can look up url
+        # Add placeholder before detection so methods can look up url
         cls._backends[name] = BackendInfo(
             name=config.name,
             url=config.url,
@@ -101,16 +108,24 @@ class ChatBotManager:
             models={},
         )
 
-        # Auto-detect api_type if not provided
+        # Auto-detect api_type or delegate to provider
         if config.api_type is None:
-            config.api_type, models = await cls._detect_api_and_list_models(name)
+            config.api_type, models = await cls._detect_api_and_list_models(name, config.api_key)
         else:
-            models = await cls._list_models_for_api_type(name, config.api_type)
+            provider = cls._providers.get(config.api_type)
+            if provider is None:
+                raise RuntimeError(f"No provider registered for api_type: {config.api_type}")
+            models = await provider.list_models(config.url, config.api_key)
 
-        # Create ChatBot instances
+        # Create ChatBot instances via provider
+        provider = cls._providers[config.api_type]
         chatbots: Dict[str, Any] = {}
         for model_id in models:
-            chatbot = cls._create_chatbot(config, model_id)
+            chatbot_config = ChatBotConfig.from_dict({
+                **vars(config),
+                "model": model_id,
+            })
+            chatbot = provider.create_chatbot(cls._clients[name], chatbot_config)
             chatbots[model_id] = chatbot
 
         cls._backends[name].api_type = config.api_type
@@ -134,108 +149,50 @@ class ChatBotManager:
         return False
 
     @staticmethod
-    async def _detect_api_and_list_models(backend_name: str) -> Tuple[str, List[str]]:
-        """Detect API type and list available models.
+    async def _detect_api_and_list_models(backend_name: str, api_key: Optional[str] = None) -> Tuple[str, List[str]]:
+        """Detect API type by probing all providers and listing available models.
 
-        Probes /v1/models endpoint and detects API based on response structure.
+        Tries each registered provider's list_models method and uses whichever
+        succeeds. Falls back to OpenAI (data) before Anthropic (models) before
+        Gemini to maintain backward compatibility with auto-detection.
 
         Args:
-            backend_name: Backend identifier used to look up HTTP client.
+            backend_name: Backend identifier used to look up URL.
+            api_key: Optional API key for authentication.
 
         Returns:
             Tuple of (api_type, [model_ids]).
 
         Raises:
-            RuntimeError: If API detection fails.
+            RuntimeError: If no provider succeeds.
         """
-        models_url = f"{ChatBotManager._backends[backend_name].url}/v1/models"
-        client = ChatBotManager._clients[backend_name]
+        url = ChatBotManager._backends[backend_name].url
 
+        # Try OpenAI first (backward compat with auto-detection)
         try:
-            response = await client.get(models_url)
-        except Exception as e:
-            raise RuntimeError(f"Failed to probe {models_url}: {e}")
+            models = await ChatBotManager._providers["openai"].list_models(url, api_key)
+            if models:
+                return "openai", models
+        except Exception:
+            pass
 
-        # Detect API type by response structure
-        if "data" in response and isinstance(response.get("data"), list):
-            # OpenAI format: {"data": [{"id": "...", ...}, ...]}
-            api_type = "openai"
-            model_ids = [m["id"] for m in response["data"] if "id" in m]
-        elif "models" in response and isinstance(response.get("models"), list):
-            # Anthropic format: {"models": [{"id": "...", ...}, ...]}
-            api_type = "anthropic"
-            model_ids = [m["id"] for m in response["models"] if "id" in m]
-        else:
-            raise RuntimeError(
-                f"Could not detect API type from response: {response}"
-            )
-
-        if not model_ids:
-            raise RuntimeError(f"No models found at {models_url}")
-
-        return api_type, model_ids
-
-    @staticmethod
-    async def _list_models_for_api_type(backend_name: str, api_type: str) -> List[str]:
-        """List models for a specific API type without auto-detection.
-
-        Args:
-            backend_name: Backend identifier used to look up HTTP client.
-            api_type: "openai" or "anthropic".
-
-        Returns:
-            List of model IDs.
-
-        Raises:
-            RuntimeError: If model listing fails.
-        """
-        models_url = f"{ChatBotManager._backends[backend_name].url}/v1/models"
-        client = ChatBotManager._clients[backend_name]
-
+        # Try Anthropic
         try:
-            response = await client.get(models_url)
-        except Exception as e:
-            raise RuntimeError(f"Failed to probe {models_url}: {e}")
+            models = await ChatBotManager._providers["anthropic"].list_models(url, api_key)
+            if models:
+                return "anthropic", models
+        except Exception:
+            pass
 
-        # Extract model IDs from response - support both OpenAI and Anthropic formats
-        model_ids = []
+        # Try Gemini
+        try:
+            models = await ChatBotManager._providers["gemini"].list_models(url, api_key)
+            if models:
+                return "gemini", models
+        except Exception:
+            pass
 
-        # Try OpenAI format first
-        if "data" in response and isinstance(response.get("data"), list):
-            model_ids = [m["id"] for m in response["data"] if "id" in m]
-        # Then try Anthropic format
-        elif "models" in response and isinstance(response.get("models"), list):
-            model_ids = [m["id"] for m in response["models"] if "id" in m]
-
-        if not model_ids:
-            raise RuntimeError(f"No models found at {models_url}, response: {response}")
-
-        return model_ids
-
-    @staticmethod
-    def _create_chatbot(config: BackendConfig, model_id: str) -> Any:
-        """Create appropriate ChatBot instance for model.
-
-        Args:
-            config: Backend configuration dataclass with all defaults applied.
-            model_id: Model identifier.
-
-        Returns:
-            ChatBot instance.
-        """
-        chatbot_config = ChatBotConfig.from_dict({
-            **vars(config),
-            "model": model_id,
-        })
-        client = ChatBotManager._clients[config.name]
-        if config.api_type == "openai":
-            return OpenAIChatBot(client, chatbot_config)
-        elif config.api_type == "anthropic":
-            return AnthropicChatBot(client, chatbot_config)
-        elif config.api_type == "gemini":
-            return GeminiChatBot(client, chatbot_config)
-        else:
-            raise ValueError(f"Unknown API type: {config.api_type}")
+        raise RuntimeError(f"Failed to detect API type or list models from {url}")
 
     @classmethod
     def list_chatbots(cls, model_regex: str) -> List[Tuple[str, Any]]:
@@ -301,14 +258,22 @@ class ChatBotManager:
             cls._backends[config.name] = backend_info
 
             if config.api_type is None:
-                config.api_type, models = await cls._detect_api_and_list_models(config.name)
+                config.api_type, models = await cls._detect_api_and_list_models(config.name, config.api_key)
             else:
-                models = await cls._list_models_for_api_type(config.name, config.api_type)
+                provider = cls._providers.get(config.api_type)
+                if provider is None:
+                    raise RuntimeError(f"No provider registered for api_type: {config.api_type}")
+                models = await provider.list_models(config.url, config.api_key)
 
-            # Create ChatBot instances
+            # Create ChatBot instances via provider
+            provider = cls._providers[config.api_type]
             chatbots: Dict[str, Any] = {}
             for model_id in models:
-                chatbot = cls._create_chatbot(config, model_id)
+                chatbot_config = ChatBotConfig.from_dict({
+                    **vars(config),
+                    "model": model_id,
+                })
+                chatbot = provider.create_chatbot(cls._clients[config.name], chatbot_config)
                 chatbots[model_id] = chatbot
 
             cls._backends[config.name].api_type = config.api_type
