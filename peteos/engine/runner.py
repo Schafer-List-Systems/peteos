@@ -510,8 +510,14 @@ class Runner(ActiveClass):
                     continue
 
             # Send context to chatbot and get a response, already passing the tool calls
-            status, response_msg = await self.step()
-            have_new_message = False
+            try:
+                status, response_msg = await self.step()
+            except Exception as e:
+                _logger.error("[runner] step() raised exception: %s: %r", type(e).__name__, e)
+                self._idle.set()
+                continue
+            finally:
+                have_new_message = False
 
             _logger.debug("[runner] step() returned status=%s", status)
             hook_status = await self.execution_environment.call_hooks("after_step", status)
