@@ -17,8 +17,8 @@ class TestBackendConfig:
         assert config.api_type is None
         assert config.chat_endpoint is None
         assert config.models_endpoint is None
-        assert config.streaming is True
-        assert config.max_tokens == 4096
+        assert config.streaming is False
+        assert config.max_tokens is None
         assert config.retry_delays is None
 
     def test_from_dict_with_api_type(self):
@@ -65,17 +65,17 @@ class TestBackendConfig:
         data = {"name": "test", "url": "http://t:80", "max_tokens": 100}
         config = BackendConfig.from_dict(data)
         assert config.max_tokens == 100
-        assert config.streaming is True  # still default
+        assert config.streaming is False
 
-    def test_streaming_default_true(self):
-        """streaming defaults to True."""
+    def test_streaming_default_false(self):
+        """streaming defaults to False."""
         config = BackendConfig.from_dict({"name": "t", "url": "http://t:80"})
-        assert config.streaming is True
+        assert config.streaming is False
 
-    def test_max_tokens_default(self):
-        """max_tokens defaults to 4096."""
+    def test_max_tokens_default_none(self):
+        """max_tokens defaults to None (set per-chatbot)."""
         config = BackendConfig.from_dict({"name": "t", "url": "http://t:80"})
-        assert config.max_tokens == 4096
+        assert config.max_tokens is None
 
     def test_retry_delays_default_none(self):
         """retry_delays defaults to None."""
