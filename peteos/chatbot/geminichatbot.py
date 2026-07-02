@@ -125,6 +125,9 @@ class GeminiChatBot(ChatBot):
                 if "default" in param_info:
                     prop["description"] = str(param_info["default"])
 
+                if py_type == "list":
+                    prop["items"] = {"type": "STRING"}
+
             properties[param_name] = prop
 
         return {
@@ -234,9 +237,12 @@ class GeminiChatBot(ChatBot):
 
         # Extract system prompt
         system_parts = []
-        messages = []
+        contents = []
         tools = []
-        current_role = "user"  # Gemini alternates between user and model
+
+        # Mapping of call_id -> function name from the most recent model message.
+        # Tool results look up their corresponding function by call_id.
+        _fc_by_call_id: dict[str, str] = {}
 
         for msg in context.messages:
             role = msg.role
@@ -257,64 +263,49 @@ class GeminiChatBot(ChatBot):
                             "parameters": params,
                         }
                         tools.append({"functionDeclarations": [func_decl]})
+            elif role == "user":
+                # Conversation message — maps to Gemini role "user"
+                parts = self._build_gemini_parts(msg.content)
+                if parts:
+                    contents.append({"role": "user", "parts": parts})
+            elif role == "assistant":
+                # Gemini has no "assistant" role — map to "model"
+                # Extract call_id → name from ContentParts before serialization
+                # (call_id is stored in the framework ContentPart, not in the Gemini
+                # functionCall — Gemini rejects unknown keys in functionCall objects)
+                _fc_by_call_id.clear()
+                for part in msg.content:
+                    if part.type == "tool_use" and part.call_id:
+                        _fc_by_call_id[part.call_id] = part.name or ""
+                parts = self._build_gemini_parts(msg.content)
+                if parts:
+                    contents.append({"role": "model", "parts": parts})
             elif role == "tool_result":
-                # Tool result - sent as user message with function response part
-                tool_use_id = None
-                for prev_msg in reversed(messages):
-                    if prev_msg["role"] == "model":
-                        for item in prev_msg.get("parts", []):
-                            if isinstance(item, dict) and "functionCall" in item:
-                                tool_use_id = item["functionCall"].get("name")
-                                break
-                        if tool_use_id:
-                            break
-                parts = []
+                # Tool result — look up function name by call_id, add to user parts
+                response_parts = []
                 for part in msg.content:
                     if part.type == "tool_result":
-                        parts.append({
+                        call_id = part.call_id or ""
+                        name = _fc_by_call_id.get(call_id)
+                        if name is None:
+                            _logger.warning(
+                                "Gemini: tool_result with call_id=%r has no matching "
+                                "functionCall in the preceding model message. Skipping.",
+                                call_id,
+                            )
+                            continue
+                        response_parts.append({
                             "functionResponse": {
-                                "name": tool_use_id or "unknown",
-                                "response": {
-                                    "content": part.content or "",
-                                },
+                                "name": name,
+                                "response": {"content": part.content or ""},
                             }
                         })
-                if parts:
-                    messages.append({"role": "user", "parts": parts})
-                    current_role = "user"
-            elif role in ("user", "assistant", "model"):
-                # Conversation message
-                parts = []
-                for part in msg.content:
-                    raw = part.raw_dict
-                    part_type = raw.get("type")
-                    if part_type == "tool_calls":
-                        # Expand tool_calls to functionCall parts
-                        for tc in raw.get("tool_calls", []):
-                            parts.append({
-                                "functionCall": {
-                                    "name": tc.get("name"),
-                                    "args": json.loads(tc.get("arguments", "{}")),
-                                }
-                            })
-                    elif part_type == "tool_use":
-                        # Reconstruct functionCall from stored tool_use (response → next turn)
-                        parts.append({
-                            "functionCall": {
-                                "name": raw.get("name"),
-                                "args": json.loads(raw.get("arguments", "{}")),
-                            }
-                        })
+                if response_parts:
+                    # Merge with most recent user message to avoid consecutive user messages
+                    if contents and contents[-1]["role"] == "user":
+                        contents[-1]["parts"].extend(response_parts)
                     else:
-                        # Convert content part to Gemini format
-                        part_data = self._build_gemini_content_part(part)
-                        if part_data:
-                            parts.append(part_data)
-
-                gemini_role = "model" if role in ("assistant", "model") else "user"
-                if parts:
-                    messages.append({"role": gemini_role, "parts": parts})
-                    current_role = gemini_role
+                        contents.append({"role": "user", "parts": response_parts})
 
         if system_parts:
             system_text = " ".join(
@@ -324,8 +315,73 @@ class GeminiChatBot(ChatBot):
             if system_text:
                 body["system_instruction"] = {"role": "system", "parts": [{"text": system_text}]}
 
-        if messages:
-            body["contents"] = messages
+        if contents:
+            body["contents"] = contents
+
+        if tools:
+            body["tools"] = tools
+
+        # Handle tool_choice in generationConfig
+        if generation_config:
+            tool_choice = generation_config.get("tool_choice")
+            if tool_choice:
+                if isinstance(tool_choice, dict):
+                    tc_type = tool_choice.get("type", "auto")
+                    if tc_type == "any":
+                        body["generationConfig"]["tool_config"] = {
+                            "any_function_config": {}
+                        }
+                    elif tc_type == "specific":
+                        body["generationConfig"]["tool_config"] = {
+                            "function_calling_config": {
+                                "mode": "ANY",
+                                "allowed_function_names": [tool_choice.get("name", "")],
+                            }
+                        }
+                    else:
+                        body["generationConfig"]["tool_config"] = {
+                            "function_calling_config": {
+                                "mode": "AUTO" if tc_type == "auto" else tc_type.upper(),
+                            }
+                        }
+                elif isinstance(tool_choice, str):
+                    body["generationConfig"]["tool_config"] = {
+                        "function_calling_config": {
+                            "mode": tool_choice.upper(),
+                        }
+                    }
+
+        return body
+
+    def _build_gemini_parts(self, content_parts: list) -> list[dict]:
+        """Build a list of Gemini format parts from message content parts.
+
+        Converts tool_use/tool_calls into functionCall parts. call_id is
+        extracted from the framework ContentPart for internal matching but
+        NOT included in the functionCall dict (Gemini rejects unknown keys).
+        """
+        parts: list[dict] = []
+        for part in content_parts:
+            raw = part.raw_dict
+            part_type = raw.get("type")
+            if part_type == "tool_calls":
+                for tc in raw.get("tool_calls", []):
+                    fc_part: dict[str, Any] = {
+                        "name": tc.get("name"),
+                        "args": json.loads(tc.get("arguments", "{}")),
+                    }
+                    parts.append({"functionCall": fc_part})
+            elif part_type == "tool_use":
+                fc_part: dict[str, Any] = {
+                    "name": raw.get("name"),
+                    "args": json.loads(raw.get("arguments", "{}")),
+                }
+                parts.append({"functionCall": fc_part})
+            else:
+                part_data = self._build_gemini_content_part(part)
+                if part_data:
+                    parts.append(part_data)
+        return parts
 
         if tools:
             body["tools"] = tools
@@ -518,7 +574,6 @@ class GeminiChatBotResponse(GenericChatBotResponse):
                 content_array.append({
                     "index": len(content_array),
                     "type": "tool_use",
-                    "call_id": f"gemini-{id(fc)}",
                     "name": fc.get("name", ""),
                     "arguments": json.dumps(fc.get("args", {})),
                 })
@@ -564,7 +619,9 @@ class GeminiChatBotResponse(GenericChatBotResponse):
 
     def _build_message(self) -> Message:
         """Convert Gemini API-specific accumulated data into a Message."""
-        role: str = self._data.get("role", "model")
+        # Map Gemini's "model" role to framework's "assistant" role
+        grole: str = self._data.get("role", "model")
+        role: str = "assistant" if grole == "model" else grole
         content_array = self._data.get("content", [])
         content_parts: list[ContentPart] = []
         has_text = False
@@ -584,8 +641,15 @@ class GeminiChatBotResponse(GenericChatBotResponse):
                 else:
                     _logger.debug("Unknown Gemini content part type: %s", item_type)
 
+        msg = Message.create(role=role, content_parts=content_parts)
+
+        # Assign deterministic call_ids derived from the message's own UUID
+        for idx, part in enumerate(msg.content):
+            if part.type == "tool_use":
+                part.raw_dict["call_id"] = f"msg-{msg.id}-{idx}"
+
         self._has_text_part = has_text
-        return Message.create(role=role, content_parts=content_parts)
+        return msg
 
 
 async def augmented_yield():
