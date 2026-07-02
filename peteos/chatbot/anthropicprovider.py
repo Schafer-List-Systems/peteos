@@ -22,7 +22,7 @@ class AnthropicChatBotProvider(BackendProvider):
             resp = await client.get(f"{url}/v1/models")
             resp.raise_for_status()
             data = resp.json()
-            return [m["id"] for m in data.get("models", []) if "id" in m]
+            return [m["id"] for m in data.get("data", []) if "id" in m]
 
     def create_chatbot(self, http_client: HTTPClient, config: ChatBotConfig) -> ChatBot:
         return AnthropicChatBot(http_client, config)

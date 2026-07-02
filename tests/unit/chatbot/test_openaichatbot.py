@@ -13,7 +13,7 @@ from peteos.conversation.message import Message, ContentPart
 
 def _make_context(messages: list[Message]) -> Context:
     """Build a Context from Message instances via the conversation package API."""
-    ctx = Context({})
+    ctx = Context.create()
     for msg in messages:
         ctx.append(msg)
     return ctx

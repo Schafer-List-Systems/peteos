@@ -9,7 +9,7 @@ class TestSystemPromptMessage:
 
     def test_create_without_static_text(self):
         msg = SystemPromptMessage.create()
-        assert msg.role == ""
+        assert msg.role == "system"
         assert msg.raw_dict.get("_static_text") is None
         assert msg.content == []
 
