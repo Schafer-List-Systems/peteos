@@ -5,6 +5,16 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 from peteos.chatbot.manager import ChatBotManager, BackendInfo
 from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
+from peteos.chatbot.chatbotconfig import ChatBotConfig
+
+
+def _chatbot_config(**overrides):
+    """Create a minimal ChatBotConfig for tests."""
+    return ChatBotConfig(
+        name="test",
+        url="http://test:8000",
+        **overrides,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +44,7 @@ def _mock_providers(openai_models=None, anthropic_models=None, gemini_models=Non
 async def test_add_backend_openai():
     """Test adding OpenAI-compatible backend."""
     mock_providers = _mock_providers(openai_models=["model-1", "model-2"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         backend = await ChatBotManager.add_backend("test-backend", "http://test:8000")
@@ -54,7 +64,7 @@ async def test_add_backend_anthropic():
     mock_providers = _mock_providers(anthropic_models=["anthropic-model-1", "anthropic-model-2"])
     from peteos.chatbot import AnthropicChatBot
 
-    mock_providers["anthropic"].create_chatbot = MagicMock(return_value=AnthropicChatBot(MagicMock(), MagicMock()))
+    mock_providers["anthropic"].create_chatbot = MagicMock(return_value=AnthropicChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         backend = await ChatBotManager.add_backend("anthropic-backend", "http://test:8000")
@@ -71,7 +81,7 @@ async def test_add_backend_gemini():
     mock_providers = _mock_providers(gemini_models=["models/gemini-2.5-flash", "models/gemini-2.0-flash"])
     from peteos.chatbot import GeminiChatBot
 
-    mock_providers["gemini"].create_chatbot = MagicMock(return_value=GeminiChatBot(MagicMock(), MagicMock()))
+    mock_providers["gemini"].create_chatbot = MagicMock(return_value=GeminiChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         backend = await ChatBotManager.add_backend("gemini-backend", "https://generativelanguage.googleapis.com")
@@ -85,7 +95,7 @@ async def test_add_backend_gemini():
 async def test_add_backend_explicit_api_type():
     """Backend with explicit api_type skips auto-detection."""
     mock_providers = _mock_providers(openai_models=["model-1"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         backend = await ChatBotManager.add_backend(
@@ -102,14 +112,14 @@ async def test_add_backend_explicit_api_type():
 async def test_add_backend_invalid_api_type():
     """Adding backend with invalid api_type raises ValueError."""
     with pytest.raises(ValueError, match="Invalid api_type"):
-        await ChatBotManager.add_backend("bad", "http://test:8000", api_type="gemini")
+        await ChatBotManager.add_backend("bad", "http://test:8000", api_type="foobar")
 
 
 @pytest.mark.asyncio
 async def test_add_backend_duplicate_name():
     """Adding backend with duplicate name raises error."""
     mock_providers = _mock_providers(openai_models=["model-1"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("test", "http://test:8000")
@@ -132,10 +142,10 @@ async def test_add_backend_empty_models():
 @pytest.mark.asyncio
 async def test_add_backend_no_provider():
     """Adding backend with no registered provider raises error."""
-    with patch.dict(ChatBotManager._providers, {"openai": MagicMock()}):
+    with patch.object(ChatBotManager, "_providers", {"openai": MagicMock()}):
         with pytest.raises(RuntimeError, match="No provider registered"):
             await ChatBotManager.add_backend(
-                "unknown-backend", "http://test:8000", api_type="unknown"
+                "unknown-backend", "http://test:8000", api_type="anthropic"
             )
 
 
@@ -143,7 +153,7 @@ async def test_add_backend_no_provider():
 async def test_add_backend_auto_detect_opens_ai():
     """Auto-detection tries OpenAI first and succeeds."""
     mock_providers = _mock_providers(openai_models=["model-1"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         backend = await ChatBotManager.add_backend("auto-backend", "http://test:8000")
@@ -155,7 +165,7 @@ async def test_add_backend_auto_detect_opens_ai():
 async def test_remove_backend_success():
     """Test successful backend removal."""
     mock_providers = _mock_providers(openai_models=["model-1"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("test", "http://test:8000")
@@ -177,7 +187,7 @@ async def test_remove_backend_not_found():
 async def test_list_chatbots_all():
     """Test listing all chatbots with wildcard pattern."""
     mock_providers = _mock_providers(openai_models=["model-a", "model-b"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("backend1", "http://test1:8000")
@@ -193,7 +203,7 @@ async def test_list_chatbots_all():
 async def test_list_chatbots_regex_filter():
     """Test filtering chatbots by regex pattern."""
     mock_providers = _mock_providers(openai_models=["qwen-7b", "qwen-14b", "mistral-7b"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("llm-backend", "http://test:8000")
@@ -209,7 +219,7 @@ async def test_list_chatbots_regex_filter():
 async def test_list_chatbots_no_match():
     """Test listing chatbots with no matches."""
     mock_providers = _mock_providers(openai_models=["model-1"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("test", "http://test:8000")
@@ -227,14 +237,18 @@ async def test_list_chatbots_multiple_backends():
     mock_providers = {}
     for api_type, models in [("openai", ["openai-model"]), ("anthropic", ["anthropic-model"])]:
         p = MagicMock()
-        if api_type == "openai":
-            p.create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
-        else:
-            p.create_chatbot = MagicMock(return_value=AnthropicChatBot(MagicMock(), MagicMock()))
+        p.create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()) if api_type == "openai" else AnthropicChatBot(MagicMock(), _chatbot_config()))
         p.list_models = AsyncMock(return_value=models)
         mock_providers[api_type] = p
 
-    with patch.dict(ChatBotManager._providers, mock_providers):
+    def auto_detect(backend_name, api_key):
+        """Return the api_type matching the backend name."""
+        if "openai" in backend_name:
+            return "openai", ["openai-model"]
+        return "anthropic", ["anthropic-model"]
+
+    with patch.object(ChatBotManager, "_detect_api_and_list_models", side_effect=auto_detect), \
+         patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("openai-backend", "http://openai:8000")
         await ChatBotManager.add_backend("anthropic-backend", "http://anthropic:8000")
 
@@ -250,7 +264,7 @@ async def test_list_chatbots_multiple_backends():
 async def test_load_from_json_openai():
     """Test loading OpenAI backend from JSON."""
     mock_providers = _mock_providers(openai_models=["local-model-1", "local-model-2"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     json_obj = {"backends": [{"name": "local-openai", "url": "http://localhost:8000"}]}
 
@@ -270,7 +284,7 @@ async def test_load_from_json_anthropic():
     from peteos.chatbot import AnthropicChatBot
 
     mock_providers = _mock_providers(anthropic_models=["claude-3-opus"])
-    mock_providers["anthropic"].create_chatbot = MagicMock(return_value=AnthropicChatBot(MagicMock(), MagicMock()))
+    mock_providers["anthropic"].create_chatbot = MagicMock(return_value=AnthropicChatBot(MagicMock(), _chatbot_config()))
 
     json_obj = {"backends": [{"name": "local-anthropic", "url": "http://localhost:8001"}]}
 
@@ -292,10 +306,7 @@ async def test_load_from_json_multiple_backends():
     mock_providers = {}
     for api_type, models in [("openai", ["model1", "model2"]), ("anthropic", ["anthropic-model"])]:
         p = MagicMock()
-        if api_type == "openai":
-            p.create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
-        else:
-            p.create_chatbot = MagicMock(return_value=AnthropicChatBot(MagicMock(), MagicMock()))
+        p.create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()) if api_type == "openai" else AnthropicChatBot(MagicMock(), _chatbot_config()))
         p.list_models = AsyncMock(return_value=models)
         mock_providers[api_type] = p
 
@@ -306,7 +317,13 @@ async def test_load_from_json_multiple_backends():
         ]
     }
 
-    with patch.dict(ChatBotManager._providers, mock_providers):
+    def auto_detect(backend_name, api_key):
+        if "backend1" in backend_name:
+            return "openai", ["model1", "model2"]
+        return "anthropic", ["anthropic-model"]
+
+    with patch.object(ChatBotManager, "_detect_api_and_list_models", side_effect=auto_detect), \
+         patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.load_from_json(json_obj)
 
     assert len(ChatBotManager._backends) == 2
@@ -320,7 +337,7 @@ async def test_load_from_json_multiple_backends():
 async def test_load_from_json_clears_existing():
     """Test that load_from_json clears existing backends."""
     mock_providers = _mock_providers(openai_models=["old-model"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("old", "http://old:8000")
@@ -329,7 +346,7 @@ async def test_load_from_json_clears_existing():
 
     json_obj = {"backends": [{"name": "new", "url": "http://new:8000"}]}
     mock_providers2 = _mock_providers(openai_models=["new-model"])
-    mock_providers2["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers2["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers2):
         await ChatBotManager.load_from_json(json_obj)
@@ -355,7 +372,7 @@ async def test_load_from_file(tmp_path):
     json_file.write_text('{"backends": [{"name": "file-backend", "url": "http://file:8000"}]}')
 
     mock_providers = _mock_providers(openai_models=["file-model"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.load_from_file(str(json_file))
@@ -379,7 +396,7 @@ async def test_load_from_file_invalid_json(tmp_path):
 async def test_reset_clears_all_state():
     """reset() clears backends and clients."""
     mock_providers = _mock_providers(openai_models=["model-1"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("test", "http://test:8000")
@@ -397,7 +414,7 @@ async def test_reset_clears_all_state():
 async def test_reset_allows_reload():
     """After reset, same backend name can be added again."""
     mock_providers = _mock_providers(openai_models=["model-1"])
-    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), MagicMock()))
+    mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
     with patch.dict(ChatBotManager._providers, mock_providers):
         await ChatBotManager.add_backend("test", "http://test:8000")
