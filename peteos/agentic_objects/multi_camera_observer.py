@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING
 import cv2
 
 from peteos.agentic_objects.camera_driver import CameraDriver
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 
 if TYPE_CHECKING:
     from peteos.session import Session
 
 
-class MultiCameraObserver(AgenticObjectBase):
+class MultiCameraObserver(AgenticObject):
     """Observer with access to multiple camera drivers.
 
     Registers drivers by name. When listing cameras, returns

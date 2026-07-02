@@ -8,7 +8,7 @@ import asyncio
 import sys
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 
 
@@ -27,7 +27,7 @@ class Grocery(Enum):
     BUTTER = "Butter"
 
 
-class GroceryList(AgenticObjectBase):
+class GroceryList(AgenticObject):
     """You manage a grocery list. Read the current list with list_items,
     add items with add_item, and clear the list with clear."""
 

@@ -6,10 +6,10 @@ Allow agents to create new agentic objects dynamically and add them to collectio
 
 ```python
 from dataclasses import dataclass
-from peteos import AgenticObjectBase, tool, invoke_agent, agentic_object
+from peteos import AgenticObject, tool, invoke_agent, agentic_object
 
 @agentic_object(allow_code_execution=True)
-class InventoryItem(AgenticObjectBase):
+class InventoryItem(AgenticObject):
     def __init__(self, name: str = "New Item", quantity: int = 0, category: str = "uncategorized"):
         self._name = name
         self._quantity = quantity
@@ -40,7 +40,7 @@ class InventoryItem(AgenticObjectBase):
         self._category = category
 
 @agentic_object(allow_code_execution=True)
-class InventoryManager(AgenticObjectBase):
+class InventoryManager(AgenticObject):
     def __init__(self):
         self._items = []
 

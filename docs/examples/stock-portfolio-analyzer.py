@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
@@ -32,7 +32,7 @@ class Holding:
 
 
 @agentic_object(allow_code_execution=True, imports=[math, random, statistics])
-class StockPortfolioAnalyzer(AgenticObjectBase):
+class StockPortfolioAnalyzer(AgenticObject):
     """You are a stock portfolio analyzer. You manage a portfolio of stock
     holdings, current prices, and historical returns. Use add_holding and
     set_price to manage data, list_holdings to inspect the portfolio, and

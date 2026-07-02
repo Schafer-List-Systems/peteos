@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
@@ -27,7 +27,7 @@ class TableInfo:
 
 
 @agentic_object(allow_code_execution=True)
-class SQLQueryBuilder(AgenticObjectBase):
+class SQLQueryBuilder(AgenticObject):
     """You are a SQL query builder. You manage a database schema and help
     construct safe SQL queries. Use list_tables and describe_table to
     explore the schema. The agent can build and validate queries using

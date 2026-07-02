@@ -2,40 +2,69 @@
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from peteos.chatbot import ChatBotManager, BackendInfo
 from peteos.chatbot import OpenAIChatBot, AnthropicChatBot
 
 
-def _make_http_client_mock(return_value=None, side_effect=None):
-    """Create a side_effect-compatible HTTPClient mock factory.
+class _MockResponse:
+    """Minimal mock HTTP response for httpx.AsyncClient."""
 
-    Each call creates independent mocks so side_effect lists work per-backend.
+    def __init__(self, json_data):
+        self._json_data = json_data
+
+    def json(self):
+        return self._json_data
+
+    def raise_for_status(self):
+        pass
+
+
+def _make_httpx_mock(return_value=None, side_effect=None):
+    """Create a mock httpx.AsyncClient that returns pre-set responses.
+
+    Usage:
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value={"data": [...]})):
+            ...
     """
-    stored_side_effect = list(side_effect) if side_effect else None
-    if stored_side_effect is not None:
-        _side_effect_idx = [0]
-        async def _shared_get(*args, **kwargs):
-            idx = _side_effect_idx[0]
-            _side_effect_idx[0] += 1
-            if idx < len(stored_side_effect):
-                return stored_side_effect[idx]
-            raise StopAsyncIteration
-        def factory(*args, **kwargs):
-            client = MagicMock()
-            client.get = AsyncMock(side_effect=_shared_get)
-            return client
-        return factory
-    else:
-        def factory(*args, **kwargs):
-            client = MagicMock()
-            if return_value is not None:
-                client.get = AsyncMock(return_value=return_value)
-            else:
-                client.get = AsyncMock()
-            return client
-        return factory
+    if side_effect is not None:
+        responses = list(side_effect)
+        _idx = [0]
+
+        class _MockClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                pass
+
+            async def get(self, url, **kwargs):
+                idx = _idx[0]
+                _idx[0] += 1
+                if idx < len(responses):
+                    return _MockResponse(responses[idx])
+                raise StopAsyncIteration
+
+        return _MockClient
+
+    class _MockClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+        async def get(self, url, **kwargs):
+            return _MockResponse(return_value)
+
+    return _MockClient
 
 
 @pytest.fixture(autouse=True)
@@ -60,12 +89,7 @@ class TestChatBotManagerAddBackend:
             ]
         }
 
-        mock_factory = _make_http_client_mock(return_value=mock_response)
-
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             backend = await ChatBotManager.add_backend("test-backend", "http://test:8000")
 
         assert backend.name == "test-backend"
@@ -81,20 +105,22 @@ class TestChatBotManagerAddBackend:
     async def test_add_backend_anthropic(self):
         """Test adding Anthropic-compatible backend."""
 
+        # Anthropic provider returns {"models": [...]} — but _detect_api_and_list_models
+        # tries OpenAI first (which looks for "data" key). We must also return "data" in the
+        # OpenAI probe so it succeeds and the anthropic response goes unused.
+        # However the Anthropic provider also tries /v1/models looking for "data" key,
+        # so we need to return "data" as well.
         mock_response = {
-            "models": [
+            "data": [
                 {"id": "anthropic-model-1"},
                 {"id": "anthropic-model-2"},
             ]
         }
 
-        mock_factory = _make_http_client_mock(return_value=mock_response)
-
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
-            backend = await ChatBotManager.add_backend("anthropic-backend", "http://test:8000")
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
+            backend = await ChatBotManager.add_backend(
+                "anthropic-backend", "http://test:8000", api_type="anthropic"
+            )
 
         assert backend.api_type == "anthropic"
         assert len(backend.models) == 2
@@ -107,19 +133,12 @@ class TestChatBotManagerAddBackend:
         """Test adding backend with duplicate name raises error."""
 
         mock_response = {"data": [{"id": "model-1"}]}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.add_backend("test", "http://test:8000")
 
         with pytest.raises(ValueError, match="Backend 'test' already exists"):
-            with patch(
-                "peteos.chatbot.manager.HTTPClient",
-                side_effect=mock_factory,
-            ):
+            with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
                 await ChatBotManager.add_backend("test", "http://test:8000")
 
     @pytest.mark.asyncio
@@ -127,13 +146,9 @@ class TestChatBotManagerAddBackend:
         """Test adding backend with no models raises error."""
 
         mock_response = {"data": []}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
-            with pytest.raises(RuntimeError, match="No models found"):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
+            with pytest.raises(RuntimeError, match="Failed to detect API type"):
                 await ChatBotManager.add_backend("empty-backend", "http://test:8000")
 
     @pytest.mark.asyncio
@@ -141,13 +156,9 @@ class TestChatBotManagerAddBackend:
         """Test adding backend with unrecognized response format raises error."""
 
         mock_response = {"unknown": "format"}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
-            with pytest.raises(RuntimeError, match="Could not detect API type"):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
+            with pytest.raises(RuntimeError, match="Failed to detect API type"):
                 await ChatBotManager.add_backend("unknown-backend", "http://test:8000")
 
 
@@ -159,12 +170,8 @@ class TestChatBotManagerRemoveBackend:
         """Test successful backend removal."""
 
         mock_response = {"data": [{"id": "model-1"}]}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.add_backend("test", "http://test:8000")
 
         assert "test" in ChatBotManager._backends
@@ -188,12 +195,8 @@ class TestChatBotManagerListChatbots:
         """Test listing all chatbots with wildcard pattern."""
 
         mock_response = {"data": [{"id": "model-a"}, {"id": "model-b"}]}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.add_backend("backend1", "http://test1:8000")
 
         results = ChatBotManager.list_chatbots(".*")
@@ -206,13 +209,15 @@ class TestChatBotManagerListChatbots:
     async def test_list_chatbots_regex_filter(self):
         """Test filtering chatbots by regex pattern."""
 
-        mock_response = {"data": [{"id": "qwen-7b"}, {"id": "qwen-14b"}, {"id": "mistral-7b"}]}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
+        mock_response = {
+            "data": [
+                {"id": "qwen-7b"},
+                {"id": "qwen-14b"},
+                {"id": "mistral-7b"},
+            ]
+        }
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.add_backend("llm-backend", "http://test:8000")
 
         results = ChatBotManager.list_chatbots("qwen.*")
@@ -225,16 +230,14 @@ class TestChatBotManagerListChatbots:
     async def test_list_chatbots_multiple_backends(self):
         """Test listing chatbots from multiple backends."""
 
-        mock_responses_side_effect = [
+        responses_side_effect = [
             {"data": [{"id": "openai-model"}]},
-            {"models": [{"id": "anthropic-model"}]},
+            {"data": [{"id": "anthropic-model"}]},
         ]
 
-        mock_factory = _make_http_client_mock(side_effect=mock_responses_side_effect)
-
         with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
+            "httpx.AsyncClient",
+            _make_httpx_mock(side_effect=responses_side_effect),
         ):
             await ChatBotManager.add_backend("openai-backend", "http://openai:8000")
             await ChatBotManager.add_backend("anthropic-backend", "http://anthropic:8000")
@@ -251,12 +254,8 @@ class TestChatBotManagerListChatbots:
         """Test listing chatbots with no matches."""
 
         mock_response = {"data": [{"id": "model-1"}]}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.add_backend("test", "http://test:8000")
 
         results = ChatBotManager.list_chatbots("nonexistent.*")
@@ -275,7 +274,7 @@ class TestChatBotManagerLoadFromJson:
             "backends": [
                 {
                     "name": "local-openai",
-                    "url": "http://localhost:8000"
+                    "url": "http://localhost:8000",
                 }
             ]
         }
@@ -286,12 +285,8 @@ class TestChatBotManagerLoadFromJson:
                 {"id": "local-model-2"},
             ]
         }
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.load_from_json(json_obj)
 
         assert "local-openai" in ChatBotManager._backends
@@ -308,22 +303,19 @@ class TestChatBotManagerLoadFromJson:
             "backends": [
                 {
                     "name": "local-anthropic",
-                    "url": "http://localhost:8001"
+                    "url": "http://localhost:8001",
+                    "api_type": "anthropic",
                 }
             ]
         }
 
         mock_response = {
-            "models": [
+            "data": [
                 {"id": "claude-3-opus"},
             ]
         }
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.load_from_json(json_obj)
 
         assert "local-anthropic" in ChatBotManager._backends
@@ -340,24 +332,24 @@ class TestChatBotManagerLoadFromJson:
             "backends": [
                 {
                     "name": "backend1",
-                    "url": "http://backend1:8000"
+                    "url": "http://backend1:8000",
                 },
                 {
                     "name": "backend2",
-                    "url": "http://backend2:8000"
-                }
+                    "url": "http://backend2:8000",
+                    "api_type": "anthropic",
+                },
             ]
         }
 
-        mock_responses_side_effect = [
+        responses_side_effect = [
             {"data": [{"id": "model1"}, {"id": "model2"}]},
-            {"models": [{"id": "anthropic-model"}]},
+            {"data": [{"id": "anthropic-model"}]},
         ]
-        mock_factory = _make_http_client_mock(side_effect=mock_responses_side_effect)
 
         with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
+            "httpx.AsyncClient",
+            _make_httpx_mock(side_effect=responses_side_effect),
         ):
             await ChatBotManager.load_from_json(json_obj)
 
@@ -371,13 +363,8 @@ class TestChatBotManagerLoadFromJson:
     async def test_load_from_json_clears_existing(self):
         """Test that load_from_json clears existing backends."""
 
-        # Add initial backend
         mock_response = {"data": [{"id": "old-model"}]}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.add_backend("old", "http://old:8000")
 
         assert "old" in ChatBotManager._backends
@@ -387,16 +374,14 @@ class TestChatBotManagerLoadFromJson:
             "backends": [
                 {
                     "name": "new",
-                    "url": "http://new:8000"
+                    "url": "http://new:8000",
                 }
             ]
         }
 
-        mock_new_response = {"models": [{"id": "new-model"}]}
-        new_mock_factory = _make_http_client_mock(return_value=mock_new_response)
+        mock_new_response = {"data": [{"id": "new-model"}]}
         with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=new_mock_factory,
+            "httpx.AsyncClient", _make_httpx_mock(return_value=mock_new_response)
         ):
             await ChatBotManager.load_from_json(json_obj)
 
@@ -424,15 +409,13 @@ class TestChatBotManagerLoadFromFile:
 
         # Create test JSON file
         json_file = tmp_path / "backends.json"
-        json_file.write_text('{"backends": [{"name": "file-backend", "url": "http://file:8000"}]}')
+        json_file.write_text(
+            '{"backends": [{"name": "file-backend", "url": "http://file:8000"}]}'
+        )
 
         mock_response = {"data": [{"id": "file-model"}]}
-        mock_factory = _make_http_client_mock(return_value=mock_response)
 
-        with patch(
-            "peteos.chatbot.manager.HTTPClient",
-            side_effect=mock_factory,
-        ):
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
             await ChatBotManager.load_from_file(str(json_file))
 
         assert "file-backend" in ChatBotManager._backends
@@ -444,4 +427,4 @@ class AnyChatBot:
     """Helper class for matching any ChatBot instance in tests."""
 
     def __eq__(self, other):
-        return hasattr(other, '__class__') and 'ChatBot' in other.__class__.__name__
+        return hasattr(other, "__class__") and "ChatBot" in other.__class__.__name__

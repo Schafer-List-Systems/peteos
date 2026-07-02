@@ -105,10 +105,10 @@ When multiple task IDs are extracted, tasks are invoked **sequentially** (not co
 ```python
 # apps/agentic_process/supervisor.py (stub)
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 
 
-class ProcessSupervisor(AgenticObjectBase):
+class ProcessSupervisor(AgenticObject):
     """OAP object that routes incoming emails to the correct
     pending task(s) within a process."""
 
@@ -249,10 +249,10 @@ def create_process_from_workflow(self) -> str:
 ```python
 # apps/agentic_process/dispatcher.py (stub)
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 
 
-class EmailDispatcher(AgenticObjectBase):
+class EmailDispatcher(AgenticObject):
     """OAP object that receives incoming emails and routes them
     to existing or newly created processes."""
 

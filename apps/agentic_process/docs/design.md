@@ -60,7 +60,7 @@ classDiagram
         DISABLED
     }
 
-    class AgenticObjectBase {
+    class AgenticObject {
         <<abstract>>
         +Role role
         +Agent agent
@@ -79,7 +79,7 @@ classDiagram
     Edge o-- Task : from
     Edge o-- Task : to
     Edge *-- EdgeState : has
-    Task --|> AgenticObjectBase : extends
+    Task --|> AgenticObject : extends
 ```
 
 ## Class Details
@@ -120,7 +120,7 @@ A `Process` is a runtime instance of a Workflow. It owns its own copies of all T
 
 ### `Task`
 
-Extends `AgenticObjectBase`. Each Task is itself an OAP object that can be invoked by an individual agent to perform work.
+Extends `AgenticObject`. Each Task is itself an OAP object that can be invoked by an individual agent to perform work.
 
 **Members:**
 - `task_id: str` — Unique identifier within the Workflow/Process
@@ -219,7 +219,7 @@ stateDiagram-v2
 
 1. **Process copies Tasks/Edges from Workflow** — A Workflow is a pure template. Each `create_process()` call produces a Process with its own Task instances. This allows multiple concurrent Processes from the same Workflow without state leakage.
 
-2. **Task extends AgenticObjectBase** — Each Task is a full OAP object, meaning it can have tools, be invoked by agents, and maintain its own internal state via the OAP infrastructure. This is the core of the agentic process model: tasks are not dumb data containers, they are autonomous agents.
+2. **Task extends AgenticObject** — Each Task is a full OAP object, meaning it can have tools, be invoked by agents, and maintain its own internal state via the OAP infrastructure. This is the core of the agentic process model: tasks are not dumb data containers, they are autonomous agents.
 
 3. **Edge `condition` maps to JSON `label`** — The `condition` member on Edge stores the value from the canvas file's `label` key (e.g. "Ja", "Nein"). When a task completes, the agent running that task evaluates the conditions on outgoing edges and enables or disables them accordingly.
 

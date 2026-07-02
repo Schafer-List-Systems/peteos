@@ -66,9 +66,9 @@ Clear the internal lines array and reset file path and modification time trackin
 To use the TextEditor, derive from it as a parent class of your agentic object:
 
 ```python
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 
-class MyAgent(TextEditor, AgenticObjectBase):
+class MyAgent(TextEditor, AgenticObject):
     """You are an agent that can edit text files."""
 ```
 

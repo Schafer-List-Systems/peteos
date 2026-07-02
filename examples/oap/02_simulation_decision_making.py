@@ -12,10 +12,10 @@ Usage:
 import sys
 from dataclasses import dataclass
 
-from peteos import AgenticObjectBase, Error, tool
+from peteos import AgenticObject, Error, tool
 
 
-class LocationRecord(AgenticObjectBase):
+class LocationRecord(AgenticObject):
     """A position in a 2D simulation space."""
 
     def __init__(self, x: float = 0.0, y: float = 0.0):
@@ -47,7 +47,7 @@ class LocationRecord(AgenticObjectBase):
         self._y = y
 
 
-class TaskRecord(AgenticObjectBase):
+class TaskRecord(AgenticObject):
     """A task in the simulation."""
 
     def __init__(self):
@@ -85,7 +85,7 @@ class Decision:
     reason: str
 
 
-class NPC(AgenticObjectBase):
+class NPC(AgenticObject):
     """A simulated character that reasons over its state to decide actions."""
 
     def __init__(self):

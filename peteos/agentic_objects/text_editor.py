@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
 @agentic_object()
-class TextEditor(AgenticObjectBase):
+class TextEditor(AgenticObject):
     """You are a text editor. You hold text as a list of lines in memory.
 
     Use `load` to read a file into your internal representation.

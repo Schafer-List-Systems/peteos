@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 from peteos.utils import get_logger
 
@@ -40,7 +40,7 @@ _MINIMAL_ENV: dict[str, str] = {
 }
 
 
-class BashWorkspace(AgenticObjectBase):
+class BashWorkspace(AgenticObject):
     """You are a secure bash workspace for executing shell commands.
 
     You can run bash commands on files placed in your workspace. You have

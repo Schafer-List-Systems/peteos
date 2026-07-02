@@ -6,7 +6,7 @@ Invoke sub-agents on nested agentic objects for context-isolated reasoning.
 
 ```python
 from dataclasses import dataclass
-from peteos import AgenticObjectBase, tool, invoke_agent, agentic_object
+from peteos import AgenticObject, tool, invoke_agent, agentic_object
 
 @dataclass
 class PriceData:
@@ -14,7 +14,7 @@ class PriceData:
     currency: str
 
 @agentic_object(invoke_sub_agents=True)
-class PriceRecord(AgenticObjectBase):
+class PriceRecord(AgenticObject):
     def __init__(self, raw_value: str = "100 USD"):
         self._raw_value = raw_value
 
@@ -28,7 +28,7 @@ class PriceRecord(AgenticObjectBase):
         """Extract numeric value from raw_value."""
         ...
 
-class InventoryItem(AgenticObjectBase):
+class InventoryItem(AgenticObject):
     def __init__(self, name: str, price: PriceRecord):
         self._name = name
         self._price = price
@@ -42,7 +42,7 @@ class InventoryItem(AgenticObjectBase):
         return self._price
 
 @agentic_object(allow_code_execution=True)
-class InventoryManager(AgenticObjectBase):
+class InventoryManager(AgenticObject):
     def __init__(self):
         self._items = [
             InventoryItem(name="Widget A", price=PriceRecord(raw_value="100 USD")),

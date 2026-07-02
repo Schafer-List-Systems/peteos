@@ -28,7 +28,7 @@ Supported MIME types:
 An agentic object can push images *into* the agent's context during invocation. This is how a tool implemented by the developer can send an image to the agent for analysis:
 
 ```python
-class ImageAnalyzer(AgenticObjectBase):
+class ImageAnalyzer(AgenticObject):
     """You analyze images sent by the user."""
 
     @tool(description="Send the processed image to the agent for analysis.")
@@ -50,7 +50,7 @@ When `allow_media_access=True` is set on the agentic class (via the `@agentic_ob
 
 ```python
 @agentic_object(allow_media_access=True)
-class ImageAnalyst(AgenticObjectBase):
+class ImageAnalyst(AgenticObject):
     """You can read and reason about images. Use read_media to inspect files."""
 ```
 

@@ -8,10 +8,10 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from peteos.oap.base import AgenticObjectBase, Error
+from peteos.oap.base import AgenticObject, Error
 
 
-class PdfTranscriber(AgenticObjectBase):
+class PdfTranscriber(AgenticObject):
     """You are a PDF page transcriber.
 
     Given a single-page PDF image, produce:

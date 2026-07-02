@@ -13,11 +13,11 @@ import sys
 
 from dataclasses import dataclass
 
-from peteos import AgenticObjectBase, Error, agentic_object, tool
+from peteos import AgenticObject, Error, agentic_object, tool
 
 
 @agentic_object(allow_code_execution=True)
-class InventoryItem(AgenticObjectBase):
+class InventoryItem(AgenticObject):
     """A single inventory item with name, quantity, and category."""
 
     def __init__(self, name: str = "New Item", quantity: int = 0, category: str = "uncategorized"):
@@ -58,7 +58,7 @@ class InventoryItem(AgenticObjectBase):
 
 
 @agentic_object(allow_code_execution=True, imports=[InventoryItem])
-class InventoryManager(AgenticObjectBase):
+class InventoryManager(AgenticObject):
     """Manages a collection of inventory items. Uses sandboxed code to create new items."""
 
     def __init__(self):

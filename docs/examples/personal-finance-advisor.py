@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
@@ -22,7 +22,7 @@ class Category(Enum):
 
 
 @agentic_object(allow_code_execution=True)
-class PersonalFinanceAdvisor(AgenticObjectBase):
+class PersonalFinanceAdvisor(AgenticObject):
     """You are a personal finance advisor. You manage income, track expenses,
     and provide financial recommendations. Use list_entries and add_entry
     to interact with the transaction ledger, and recommend_budget to get

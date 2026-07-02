@@ -84,7 +84,7 @@ When `invoke_sub_agents` is enabled on the agentic class, the agent can invoke a
 from peteos.oap.decorators import agentic_object
 
 @agentic_object(invoke_sub_agents=True)
-class Supervisor(AgenticObjectBase):
+class Supervisor(AgenticObject):
     """You are a supervisor. Delegate tasks to specialists."""
 
     def __init__(self):

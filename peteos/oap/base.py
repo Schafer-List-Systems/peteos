@@ -1,4 +1,4 @@
-"""AgenticObjectBase - base class for all OAP objects."""
+"""AgenticObject - base class for all OAP objects."""
 
 from __future__ import annotations
 
@@ -30,18 +30,18 @@ def _build_system_prompt(cls: type) -> str:
     """Build the system prompt for a concrete agentic object class.
 
     Collects docstrings from classes in the MRO that directly inherit
-    from AgenticObjectBase (concrete agentic objects), ordered from
+    from AgenticObject (concrete agentic objects), ordered from
     most-derived to base. Prepends standard behaviour directives.
     """
     class_name = cls.__name__
 
     # Collect only concrete agentic objects — classes that directly
-    # inherit from AgenticObjectBase — in MRO order (derived first).
+    # inherit from AgenticObject — in MRO order (derived first).
     doc_parts: list[str] = []
     for parent in cls.__mro__:
-        if parent in (AgenticObjectBase, object):
+        if parent in (AgenticObject, object):
             continue
-        if AgenticObjectBase not in parent.__bases__:
+        if AgenticObject not in parent.__bases__:
             continue
         parent_doc = (parent.__doc__ or "").strip()
         if parent_doc:
@@ -60,7 +60,7 @@ def _build_system_prompt(cls: type) -> str:
 
 
 def _collect_oap_config(cls: type) -> dict[str, Any]:
-    """Collect and merge OAP config from all classes in the MRO that directly inherit from AgenticObjectBase.
+    """Collect and merge OAP config from all classes in the MRO that directly inherit from AgenticObject.
 
     Mirrors the MRO iteration in _build_system_prompt. Collects the union of
     all imports, merges import_aliases, and ORs all boolean flags across the
@@ -73,9 +73,9 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     allow_media_access = False
     invoke_sub_agents = False
     for parent in cls.__mro__:
-        if parent in (AgenticObjectBase, object):
+        if parent in (AgenticObject, object):
             continue
-        if AgenticObjectBase not in parent.__bases__:
+        if AgenticObject not in parent.__bases__:
             continue
         cfg = getattr(parent, "_oap_config", None)
         if cfg:
@@ -99,7 +99,7 @@ from peteos.utils._schema import get_schema_description, parse_data
 from peteos.persona.agent import Agent
 
 
-class AgenticObjectBase:
+class AgenticObject:
     """Base class for all Object-Agentic Programming objects.
 
     All subclasses are auto-registered in AgenticObjectRegistry.
@@ -634,13 +634,13 @@ class AgenticObjectBase:
 
     async def invoke(
         self,
-        target: "AgenticObjectBase",
+        target: "AgenticObject",
         prompt: str,
         output_schema: type | None = None,
         persistent: bool = False,
         timeout: float | None = None,
     ) -> Any:
-        """Invoke a sub-agent on a target AgenticObjectBase.
+        """Invoke a sub-agent on a target AgenticObject.
 
         Verifies that self allows sub-agent invocation, then forwards to
         target.invoke_agent().

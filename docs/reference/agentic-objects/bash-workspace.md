@@ -61,7 +61,7 @@ Files outside the workspace directory are rejected.
 To use the BashWorkspace, derive from it as a parent class of your agentic object:
 
 ```python
-class MyAgent(BashWorkspace, AgenticObjectBase):
+class MyAgent(BashWorkspace, AgenticObject):
     """You are an agent with a secure bash workspace."""
 ```
 

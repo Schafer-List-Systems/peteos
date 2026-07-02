@@ -1,4 +1,4 @@
-"""Registry for auto-discovered AgenticObjectBase subclasses."""
+"""Registry for auto-discovered AgenticObject subclasses."""
 
 import importlib
 import pkgutil
@@ -6,36 +6,36 @@ from typing import Type
 
 
 class AgenticObjectRegistry:
-    """Registry of auto-discovered AgenticObjectBase subclasses, keyed by class name."""
+    """Registry of auto-discovered AgenticObject subclasses, keyed by class name."""
 
     _registry: dict[str, Type] = {}
 
     @classmethod
     def register(cls, agentic_class: Type) -> None:
-        """Register an AgenticObjectBase subclass.
+        """Register an AgenticObject subclass.
 
-        Called automatically by AgenticObjectBase.__init_subclass__().
+        Called automatically by AgenticObject.__init_subclass__().
 
         Args:
-            agentic_class: A subclass of AgenticObjectBase.
+            agentic_class: A subclass of AgenticObject.
         """
         cls._registry[agentic_class.__name__] = agentic_class
 
     @classmethod
     def get(cls, name: str) -> Type | None:
-        """Look up an AgenticObjectBase subclass by name.
+        """Look up an AgenticObject subclass by name.
 
         Args:
             name: The class name.
 
         Returns:
-            The AgenticObjectBase subclass, or None if not found.
+            The AgenticObject subclass, or None if not found.
         """
         return cls._registry.get(name)
 
     @classmethod
     def get_all(cls) -> dict[str, Type]:
-        """Return all registered AgenticObjectBase subclasses.
+        """Return all registered AgenticObject subclasses.
 
         Returns:
             Dict mapping class name to class.
@@ -53,10 +53,10 @@ class AgenticObjectRegistry:
         base_package: str = "peteos",
         sub_package: str | None = None,
     ) -> int:
-        """Discover and register AgenticObjectBase subclasses by importing modules.
+        """Discover and register AgenticObject subclasses by importing modules.
 
         Walks the specified package, imports each .py module, and lets
-        AgenticObjectBase.__init_subclass__ handle auto-registration.
+        AgenticObject.__init_subclass__ handle auto-registration.
 
         Args:
             base_package: The top-level package to scan (default: "peteos").

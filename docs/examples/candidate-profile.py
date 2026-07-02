@@ -9,7 +9,7 @@ import sys
 import asyncio
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 
 
@@ -20,7 +20,7 @@ class JobRole(Enum):
     NOT_FITTING = "not-fitting"
 
 
-class CandidateProfile(AgenticObjectBase):
+class CandidateProfile(AgenticObject):
     """You are a candidate profiler.
        You reason about job applicants' biographies to determine
        which role they are best suited for and extract their skills.

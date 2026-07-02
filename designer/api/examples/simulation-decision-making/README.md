@@ -6,9 +6,9 @@ Use agent reasoning to drive decisions in simulations — game NPCs, robots, or 
 
 ```python
 from dataclasses import dataclass
-from peteos import AgenticObjectBase, tool, invoke_agent
+from peteos import AgenticObject, tool, invoke_agent
 
-class LocationRecord(AgenticObjectBase):
+class LocationRecord(AgenticObject):
     def __init__(self, x: float = 0.0, y: float = 0.0):
         self._x = x
         self._y = y
@@ -28,7 +28,7 @@ class LocationRecord(AgenticObjectBase):
         """Calculate Euclidean distance to another location."""
         ...
 
-class TaskRecord(AgenticObjectBase):
+class TaskRecord(AgenticObject):
     def __init__(self):
         self._description = "Fetch water"
         self._priority = 5
@@ -46,7 +46,7 @@ class TaskRecord(AgenticObjectBase):
     def get_target_location(self) -> LocationRecord:
         return self._target_location
 
-class NPC(AgenticObjectBase):
+class NPC(AgenticObject):
     def __init__(self):
         self._position = LocationRecord()
         self._hunger = 75.0  # 0-100

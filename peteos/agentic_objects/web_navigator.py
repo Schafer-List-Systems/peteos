@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 from peteos.utils import get_logger
 
@@ -85,7 +85,7 @@ def _extract_text(html: str) -> tuple[str, list[dict]]:
 
 
 @agentic_object(allow_code_execution=False)
-class WebNavigator(AgenticObjectBase):
+class WebNavigator(AgenticObject):
     """You are a web navigator agentic object with tools to fetch, render, and screenshot web pages.
 
     Use ``fetch_text`` for fast retrieval of static HTML pages (most informational sites).

@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING
 import cv2
 
 from peteos.agentic_objects.camera_driver import CameraDriver, CV2CameraDriver
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 
 if TYPE_CHECKING:
     from peteos.session import Session
 
 
-class CameraObserver(AgenticObjectBase):
+class CameraObserver(AgenticObject):
     """You are an observer with access to cameras.
 
     Only one camera can be open at a time. Grabbed images can be read using read_cached_image.

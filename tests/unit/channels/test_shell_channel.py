@@ -97,7 +97,7 @@ class TestShellChannelSend:
         original_print = builtins.print
         builtins.print = mock_print
         try:
-            asyncio.get_event_loop().run_until_complete(channel.send("hello world"))
+            asyncio.run(channel.send("hello world"))
         finally:
             builtins.print = original_print
 

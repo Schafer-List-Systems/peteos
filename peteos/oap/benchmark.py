@@ -2,7 +2,7 @@
 
 Provides BenchmarkRunner, BenchmarkRow, BenchmarkReport, and
 LLM-based comparison functions for statistical evaluation of
-AgenticObjectBase instances.
+AgenticObject instances.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import sys
 from itertools import product
 from typing import TYPE_CHECKING, Any, Callable
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 from peteos.oap.error import Error
 
@@ -33,10 +33,10 @@ class BenchmarkRow:
         self.output_dimensions: dict[str, Any] = {}
 
 
-class BenchmarkReport(AgenticObjectBase):
+class BenchmarkReport(AgenticObject):
     """Agentic report over benchmark results.
 
-    Inherits AgenticObjectBase so it has its own agent for invoke_agent()
+    Inherits AgenticObject so it has its own agent for invoke_agent()
     and reason() via invoke_agent. Also provides filter and aggregation methods.
 
     Attributes:
@@ -265,7 +265,7 @@ class BenchmarkRunner:
 # --- LLM-based comparison functions ---
 
 
-class AgenticStringComparator(AgenticObjectBase):
+class AgenticStringComparator(AgenticObject):
     """You are a String Comparator answering questions with true or false."""
 
     _instance: AgenticStringComparator | None = None

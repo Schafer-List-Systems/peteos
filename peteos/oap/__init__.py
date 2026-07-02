@@ -1,6 +1,6 @@
 """OAP - Object-Agentic Programming for peteos."""
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.error import Error
 from peteos.oap.benchmark import (
@@ -11,7 +11,7 @@ from peteos.oap.benchmark import (
 )
 
 __all__ = [
-    "AgenticObjectBase",
+    "AgenticObject",
     "AgenticStringComparator",
     "BenchmarkReport",
     "BenchmarkRow",

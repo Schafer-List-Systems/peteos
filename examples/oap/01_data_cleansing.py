@@ -12,11 +12,11 @@ Usage:
 import sys
 from dataclasses import dataclass
 
-from peteos import AgenticObjectBase, Error, tool
+from peteos import AgenticObject, Error, tool
 from peteos.chatbot.manager import ChatBotManager
 
 
-class PersonRecord(AgenticObjectBase):
+class PersonRecord(AgenticObject):
     """A person record with messy personal data for normalization."""
 
     def __init__(self):

@@ -29,7 +29,7 @@ import math
 import statistics
 
 @agentic_object(allow_code_execution=True, imports=[math, statistics])
-class Calculator(AgenticObjectBase):
+class Calculator(AgenticObject):
     """You compute statistics on provided data."""
 ```
 

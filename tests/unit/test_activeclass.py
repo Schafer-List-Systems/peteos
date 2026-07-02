@@ -6,7 +6,7 @@ import pytest
 from peteos.utils.activeclass import ActiveClass
 
 
-class TestableActive(ActiveClass):
+class ActiveHarness(ActiveClass):
     """ActiveClass subclass with a testable run() loop."""
 
     def __init__(self, *args, **kwargs):
@@ -25,7 +25,7 @@ class TestActiveClassInit:
     """Test ActiveClass initialization and default state."""
 
     def test_default_state(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         assert obj.is_running() is False
         assert obj._loop_task is None
         assert obj._running is False
@@ -43,7 +43,7 @@ class TestStartStop:
 
     @pytest.mark.asyncio
     async def test_start_sets_running(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         await obj.start()
         assert obj.is_running() is True
         assert obj._loop_task is not None
@@ -52,7 +52,7 @@ class TestStartStop:
 
     @pytest.mark.asyncio
     async def test_stop_cancels_task(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         await obj.start()
         await obj.stop()
         assert obj.is_running() is False
@@ -60,7 +60,7 @@ class TestStartStop:
 
     @pytest.mark.asyncio
     async def test_start_already_running_raises(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         await obj.start()
         with pytest.raises(RuntimeError, match="already running"):
             await obj.start()
@@ -68,13 +68,13 @@ class TestStartStop:
 
     @pytest.mark.asyncio
     async def test_stop_not_running_is_noop(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         await obj.stop()  # should not raise
         assert obj.is_running() is False
 
     @pytest.mark.asyncio
     async def test_stop_twice_is_noop(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         await obj.start()
         await obj.stop()
         await obj.stop()  # should not raise
@@ -85,18 +85,18 @@ class TestPushEvent:
     """Test push_event() and event queue."""
 
     def test_push_event_adds_to_queue(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         obj.push_event("hello")
         assert not obj.event_queue.empty()
         assert obj.event_queue.get_nowait() == "hello"
 
     def test_push_event_sets_trigger(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         obj.push_event("data")
         assert obj._event_trigger.is_set()
 
     def test_push_event_different_types(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         obj.push_event(42)
         obj.push_event({"key": "value"})
         obj.push_event([1, 2, 3])
@@ -110,7 +110,7 @@ class TestWait:
 
     @pytest.mark.asyncio
     async def test_wait_returns_pushed_event(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
 
         async def push_later():
             await asyncio.sleep(0.05)
@@ -122,20 +122,20 @@ class TestWait:
 
     @pytest.mark.asyncio
     async def test_wait_immediate_return(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         obj.push_event("instant")
         result = await obj._wait()
         assert result == "instant"
 
     @pytest.mark.asyncio
     async def test_wait_timeout_returns_none(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         result = await obj._wait(timeout=0.05)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_wait_blocks_without_polling(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
 
         async def push_later():
             await asyncio.sleep(0.05)
@@ -151,7 +151,7 @@ class TestSequentialEvents:
 
     @pytest.mark.asyncio
     async def test_sequential_events(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         await obj.start()
 
         async def pusher():
@@ -172,7 +172,7 @@ class TestRunLoop:
 
     @pytest.mark.asyncio
     async def test_run_loop_processes_events_and_stops(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         await obj.start()
 
         async def event_provider():
@@ -192,7 +192,7 @@ class TestRunLoop:
 
     @pytest.mark.asyncio
     async def test_run_with_immediate_stop(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         await obj.start()
 
         async def stop_immediately():
@@ -214,7 +214,7 @@ class TestConcurrency:
 
     @pytest.mark.asyncio
     async def test_concurrent_push_events(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         num_pushes = 50
 
         async def pusher(i):
@@ -236,7 +236,7 @@ class TestConcurrency:
 
     @pytest.mark.asyncio
     async def test_concurrent_wait_and_push(self):
-        obj = TestableActive()
+        obj = ActiveHarness()
         # No start() — just test _wait() concurrency directly
         results: list = []
 

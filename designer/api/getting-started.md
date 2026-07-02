@@ -7,9 +7,9 @@ Object-agentic programming lets you write normal Python classes and expose their
 ## Step 1: Create an Agent Object
 
 ```python
-from peteos import AgenticObjectBase, tool
+from peteos import AgenticObject, tool
 
-class InventoryManager(AgenticObjectBase):
+class InventoryManager(AgenticObject):
     def __init__(self):
         self._items = ["Flour", "Hammer", "Sugar", "Nails", "Paint"]
 
@@ -31,7 +31,7 @@ class InventoryManager(AgenticObjectBase):
 The agent has `get_items` and `set_items` as direct tool calls. `internal_method` is not available as a tool call.
 
 Key points:
-- **Inherit** from `AgenticObjectBase`
+- **Inherit** from `AgenticObject`
 - **`@tool`** on every method you want the agent to call directly — getters, setters, and actions
 - Read-only: only a getter method (no setter)
 - Read-write: getter + setter, both decorated with `@tool`
@@ -103,7 +103,7 @@ The agent can write sandboxed Python code to iterate, create objects, call metho
 
 ```python
 @agentic_object(imports=[time, decimal], allow_code_execution=True)
-class PriceRecord(AgenticObjectBase):
+class PriceRecord(AgenticObject):
     ...
 ```
 
@@ -135,7 +135,7 @@ Objects can contain other agentic objects as member variables. The parent agent 
 
 ```python
 from dataclasses import dataclass
-from peteos import AgenticObjectBase, tool, agentic_object
+from peteos import AgenticObject, tool, agentic_object
 from peteos import invoke_agent
 
 @dataclass
@@ -143,7 +143,7 @@ class Answer:
     response: str
 
 @agentic_object(invoke_sub_agents=True)
-class Child(AgenticObjectBase):
+class Child(AgenticObject):
     def __init__(self, name: str, hunger: float, tiredness: float):
         self._name = name
         self._hunger = hunger  # 0-100
@@ -155,7 +155,7 @@ class Child(AgenticObjectBase):
         return {"name": self._name, "hunger": self._hunger, "tiredness": self._tiredness}
 
 @agentic_object(allow_code_execution=True)
-class Parent(AgenticObjectBase):
+class Parent(AgenticObject):
     def __init__(self):
         self._children = [
             Child("Alice", hunger=70.0, tiredness=30.0),
