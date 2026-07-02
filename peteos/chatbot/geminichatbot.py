@@ -441,7 +441,28 @@ class GeminiChatBotResponse(GenericChatBotResponse):
                         if fr in ("STOP", "MAX_TOKENS"):
                             break
             except json.JSONDecodeError:
-                _logger.warning("Failed to parse Gemini stream: %s", combined[:200])
+                # Check if the response is an error dict in non-stream format
+                # (e.g., Gemini API returning a raw error response instead of a stream)
+                try:
+                    error_body = json.loads(combined)
+                    if isinstance(error_body, dict) and (
+                        "error" in error_body or "code" in error_body or "status" in error_body
+                    ):
+                        self._data["error"] = str(error_body.get("error", error_body))
+                        _logger.error(
+                            "Gemini returned error response (non-stream format): %s",
+                            combined[:300],
+                        )
+                        return
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                # Truly unparseable — raise to terminate the stream
+                _logger.error(
+                    "Gemini stream returned unparseable response: %s", combined[:200]
+                )
+                raise RuntimeError(
+                    f"Gemini stream returned unparseable response: {combined[:200]}"
+                )
 
         return _stream_generator().__aiter__()
 
