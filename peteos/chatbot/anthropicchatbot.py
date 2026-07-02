@@ -225,13 +225,12 @@ class AnthropicChatBot(ChatBot):
                 for part in msg.content:
                     if part.type == "tool":
                         raw = part.raw_dict
-                        # Anthropic expects "input_schema" instead of "parameters"
-                        tool_def = dict(raw)
-                        if "parameters" in tool_def:
+                        # Strip internal fields before sending to Anthropic
+                        tool_def = {k: v for k, v in raw.items() if k not in ("type", "parameters")}
+                        if "parameters" in raw:
                             tool_def["input_schema"] = self._translate_tool_params_to_anthropic(
-                                tool_def.get("parameters", {})
+                                raw.get("parameters", {})
                             )
-                        del tool_def["parameters"]
                         tools.append(tool_def)
             elif role in ("user", "assistant"):
                 # Conversation messages
