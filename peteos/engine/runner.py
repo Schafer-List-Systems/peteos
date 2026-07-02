@@ -515,8 +515,9 @@ class Runner(ActiveClass):
             except Exception as e:
                 _logger.error("[runner] step() raised exception: %s: %r", type(e).__name__, e)
                 self._idle.set()
-                have_new_message = False
                 continue
+            finally:
+                have_new_message = False
 
             _logger.debug("[runner] step() returned status=%s", status)
             hook_status = await self.execution_environment.call_hooks("after_step", status)
