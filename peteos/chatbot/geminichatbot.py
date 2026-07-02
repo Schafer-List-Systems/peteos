@@ -282,12 +282,13 @@ class GeminiChatBot(ChatBot):
                 if parts:
                     messages.append({"role": "user", "parts": parts})
                     current_role = "user"
-            elif role in ("user", "assistant"):
+            elif role in ("user", "assistant", "model"):
                 # Conversation message
                 parts = []
                 for part in msg.content:
                     raw = part.raw_dict
-                    if raw.get("type") == "tool_calls":
+                    part_type = raw.get("type")
+                    if part_type == "tool_calls":
                         # Expand tool_calls to functionCall parts
                         for tc in raw.get("tool_calls", []):
                             parts.append({
@@ -296,13 +297,21 @@ class GeminiChatBot(ChatBot):
                                     "args": json.loads(tc.get("arguments", "{}")),
                                 }
                             })
+                    elif part_type == "tool_use":
+                        # Reconstruct functionCall from stored tool_use (response → next turn)
+                        parts.append({
+                            "functionCall": {
+                                "name": raw.get("name"),
+                                "args": json.loads(raw.get("arguments", "{}")),
+                            }
+                        })
                     else:
                         # Convert content part to Gemini format
                         part_data = self._build_gemini_content_part(part)
                         if part_data:
                             parts.append(part_data)
 
-                gemini_role = "model" if role == "assistant" else "user"
+                gemini_role = "model" if role in ("assistant", "model") else "user"
                 if parts:
                     messages.append({"role": gemini_role, "parts": parts})
                     current_role = gemini_role
