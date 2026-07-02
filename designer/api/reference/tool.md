@@ -16,7 +16,7 @@ def tool(
 
 ## Description
 
-Marks a method on an `AgenticObjectBase` subclass as callable by agents. The agent's reasoning loop treats every `@tool` method as an available action.
+Marks a method on an `AgenticObject` subclass as callable by agents. The agent's reasoning loop treats every `@tool` method as an available action.
 
 ## Parameters
 
@@ -28,9 +28,9 @@ Marks a method on an `AgenticObjectBase` subclass as callable by agents. The age
 ## Usage
 
 ```python
-from peteos import AgenticObjectBase, tool
+from peteos import AgenticObject, tool
 
-class InventoryManager(AgenticObjectBase):
+class InventoryManager(AgenticObject):
     def __init__(self):
         self._items = ["Flour", "Hammer", "Sugar"]
 
@@ -71,7 +71,7 @@ Parameters and return types are always derived from the method signature. Only n
 
 ## Rules
 
-- Must be applied to methods of classes that inherit from `AgenticObjectBase`
+- Must be applied to methods of classes that inherit from `AgenticObject`
 - All `@tool` methods are collected via reflection when `invoke_agent()` is called
 - Undecorated methods are invisible to agents — callable only from normal Python code
 - Without parameters: name derived from method name, description from docstring

@@ -1,23 +1,23 @@
-"""Tests for AgenticObjectBase."""
+"""Tests for AgenticObject."""
 
 import pytest
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.error import Error
 from peteos.persona.toolmanager import ToolManager
 
 
-class TestAgenticObjectBaseInit:
+class TestAgenticObjectInit:
     def test_default_init(self):
-        obj = AgenticObjectBase()
+        obj = AgenticObject()
         assert obj.agent is not None
         assert obj.role is not None
-        assert obj.role.name == "oap_AgenticObjectBase"
+        assert obj.role.name == "oap_AgenticObject"
         assert isinstance(obj._oap_tool_manager, ToolManager)
 
     def test_agent_property(self):
-        obj = AgenticObjectBase()
+        obj = AgenticObject()
         original = obj.agent
         assert original is not None
         obj.agent = "mock_agent"
@@ -26,28 +26,28 @@ class TestAgenticObjectBaseInit:
         obj.agent = original
 
     def test_role_auto_created(self):
-        obj = AgenticObjectBase()
+        obj = AgenticObject()
         assert isinstance(obj.role, type(obj.role))
 
     def test_system_prompt_default_no_docstring(self):
-        obj = AgenticObjectBase()
-        assert "You are an agent working on a AgenticObjectBase object" in obj.role.system_prompt
+        obj = AgenticObject()
+        assert "You are an agent working on a AgenticObject object" in obj.role.system_prompt
 
     def test_system_prompt_from_class_docstring(self):
-        class DocstringObj(AgenticObjectBase):
+        class DocstringObj(AgenticObject):
             """You are a special analysis agent."""
         obj = DocstringObj()
         assert obj.role.system_prompt == "You are a special analysis agent."
         assert "You are an agent working on a DocstringObj object" not in obj.role.system_prompt
 
     def test_system_prompt_empty_docstring_falls_back(self):
-        class EmptyDocstringObj(AgenticObjectBase):
+        class EmptyDocstringObj(AgenticObject):
             """"""
         obj = EmptyDocstringObj()
         assert "You are an agent working on a EmptyDocstringObj object" in obj.role.system_prompt
 
     def test_system_prompt_strips_whitespace(self):
-        class WhitespaceDocstringObj(AgenticObjectBase):
+        class WhitespaceDocstringObj(AgenticObject):
             """
 
             You are a whitespacey agent.
@@ -113,7 +113,7 @@ class TestToolRegistry:
 # --- Module-level class fixtures (avoids Python 3.12 closure issue) ---
 
 @agentic_object()
-class SimpleToolObj(AgenticObjectBase):
+class SimpleToolObj(AgenticObject):
     @tool()
     def hello(self, name: str) -> str:
         """Say hello."""
@@ -124,7 +124,7 @@ class SimpleToolObj(AgenticObjectBase):
 
 
 @agentic_object()
-class MultiToolObj(AgenticObjectBase):
+class MultiToolObj(AgenticObject):
     @tool()
     def hello(self, name: str) -> str:
         """Say hello."""
@@ -137,7 +137,7 @@ class MultiToolObj(AgenticObjectBase):
 
 
 @agentic_object()
-class ParentToolObj(AgenticObjectBase):
+class ParentToolObj(AgenticObject):
     @tool()
     def parent_tool(self) -> str:
         """Parent tool."""
@@ -153,7 +153,7 @@ class ChildToolObj(ParentToolObj):
 
 
 @agentic_object()
-class ParentOverrideObj(AgenticObjectBase):
+class ParentOverrideObj(AgenticObject):
     @tool()
     def tool_a(self) -> str:
         """Parent version."""
@@ -169,7 +169,7 @@ class OverrideToolObj(ParentOverrideObj):
 
 
 @agentic_object()
-class CustomNameToolObj(AgenticObjectBase):
+class CustomNameToolObj(AgenticObject):
     @tool(name="custom_name")
     def internal_method(self) -> str:
         """Custom name."""
@@ -177,7 +177,7 @@ class CustomNameToolObj(AgenticObjectBase):
 
 
 @agentic_object()
-class DocstringToolObj(AgenticObjectBase):
+class DocstringToolObj(AgenticObject):
     @tool()
     def my_tool(self) -> str:
         """This is the description."""
@@ -185,7 +185,7 @@ class DocstringToolObj(AgenticObjectBase):
 
 
 @agentic_object()
-class CustomDescToolObj(AgenticObjectBase):
+class CustomDescToolObj(AgenticObject):
     @tool(description="custom desc")
     def my_tool(self) -> str:
         """Docstring."""
@@ -193,7 +193,7 @@ class CustomDescToolObj(AgenticObjectBase):
 
 
 @agentic_object()
-class NoToolObj(AgenticObjectBase):
+class NoToolObj(AgenticObject):
     def regular_method(self):
         pass
 
@@ -205,12 +205,12 @@ import numpy
 
 
 @agentic_object(allow_code_execution=True, imports=[numpy], import_aliases={"numpy": "np"})
-class BBase(AgenticObjectBase):
+class BBase(AgenticObject):
     """Branch B with numpy support."""
 
 
 @agentic_object(allow_code_execution=True, imports=[cv2])
-class CBase(AgenticObjectBase):
+class CBase(AgenticObject):
     """Branch C with opencv support."""
 
 

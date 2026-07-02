@@ -13,7 +13,7 @@ import sys
 
 from dataclasses import dataclass
 
-from peteos import AgenticObjectBase, Error, agentic_object, tool
+from peteos import AgenticObject, Error, agentic_object, tool
 
 
 @dataclass
@@ -23,7 +23,7 @@ class PriceData:
 
 
 @agentic_object(invoke_sub_agents=True)
-class PriceRecord(AgenticObjectBase):
+class PriceRecord(AgenticObject):
     """A price record with a raw price string."""
 
     def __init__(self, raw_value: str = "100 USD"):
@@ -50,7 +50,7 @@ class PriceRecord(AgenticObjectBase):
 
 
 @agentic_object(allow_code_execution=True, imports=[PriceRecord])
-class InventoryItem(AgenticObjectBase):
+class InventoryItem(AgenticObject):
     """An inventory item with a price record."""
 
     def __init__(self, name: str, price: PriceRecord):
@@ -70,7 +70,7 @@ class InventoryItem(AgenticObjectBase):
 
 
 @agentic_object(allow_code_execution=True, imports=[InventoryItem, PriceRecord])
-class InventoryManager(AgenticObjectBase):
+class InventoryManager(AgenticObject):
     """Manages items with sub-agents for price parsing."""
 
     def __init__(self):

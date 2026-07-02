@@ -6,9 +6,9 @@ Normalize messy, heterogeneous, or inconsistently formatted data records using a
 
 ```python
 from dataclasses import dataclass
-from peteos import AgenticObjectBase, tool, invoke_agent
+from peteos import AgenticObject, tool, invoke_agent
 
-class PersonRecord(AgenticObjectBase):
+class PersonRecord(AgenticObject):
     def __init__(self):
         self._full_name = "Dr. John Michael Smith Jr."
         self._height = "5'11\""

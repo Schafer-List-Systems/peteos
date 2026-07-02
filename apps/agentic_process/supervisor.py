@@ -12,7 +12,7 @@ import logging
 import uuid as uuid_mod
 
 from apps.agentic_process.process import Process
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 
 from apps.agentic_process._types import TaskState, ProcessState
@@ -27,7 +27,7 @@ from apps.agentic_process import utils as _utils
 from pathlib import Path
 
 
-class ProcessSupervisor(AgenticObjectBase):
+class ProcessSupervisor(AgenticObject):
     """You are a process supervisor for the agentic process engine.
 
     Your job is to receive an email and decide which task(s) inside the

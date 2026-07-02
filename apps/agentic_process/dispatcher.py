@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import uuid as uuid_mod
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 
 from apps.agentic_process.email_client import fetch_email, send_email
 from apps.agentic_process import config
 
 
-class EmailDispatcher(AgenticObjectBase):
+class EmailDispatcher(AgenticObject):
     """You are an email dispatcher.
 
     Your job is to read the email you received and decide whether it

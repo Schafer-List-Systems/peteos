@@ -7,12 +7,12 @@ import asyncio
 import sys
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object
 
 
 @agentic_object(allow_code_execution=True)
-class FibonacciSquared(AgenticObjectBase):
+class FibonacciSquared(AgenticObject):
     """You are a helpful assistant."""
 
 

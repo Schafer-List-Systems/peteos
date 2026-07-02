@@ -7,7 +7,7 @@
 
 ```python
 def invoke_agent(
-    object: AgenticObjectBase,
+    object: AgenticObject,
     prompt: str = "",
     output_schema: type | None = None,
     thread_id: str | None = None,
@@ -23,7 +23,7 @@ Starts an agent that reasons over the object's `@tool` methods and works toward 
 
 ## Concurrency
 
-`invoke_agent()` and `AgenticObjectBase.invoke()` are **serialized per `AgenticObjectBase` instance** using an internal `threading.Lock`. Only one invocation runs at a time per object. This protects the object's member variables from race conditions caused by interleaved tool calls.
+`invoke_agent()` and `AgenticObject.invoke()` are **serialized per `AgenticObject` instance** using an internal `threading.Lock`. Only one invocation runs at a time per object. This protects the object's member variables from race conditions caused by interleaved tool calls.
 
 See also: [`@agentic_object`](agentic_object.md#members) (acquire/release members)
 
@@ -31,7 +31,7 @@ See also: [`@agentic_object`](agentic_object.md#members) (acquire/release member
 
 | Parameter | Type | Default | Purpose |
 |---|---|---|---|
-| `object` | `AgenticObjectBase` | required | The root object the agent will work on |
+| `object` | `AgenticObject` | required | The root object the agent will work on |
 | `prompt` | `str` | `""` | Task description for the agent |
 | `output_schema` | `type` | `None` → `str` | Expected return type (dataclass, TypedDict, etc.) |
 | `thread_id` | `str \| None` | `None` → non-persistent | Persistent session ID. Omitted for single-shot calls |

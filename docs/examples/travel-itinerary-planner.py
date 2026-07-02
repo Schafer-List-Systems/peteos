@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
@@ -22,7 +22,7 @@ class ActivityType(Enum):
 
 
 @agentic_object(allow_code_execution=True)
-class TravelItineraryPlanner(AgenticObjectBase):
+class TravelItineraryPlanner(AgenticObject):
     """You are a travel itinerary planner. You manage destination details,
     budget, and travel days. Use set_destination, set_budget, and set_days
     to configure the trip. Add activities with add_activity and view them

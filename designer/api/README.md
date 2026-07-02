@@ -15,7 +15,7 @@ api/
     ├── tool.md              ← @tool decorator
     ├── agentic_object.md      ← @agentic_object decorator
     ├── invoke_agent.md      ← invoke_agent() function
-    ├── invoke.md            ← AgenticObjectBase.invoke() method
+    ├── invoke.md            ← AgenticObject.invoke() method
     └── error.md             ← Error class
 ```
 
@@ -28,5 +28,5 @@ api/
 | [reference/tool.md](reference/tool.md) | `@tool` decorator — marks methods as agent tools |
 | [reference/agentic_object.md](reference/agentic_object.md) | `@agentic_object` decorator — configures agent capabilities per-class |
 | [reference/invoke_agent.md](reference/invoke_agent.md) | `invoke_agent()` function — main entry point for agent-driven object interaction |
-| [reference/invoke.md](reference/invoke.md) | `AgenticObjectBase.invoke()` method — invoke sub-agents on child objects |
+| [reference/invoke.md](reference/invoke.md) | `AgenticObject.invoke()` method — invoke sub-agents on child objects |
 | [reference/error.md](reference/error.md) | `Error` class — task failure result, returned not raised |

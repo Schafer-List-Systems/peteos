@@ -6,7 +6,7 @@ An index of all reference pages in this directory. Each page documents a single 
 
 | Reference | Description |
 |---|---|
-| [AgenticObjectBase](./agentic-object-base.md) | Base class for all agentic objects |
+| [AgenticObject](./agentic-object-base.md) | Base class for all agentic objects |
 | [ChatBotManager](./chatbot-manager.md) | Configure LLM backends |
 | [Error](./error.md) | Value object returned by `invoke_agent` on failure |
 

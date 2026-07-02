@@ -7,7 +7,7 @@ Peteos lets you build **agentic objects**: ordinary Python objects that can thin
 ## Quick Start
 
 ```python
-class Example(AgenticObjectBase):
+class Example(AgenticObject):
     """You are Pete, a concise assistant."""
     def __init__(self, job: str):
         super().__init__()
@@ -34,8 +34,8 @@ pip install .
 
 ## Key Features
 
-- **Agentic objects** — derive from `AgenticObjectBase` and get a thinking agent behind every instance.
-- **Multi-inheritance composition** — combine agentic classes with `AgenticObjectBase` to compose behavior.
+- **Agentic objects** — derive from `AgenticObject` and get a thinking agent behind every instance.
+- **Multi-inheritance composition** — combine agentic classes with `AgenticObject` to compose behavior.
 - **Structured output** — declare `output_schema` and get typed results back.
 - **Sandboxed code execution** — let agents run Python in a restricted sandbox.
 - **Persistent sessions** — threads, memory, and sub-agent coordination via `persistent_thread_id`.

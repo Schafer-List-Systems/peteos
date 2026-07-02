@@ -1,15 +1,15 @@
-# `AgenticObjectBase.invoke()` Method
+# `AgenticObject.invoke()` Method
 
-> **Module**: `peteos.AgenticObjectBase`
+> **Module**: `peteos.AgenticObject`
 > **Purpose**: Invoke a sub-agent on another agentic object.
 
 ## Signature
 
 ```python
-class AgenticObjectBase:
+class AgenticObject:
     def invoke(
         self,
-        target: "AgenticObjectBase",
+        target: "AgenticObject",
         prompt: str,
         output_schema: type | None = None,
         persistent: bool = False,
@@ -21,11 +21,11 @@ class AgenticObjectBase:
 
 ## Description
 
-Called from within sandboxed Python code. Invokes the global `invoke_agent()` on the target object with its own context-isolated execution. Available on every `AgenticObjectBase` subclass — not gated by the calling object's decorator flags.
+Called from within sandboxed Python code. Invokes the global `invoke_agent()` on the target object with its own context-isolated execution. Available on every `AgenticObject` subclass — not gated by the calling object's decorator flags.
 
 ## Concurrency
 
-`invoke()` and `invoke_agent()` are **serialized per `AgenticObjectBase` instance** using an internal `threading.Lock`. Only one invocation runs at a time per object. This protects the object's member variables from race conditions caused by interleaved tool calls.
+`invoke()` and `invoke_agent()` are **serialized per `AgenticObject` instance** using an internal `threading.Lock`. Only one invocation runs at a time per object. This protects the object's member variables from race conditions caused by interleaved tool calls.
 
 See also: [`@agentic_object`](agentic_object.md#members) (acquire/release members)
 
@@ -33,7 +33,7 @@ See also: [`@agentic_object`](agentic_object.md#members) (acquire/release member
 
 | Parameter | Type | Default | Purpose |
 |---|---|---|---|
-| `target` | `AgenticObjectBase` | required | The sub-object to invoke the sub-agent on |
+| `target` | `AgenticObject` | required | The sub-object to invoke the sub-agent on |
 | `prompt` | `str` | required | Task description for the sub-agent |
 | `output_schema` | `type` | `None` → `str` | Expected return type for the sub-agent |
 | `persistent` | `bool` | `False` | If `True`, inherit the parent's thread ID; if `False`, use a non-persistent thread that is destroyed immediately after the call |
@@ -72,7 +72,7 @@ Parent thread: "parent-tick"
 
 ```python
 @agentic_object(allow_code_execution=True)
-class Parent(AgenticObjectBase):
+class Parent(AgenticObject):
     def __init__(self):
         self._children = [Child("Alice"), Child("Bob")]
 
@@ -82,7 +82,7 @@ class Parent(AgenticObjectBase):
 
 
 @agentic_object(invoke_sub_agents=True)
-class Child(AgenticObjectBase):
+class Child(AgenticObject):
     @tool
     def get_state(self) -> dict:
         return {"hunger": 70, "tiredness": 30}

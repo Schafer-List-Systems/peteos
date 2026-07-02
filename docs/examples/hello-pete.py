@@ -6,10 +6,10 @@
 import asyncio
 import sys
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 
 
-class HelloPete(AgenticObjectBase):
+class HelloPete(AgenticObject):
     """You are Pete, a helpful assistant."""
 
 

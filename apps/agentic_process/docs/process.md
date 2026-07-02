@@ -38,7 +38,7 @@ flowchart TD
 
 1. **Check for active tasks** — If `_active_tasks` is empty, the process has no work and returns immediately.
 2. **Dequeue one active task** — Pop the first task ID from `_active_tasks`. Only one task is processed per `update()` call.
-3. **Invoke the agent** — The task is an OAP object (`AgenticObjectBase`). Calling `invoke()` on it launches the agent with the task's tools and state.
+3. **Invoke the agent** — The task is an OAP object (`AgenticObject`). Calling `invoke()` on it launches the agent with the task's tools and state.
 4. **Handle the result** — The agent's tools (`accept`, `deny`, `set_text`, etc.) determine the task's new state:
    - **`PENDING`** — The task awaits external input (e.g., an email was sent to a user). The task is removed from `_active_tasks` and added to `_pending_tasks`.
    - **`DENIED`** — The process is terminated. All outgoing edges are disabled.

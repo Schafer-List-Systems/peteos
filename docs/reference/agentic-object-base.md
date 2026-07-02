@@ -1,7 +1,7 @@
-# AgenticObjectBase
+# AgenticObject
 
 ```python
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 ```
 
 Base class for all Object-Agentic Programming objects. Deriving from it gives every instance its own thinking agent. Configure class-level behavior with the [`@agentic_object` decorator](./decorator-args.md).
@@ -9,7 +9,7 @@ Base class for all Object-Agentic Programming objects. Deriving from it gives ev
 ## Constructor
 
 ```python
-class MyObject(AgenticObjectBase):
+class MyObject(AgenticObject):
     def __init__(self):
         super().__init__()
         # ... your state ...
@@ -49,7 +49,7 @@ Invoke this object's agent with a text prompt.
 
 ```python
 async def invoke(
-    target: AgenticObjectBase,
+    target: AgenticObject,
     prompt: str,
     output_schema: type | None = None,
     persistent: bool = False,
@@ -61,7 +61,7 @@ Invoke a sub-agent on a target agentic object. Only works when `invoke_sub_agent
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `target` | `AgenticObjectBase` | — | The sub-object to invoke. |
+| `target` | `AgenticObject` | — | The sub-object to invoke. |
 | `prompt` | `str` | — | Task description for the sub-agent. |
 | `output_schema` | `type \| None` | `None` | Expected return type. |
 | `persistent` | `bool` | `False` | If True, inherit the parent's thread ID. |

@@ -9,7 +9,7 @@ def tool(
     name: str | None | Callable = None,
     description: str | None = None,
 ) -> Callable[[Callable], Callable] | Callable:
-    """Mark a method on an AgenticObjectBase subclass as callable by agents.
+    """Mark a method on an AgenticObject subclass as callable by agents.
 
     Supports both @tool and @tool(name="custom_name").
     """
@@ -30,7 +30,7 @@ def agentic_object(
     invoke_sub_agents: bool = False,
     allow_code_execution: bool = False,
 ) -> Callable[[type], type]:
-    """Configure agent capabilities per AgenticObjectBase subclass."""
+    """Configure agent capabilities per AgenticObject subclass."""
 
     def decorator(cls: type) -> type:
         cls._oap_config = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from peteos.oap import Error
 from peteos.utils.logger import get_logger
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import tool
 from .edge import Edge
 
@@ -19,7 +19,7 @@ from pathlib import Path
 from . import utils as _utils
 
 
-class Task(AgenticObjectBase):
+class Task(AgenticObject):
     """You are a task agent within a user-interactiorkflow
     assisting the process supervisor (user).
 

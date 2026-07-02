@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
@@ -28,7 +28,7 @@ class Metric:
 
 
 @agentic_object(allow_code_execution=True)
-class SystemHealthMonitor(AgenticObjectBase):
+class SystemHealthMonitor(AgenticObject):
     """You are a system health monitor. You track CPU, memory, disk, and
     network metrics. Use record_metric to add readings and get_metric to
     inspect current values. The agent can analyze trends and return a

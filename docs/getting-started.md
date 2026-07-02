@@ -62,12 +62,12 @@ Model patterns can be used to restrict which models are considered, and in case 
 
 ## Hello World
 
-An agentic class is a class that derives from `AgenticObjectBase`.
+An agentic class is a class that derives from `AgenticObject`.
 Behind the scenes, an agent operates on the object.
 The class docstring serves as the agent's system prompt.
 
 ```python
-class HelloPete(AgenticObjectBase):
+class HelloPete(AgenticObject):
     """You are Pete, a helpful assistant."""
 ```
 
@@ -117,7 +117,7 @@ class Grocery(Enum):
     EGG = "Egg"
     BUTTER = "Butter"
 
-class GroceryList(AgenticObjectBase):
+class GroceryList(AgenticObject):
     """You manage a grocery list. Read the current list with list_items,
     add items with add_item, and clear the list with clear."""
 
@@ -167,7 +167,7 @@ Code executed in the sandbox can access the agentic object through the `self` pa
 
 ```python
 @agentic_object(allow_code_execution=True)
-class FibonacciSquared(AgenticObjectBase):
+class FibonacciSquared(AgenticObject):
     """You are a helpful assistant."""
 ```
 
@@ -198,7 +198,7 @@ import statistics
 from dataclasses import dataclass
 from enum import Enum
 
-from peteos.oap.base import AgenticObjectBase
+from peteos.oap.base import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
@@ -218,7 +218,7 @@ class Holding:
 
 
 @agentic_object(allow_code_execution=True, imports=[math, random, statistics])
-class StockPortfolioAnalyzer(AgenticObjectBase):
+class StockPortfolioAnalyzer(AgenticObject):
     """You are a stock portfolio analyzer. You manage a portfolio of stock
     holdings, current prices, and historical returns. Use add_holding and
     set_price to manage data, list_holdings to inspect the portfolio, and

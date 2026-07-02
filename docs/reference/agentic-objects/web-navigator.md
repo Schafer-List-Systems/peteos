@@ -70,7 +70,7 @@ Spawns Chrome in headless mode with `--headless=new --screenshot` and saves the 
 To use the WebNavigator, derive from it as a parent class of your agentic object:
 
 ```python
-class MyAgent(WebNavigator, AgenticObjectBase):
+class MyAgent(WebNavigator, AgenticObject):
     """You are an agent with web navigation capabilities."""
 ```
 

@@ -11,7 +11,7 @@ def agentic_object(
     invoke_sub_agents: bool = False,
     allow_code_execution: bool = False,
 ) -> Callable[[type], type]:
-    """Configure agent capabilities for an AgenticObjectBase subclass."""
+    """Configure agent capabilities for an AgenticObject subclass."""
     ...
 ```
 
@@ -31,27 +31,27 @@ Class-level decorator that controls what capabilities the agent has when working
 
 ```python
 from dataclasses import dataclass
-from peteos import AgenticObjectBase, tool, agentic_object
+from peteos import AgenticObject, tool, agentic_object
 import time
 import decimal
 
 # Only sandboxed code with time and decimal modules
 @agentic_object(imports=[time, decimal], allow_code_execution=True)
-class TimeRecord(AgenticObjectBase):
+class TimeRecord(AgenticObject):
     ...
 
 # Only sub-agent invocation enabled
 @agentic_object(invoke_sub_agents=True)
-class Child(AgenticObjectBase):
+class Child(AgenticObject):
     ...
 
 # All three capabilities
 @agentic_object(imports=[time, decimal], invoke_sub_agents=True, allow_code_execution=True)
-class PriceRecord(AgenticObjectBase):
+class PriceRecord(AgenticObject):
     ...
 
 # No capabilities beyond @tool methods (default)
-class InventoryItem(AgenticObjectBase):
+class InventoryItem(AgenticObject):
     ...
 ```
 
@@ -63,7 +63,7 @@ Modules passed to the sandbox as Python object references. The agent never sees 
 
 ```python
 @agentic_object(imports=[time, decimal])
-class PriceRecord(AgenticObjectBase):
+class PriceRecord(AgenticObject):
     # Agent's sandboxed code can use:
     #   time.time()
     #   decimal.Decimal("100.00")
@@ -108,7 +108,7 @@ The agent can use sandboxed code to:
 
 ### `acquire(timeout: float | None = None) -> None`
 
-Acquires the `threading.Lock` that serializes invocations on this object. Only one invocation can hold the lock at a time — both `invoke_agent()` and `AgenticObjectBase.invoke()` call `acquire()` before creating a session and `release()` when done.
+Acquires the `threading.Lock` that serializes invocations on this object. Only one invocation can hold the lock at a time — both `invoke_agent()` and `AgenticObject.invoke()` call `acquire()` before creating a session and `release()` when done.
 
 This prevents race conditions caused by interleaved `@tool` calls that read/write the object's member variables.
 
@@ -130,9 +130,9 @@ Releases the `threading.Lock` acquired by a prior `acquire()` call. Signals that
 | Lock held by caller | Releases the lock, unblocks waiting callers |
 | Lock not held | Raises `RuntimeError` (double-release protection) |
 
-`invoke_agent()` and `AgenticObjectBase.invoke()` handle `release()` via try/finally to guarantee it's always called even on exceptions.
+`invoke_agent()` and `AgenticObject.invoke()` handle `release()` via try/finally to guarantee it's always called even on exceptions.
 
 ## Related
 
 - [`invoke_agent()`](invoke_agent.md) — main entry point for agent-driven object interaction
-- [`AgenticObjectBase.invoke()`](invoke.md) — sub-agent invocation from sandboxed code
+- [`AgenticObject.invoke()`](invoke.md) — sub-agent invocation from sandboxed code

@@ -6,7 +6,7 @@ from enum import Enum
 
 import pytest
 
-from peteos.oap._schema import _recursive_cast, get_schema_description, parse_data
+from peteos.utils._schema import _recursive_cast, get_schema_description, parse_data
 
 
 # ── Example 1: Simple scalar dataclass ───────────────────────────────
@@ -444,7 +444,7 @@ class TestBareStringFallback:
 
     def test_parse_enum_dict_value_shows_value(self):
         """When LLM sends a dict instead of string, error shows the dict."""
-        with pytest.raises(ValueError, match="JobRole string"):
+        with pytest.raises(ValueError, match="Expected JobRole"):
             parse_data('{"role": "fullstack-developer"}', JobRole)
 
 class Color(Enum):
@@ -460,7 +460,7 @@ class TestEnumSupport:
         assert result is Color.RED
 
     def test_recursive_cast_enum_invalid_raises(self):
-        with pytest.raises(ValueError, match="Color string"):
+        with pytest.raises(ValueError, match="Expected Color"):
             _recursive_cast("purple", Color)
 
     def test_recursive_cast_enum_invalid_shows_value(self):
@@ -472,7 +472,7 @@ class TestEnumSupport:
         assert result is Color.RED
 
     def test_parse_data_enum_invalid_raises(self):
-        with pytest.raises(ValueError, match="Color string"):
+        with pytest.raises(ValueError, match="Expected Color"):
             parse_data('"purple"', Color)
 
     def test_recursive_cast_enum_in_dataclass(self):
