@@ -10,7 +10,7 @@ from .backendconfig import BackendConfig
 class ChatBotConfig(BackendConfig):
     """Configuration for a single ChatBot instance.
 
-    Inherits backend config (url, api_type, etc.) and adds
+    Inherits backend config (url, api_type, api_key, etc.) and adds
     per-chatbot options like translations and model selection.
 
     All defaults are defined here so there is a single source of truth.
@@ -20,11 +20,12 @@ class ChatBotConfig(BackendConfig):
     Attributes:
         name: Unique backend identifier.
         url: API base URL.
-        api_type: "openai" or "anthropic".
+        api_type: "openai", "anthropic", or "gemini".
         chat_endpoint: Custom chat endpoint (default: API-specific).
         models_endpoint: Custom models endpoint (default: API-specific).
         streaming: Use streaming mode by default.
-        max_tokens: Maximum tokens to generate (Anthropic default: 4096).
+        max_tokens: Maximum tokens to generate (set per-API-type in chatbot __init__).
+        api_key: API key for authentication
         model: Model identifier for this ChatBot instance.
         response_translations: Per-chatbot SSE event translations.
         request_translations: Per-chatbot request key translations.

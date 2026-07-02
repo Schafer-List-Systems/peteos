@@ -41,7 +41,7 @@ class TestOpenAILiveStreaming:
         from peteos.conversation.context import Context
 
         user_msg = Message.create("user", [ContentPart.create_text("Say hello")])
-        ctx = Context({})
+        ctx = Context.create()
         ctx.append(user_msg)
 
         response = await live_openai_chatbot.send_context(ctx, streaming=True)
@@ -67,7 +67,7 @@ class TestOpenAILiveStreaming:
             Message.create("system", [ContentPart.create_text("You are a translator. Always reply in uppercase.")]),
             Message.create("user", [ContentPart.create_text("hello")]),
         ]
-        ctx = Context({})
+        ctx = Context.create()
         for msg in messages:
             ctx.append(msg)
 
@@ -91,7 +91,7 @@ class TestOpenAILiveStreaming:
             Message.create("system", [ContentPart.create_text("Think out loud and then answer.")]),
             Message.create("user", [ContentPart.create_text("What is 2+2? Answer in one sentence.")]),
         ]
-        ctx = Context({})
+        ctx = Context.create()
         for msg in messages:
             ctx.append(msg)
 
@@ -117,7 +117,7 @@ class TestOpenAILiveStreaming:
         from peteos.conversation.context import Context
 
         user_msg = Message.create("user", [ContentPart.create_text("What is 1+1?")])
-        ctx = Context({})
+        ctx = Context.create()
         ctx.append(user_msg)
 
         response = await live_openai_chatbot.send_context(
@@ -142,7 +142,7 @@ class TestOpenAILiveStreaming:
         from peteos.conversation.context import Context
 
         user_msg = Message.create("user", [ContentPart.create_text("Say exactly 'test'")])
-        ctx = Context({})
+        ctx = Context.create()
         ctx.append(user_msg)
 
         response = await live_openai_chatbot.send_context(
@@ -169,7 +169,7 @@ class TestOpenAILiveStreaming:
             Message.create("assistant", [ContentPart.create_text("First response")]),
             Message.create("user", [ContentPart.create_text("Second message")]),
         ]
-        ctx = Context({})
+        ctx = Context.create()
         for msg in messages:
             ctx.append(msg)
 
@@ -187,7 +187,7 @@ class TestOpenAILiveStreaming:
 
         from peteos.conversation.context import Context
 
-        ctx = Context({})
+        ctx = Context.create()
 
         response = await live_openai_chatbot.send_context(ctx, streaming=True)
         async for _ in response:
@@ -209,7 +209,7 @@ class TestOpenAILiveNonStreaming:
         from peteos.conversation.context import Context
 
         user_msg = Message.create("user", [ContentPart.create_text("Say hello")])
-        ctx = Context({})
+        ctx = Context.create()
         ctx.append(user_msg)
 
         response = await live_openai_chatbot.send_context(ctx, streaming=False)
@@ -234,7 +234,7 @@ class TestOpenAILiveNonStreaming:
             Message.create("system", [ContentPart.create_text("You are helpful.")]),
             Message.create("user", [ContentPart.create_text("What day is today?")]),
         ]
-        ctx = Context({})
+        ctx = Context.create()
         for msg in messages:
             ctx.append(msg)
 
@@ -258,7 +258,7 @@ class TestOpenAILiveNonStreaming:
         from peteos.conversation.context import Context
 
         user_msg = Message.create("user", [ContentPart.create_text("What is 1+1?")])
-        ctx = Context({})
+        ctx = Context.create()
         ctx.append(user_msg)
 
         response = await live_openai_chatbot.send_context(
@@ -283,7 +283,7 @@ class TestOpenAILiveNonStreaming:
         from peteos.conversation.context import Context
 
         user_msg = Message.create("user", [ContentPart.create_text("Say 'test'")])
-        ctx = Context({})
+        ctx = Context.create()
         ctx.append(user_msg)
 
         response = await live_openai_chatbot.send_context(

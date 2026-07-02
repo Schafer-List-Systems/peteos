@@ -74,10 +74,11 @@ class HealthReport:
 
 
 async def main():
-    from peteos.utils.logger import setup_logging
+    #from peteos.utils.logger import setup_logging
     #setup_logging(level="DEBUG", debug=True)
-    #url = sys.argv[1]
-    await ChatBotManager.add_backend("local", url)
+    args = sys.argv[1:] + [None] * 3
+    url, api_type, api_key = args[:3]
+    await ChatBotManager.add_backend("local", url, api_type=api_type, api_key=api_key)
 
     monitor = SystemHealthMonitor()
 

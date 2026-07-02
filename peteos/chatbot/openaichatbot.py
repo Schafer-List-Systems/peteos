@@ -326,6 +326,11 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
         response = cls(events(), translations)
         response._data = {}
 
+        if "error" in data:
+            response._data["error"] = str(data["error"])
+            _logger.error("OpenAI error: %s", data["error"])
+            return response
+
         choices = data.get("choices", [])
         if choices and isinstance(choices, list) and choices:
             message = choices[0].get("message", {})
