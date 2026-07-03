@@ -46,3 +46,54 @@ await ChatBotManager.load_from_file("config/chatbot_config.json")
 ```
 
 `load_from_file` clears all previously registered backends before loading — it replaces state entirely.
+
+## Auto-Configuration
+
+When you import `peteos`, the manager automatically discovers and loads a `peteos.json` configuration file from standard locations. The first file found wins — no merging, no explicit calls needed:
+
+1. **`PETEOS_CONFIG`** environment variable (full path to `peteos.json`)
+2. **`$XDG_CONFIG_HOME/peteos/peteos.json`** (defaults to `~/.config/peteos/peteos.json`)
+3. **`/etc/peteos/peteos.json`** (system-wide)
+4. **`./peteos.json`** (current working directory)
+
+The configuration format is identical to the JSON file format described above. If no config file is found, a warning is logged and backends remain empty — no error is raised.
+
+```json
+{
+    "backends": [
+        {
+            "name": "local",
+            "url": "http://localhost:3001"
+        },
+        {
+            "name": "gemini",
+            "url": "https://generativelanguage.googleapis.com",
+            "api_type": "gemini",
+            "api_key": "YOUR_GEMINI_API_KEY"
+        },
+        {
+            "name": "anthropic",
+            "url": "https://api.anthropic.com",
+            "api_type": "anthropic",
+            "api_key": "YOUR_ANTHROPIC_API_KEY"
+        }
+    ]
+}
+```
+
+```python
+import peteos  # auto-loads peteos.json on import
+```
+
+## Manual Loading
+
+If you need to load a configuration from a non-standard location, use `load_from_json()` or `load_from_file()`:
+
+```python
+from peteos.chatbot import ChatBotManager
+import asyncio
+
+asyncio.run(ChatBotManager.load_from_file("/custom/path/config.json"))
+```
+
+Or load programmatically with `add_backend()`.
