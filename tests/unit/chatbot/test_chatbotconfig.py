@@ -88,3 +88,15 @@ class TestChatBotConfig:
         """request_translations defaults to None."""
         config = ChatBotConfig.from_dict({"name": "t", "url": "http://t:80"})
         assert config.request_translations is None
+
+    def test_priority_default_is_zero(self):
+        """priority defaults to 0 when not provided."""
+        config = ChatBotConfig.from_dict({"name": "t", "url": "http://t:80"})
+        assert config.priority == 0
+
+    def test_priority_explicit_value(self):
+        """priority can be explicitly set."""
+        config = ChatBotConfig.from_dict(
+            {"name": "t", "url": "http://t:80", "model": "gpt-4", "priority": 42}
+        )
+        assert config.priority == 42

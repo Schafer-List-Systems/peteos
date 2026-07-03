@@ -458,3 +458,111 @@ class TestBackendInfo:
         models = {"m1": object(), "m2": object()}
         info = BackendInfo(name="test", url="http://t:8000", api_type="openai", models=models)
         assert info.models == models
+
+
+class TestChatBotPriority:
+    """Tests for model priority feature."""
+
+    @pytest.mark.asyncio
+    async def test_add_backend_with_model_priorities(self):
+        """Test adding backend with model_priorities applies priorities to each model."""
+        mock_providers = _mock_providers(openai_models=["gpt-4", "gpt-3.5"])
+        # Use the real OpenAI provider's create_chatbot to verify priority flows through
+        from peteos.chatbot.openaiprovider import OpenAIChatBotProvider
+
+        mock_providers["openai"].create_chatbot = OpenAIChatBotProvider().create_chatbot
+
+        with patch.dict(ChatBotManager._providers, mock_providers):
+            backend = await ChatBotManager.add_backend(
+                "prio-backend",
+                "http://test:8000",
+                model_priorities={"gpt-4": 10, "gpt-3.5": 0},
+            )
+
+        assert backend.models["gpt-4"].priority == 10
+        assert backend.models["gpt-3.5"].priority == 0
+
+    @pytest.mark.asyncio
+    async def test_add_backend_model_priorities_missing_model_defaults_to_zero(self):
+        """Model not in model_priorities dict gets priority 0."""
+        mock_providers = _mock_providers(openai_models=["gpt-4", "gpt-5"])
+        from peteos.chatbot.openaiprovider import OpenAIChatBotProvider
+
+        mock_providers["openai"].create_chatbot = OpenAIChatBotProvider().create_chatbot
+
+        with patch.dict(ChatBotManager._providers, mock_providers):
+            # Only gpt-4 has priority; gpt-5 should default to 0
+            backend = await ChatBotManager.add_backend(
+                "partial-prio-backend",
+                "http://test:8000",
+                model_priorities={"gpt-4": 5},
+            )
+
+        assert backend.models["gpt-4"].priority == 5
+        assert backend.models["gpt-5"].priority == 0
+
+    @pytest.mark.asyncio
+    async def test_load_from_json_with_model_priorities(self):
+        """Test load_from_json applies model_priorities from config."""
+        mock_providers = _mock_providers(openai_models=["premium", "standard"])
+        from peteos.chatbot.openaiprovider import OpenAIChatBotProvider
+
+        mock_providers["openai"].create_chatbot = OpenAIChatBotProvider().create_chatbot
+
+        json_obj = {
+            "backends": [
+                {
+                    "name": "prio-json-backend",
+                    "url": "http://test:8000",
+                    "model_priorities": {"premium": 20, "standard": 0},
+                }
+            ]
+        }
+
+        with patch.dict(ChatBotManager._providers, mock_providers):
+            await ChatBotManager.load_from_json(json_obj)
+
+        assert ChatBotManager._backends["prio-json-backend"].models["premium"].priority == 20
+        assert ChatBotManager._backends["prio-json-backend"].models["standard"].priority == 0
+
+    def test_list_chatbots_sorted_by_priority(self):
+        """Test list_chatbots returns models sorted by priority descending."""
+        mock_providers = _mock_providers(openai_models=["a", "b", "c"])
+        mock_providers["openai"].create_chatbot = MagicMock(
+            return_value=OpenAIChatBot(MagicMock(), _chatbot_config())
+        )
+
+        with patch.dict(ChatBotManager._providers, mock_providers):
+            ChatBotManager._backends["t"] = BackendInfo(
+                name="t", url="http://t:8000", api_type="openai", models={}
+            )
+            for mid, prio in [("a", 0), ("b", 10), ("c", 5)]:
+                config = _chatbot_config(model=mid, priority=prio)
+                mock_providers["openai"].create_chatbot.return_value = OpenAIChatBot(
+                    MagicMock(), config
+                )
+                ChatBotManager._backends["t"].models[mid] = mock_providers[
+                    "openai"
+                ].create_chatbot.return_value
+
+        results = ChatBotManager.list_chatbots(".*")
+        assert len(results) == 3
+        assert results[0][0] == "b"  # priority 10
+        assert results[1][0] == "c"  # priority 5
+        assert results[2][0] == "a"  # priority 0
+
+    @pytest.mark.asyncio
+    async def test_list_chatbots_tiebreaker_is_alphabetical(self):
+        """When priorities are equal, models are sorted alphabetically."""
+        mock_providers = _mock_providers(openai_models=["zebra", "alpha"])
+        mock_providers["openai"].create_chatbot = MagicMock(
+            return_value=OpenAIChatBot(MagicMock(), _chatbot_config())
+        )
+
+        with patch.dict(ChatBotManager._providers, mock_providers):
+            await ChatBotManager.add_backend("tie-backend", "http://test:8000")
+
+        results = ChatBotManager.list_chatbots(".*")
+        assert len(results) == 2
+        assert results[0][0] == "alpha"  # alphabetical tiebreaker
+        assert results[1][0] == "zebra"

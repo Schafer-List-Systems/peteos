@@ -72,6 +72,15 @@ class ChatBot(ABC):
         """Set a new model identifier."""
         self._config.model = value
 
+    @property
+    def priority(self) -> int:
+        """Get the priority of this chatbot's model.
+
+        Higher values indicate higher priority. Models are sorted by
+        descending priority when listing available chatbots.
+        """
+        return self._config.priority
+
     def get_headers(self) -> Dict[str, str]:
         """Return extra HTTP headers to include with every API request.
 

@@ -32,6 +32,7 @@ class ChatBotConfig(BackendConfig):
     """
 
     model: Optional[str] = None
+    priority: int = 0
     response_translations: Optional[Dict[str, str]] = None
     request_translations: Optional[Dict[str, str]] = None
 

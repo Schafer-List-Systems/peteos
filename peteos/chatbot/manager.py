@@ -124,6 +124,7 @@ class ChatBotManager:
             chatbot_config = ChatBotConfig.from_dict({
                 **vars(config),
                 "model": model_id,
+                "priority": (config.model_priorities or {}).get(model_id, 0),
             })
             chatbot = provider.create_chatbot(cls._clients[name], chatbot_config)
             chatbots[model_id] = chatbot
@@ -212,7 +213,7 @@ class ChatBotManager:
                 if pattern.search(model_id):
                     results.append((model_id, chatbot))
 
-        return sorted(results, key=lambda x: x[0])
+        return sorted(results, key=lambda x: (-x[1].priority, x[0]))
 
     @classmethod
     async def load_from_json(cls, json_obj: dict) -> None:
@@ -272,6 +273,7 @@ class ChatBotManager:
                 chatbot_config = ChatBotConfig.from_dict({
                     **vars(config),
                     "model": model_id,
+                    "priority": (config.model_priorities or {}).get(model_id, 0),
                 })
                 chatbot = provider.create_chatbot(cls._clients[config.name], chatbot_config)
                 chatbots[model_id] = chatbot

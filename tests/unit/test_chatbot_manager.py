@@ -262,6 +262,107 @@ class TestChatBotManagerListChatbots:
 
         assert len(results) == 0
 
+    @pytest.mark.asyncio
+    async def test_list_chatbots_sorted_by_priority(self):
+        """Test that list_chatbots sorts by priority descending, then model_id."""
+
+        mock_response = {
+            "data": [
+                {"id": "gpt-3.5-turbo"},
+                {"id": "gpt-4"},
+                {"id": "gpt-4o"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.add_backend(
+                "priority-backend",
+                "http://test:8000",
+                model_priorities={"gpt-4o": 10, "gpt-4": 5},
+            )
+
+        results = ChatBotManager.list_chatbots("gpt")
+
+        assert len(results) == 3
+        assert results[0][0] == "gpt-4o"  # priority 10
+        assert results[1][0] == "gpt-4"   # priority 5
+        assert results[2][0] == "gpt-3.5-turbo"  # priority 0 (default)
+
+    @pytest.mark.asyncio
+    async def test_list_chatbots_priority_breaks_alphabetical_tie(self):
+        """When priorities differ, they override alphabetical ordering."""
+
+        mock_response = {
+            "data": [
+                {"id": "gpt-3.5-turbo"},
+                {"id": "gpt-4"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            # gpt-3.5 is alphabetically first, but gpt-4 has higher priority
+            await ChatBotManager.add_backend(
+                "tie-breaker-backend",
+                "http://test:8000",
+                model_priorities={"gpt-4": 1},
+            )
+
+        results = ChatBotManager.list_chatbots("gpt")
+
+        assert results[0][0] == "gpt-4"  # higher priority, despite later alphabet
+        assert results[1][0] == "gpt-3.5-turbo"
+
+    @pytest.mark.asyncio
+    async def test_list_chatbots_default_priority_is_zero(self):
+        """Models without explicit priority get 0 and stay alphabetical."""
+
+        mock_response = {
+            "data": [
+                {"id": "model-b"},
+                {"id": "model-a"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.add_backend(
+                "default-priority-backend",
+                "http://test:8000",
+            )
+
+        results = ChatBotManager.list_chatbots(".*")
+
+        assert len(results) == 2
+        assert results[0][0] == "model-a"  # alphabetical tiebreaker
+        assert results[1][0] == "model-b"
+
+    @pytest.mark.asyncio
+    async def test_chatbot_priority_property(self):
+        """ChatBot instances expose priority via .priority property."""
+
+        mock_response = {"data": [{"id": "priority-model"}]}
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.add_backend(
+                "prop-backend",
+                "http://test:8000",
+                model_priorities={"priority-model": 42},
+            )
+
+        chatbot = ChatBotManager._backends["prop-backend"].models["priority-model"]
+        assert chatbot.priority == 42
+
 
 class TestChatBotManagerLoadFromJson:
     """Tests for load_from_json method."""
@@ -398,6 +499,75 @@ class TestChatBotManagerLoadFromJson:
 
         assert len(ChatBotManager._backends) == 0
         assert len(ChatBotManager._clients) == 0
+
+    @pytest.mark.asyncio
+    async def test_load_from_json_with_model_priorities(self):
+        """Test loading backend with model_priorities from JSON."""
+
+        json_obj = {
+            "backends": [
+                {
+                    "name": "prioritized-backend",
+                    "url": "http://prioritized:8000",
+                    "model_priorities": {
+                        "premium-model": 10,
+                        "standard-model": 0,
+                    },
+                }
+            ]
+        }
+
+        mock_response = {
+            "data": [
+                {"id": "premium-model"},
+                {"id": "standard-model"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.load_from_json(json_obj)
+
+        results = ChatBotManager.list_chatbots(".*")
+
+        assert len(results) == 2
+        assert results[0][0] == "premium-model"  # priority 10
+        assert results[1][0] == "standard-model"  # priority 0
+
+    @pytest.mark.asyncio
+    async def test_load_from_json_with_empty_model_priorities(self):
+        """Test loading backend with empty model_priorities dict."""
+
+        json_obj = {
+            "backends": [
+                {
+                    "name": "no-priority-backend",
+                    "url": "http://noprio:8000",
+                    "model_priorities": {},
+                }
+            ]
+        }
+
+        mock_response = {
+            "data": [
+                {"id": "model-b"},
+                {"id": "model-a"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.load_from_json(json_obj)
+
+        results = ChatBotManager.list_chatbots(".*")
+
+        assert len(results) == 2
+        assert results[0][0] == "model-a"  # alphabetical tiebreaker
+        assert results[1][0] == "model-b"
 
 
 class TestChatBotManagerLoadFromFile:
