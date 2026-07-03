@@ -1,6 +1,6 @@
 # Invocation
 
-An agentic object is invoked through the `invoke_agent()` method. The agent reasons about your prompt and responds, using tools to interact with the object's state as needed.
+An agentic object is invoked through [`invoke_agent()`](../reference/agentic-object-base.md#invoke_agent). The agent reasons about your prompt and responds, using tools to interact with the object's state as needed.
 
 ## Basic Invocation
 

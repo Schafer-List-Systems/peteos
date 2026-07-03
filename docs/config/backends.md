@@ -1,6 +1,6 @@
 # Backends
 
-The `ChatBotManager` configures which LLM APIs the agent can use. It is a class-method-only singleton — there is exactly one manager shared across the entire application.
+The [ChatBotManager](../reference/chatbot-manager.md) configures which LLM APIs the agent can use. It is a class-method-only singleton — there is exactly one manager shared across the entire application.
 
 ## Registering a Backend
 

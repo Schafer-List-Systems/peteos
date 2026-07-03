@@ -11,7 +11,7 @@ from peteos.conversation.media import (
 )
 ```
 
-Utility functions that convert file paths, raw bytes, or HTTP(S) URLs into `ContentPart` objects for inclusion in chatbot messages.
+Utility functions that convert file paths, raw bytes, or HTTP(S) URLs into [`ContentPart`](../reference/message.md#contentpart-factory-methods) objects for inclusion in chatbot messages.
 
 ## Synchronous Functions
 
@@ -78,7 +78,7 @@ The following extension-to-MIME mappings are used for content detection:
 
 ## Usage
 
-Attach media to an agent invocation via the `image` parameter on `invoke_agent()`, or queue media as messages using `ContentPart` + `Message.create()`:
+Attach media to an agent invocation via the `image` parameter on [`invoke_agent()`](../reference/agentic-object-base.md#invoke_agent), or queue media as messages using `ContentPart` + [`Message.create()`](../reference/message.md#message-factory-methods):
 
 ```python
 from peteos.conversation.media import create_content_part_async

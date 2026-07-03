@@ -4,7 +4,7 @@ Testing agentic systems in the sOAP paradigm follows familiar patterns from clas
 
 ## Unit Testing Tools
 
-Developers write tests for agentic classes just as they would for classical OOP classes — testing the tools (methods decorated with `@tool`) that are part of the object's public interface. Since these methods are regular Python functions, standard unit tests work directly:
+Developers write tests for agentic classes just as they would for classical OOP classes — testing the tools (methods decorated with [`@tool`](../reference/decorator-args.md#tool)) that are part of the object's public interface. Since these methods are regular Python functions, standard unit tests work directly:
 
 ```python
 def test_add_item():

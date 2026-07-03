@@ -10,7 +10,7 @@ External intervention is expensive: hooks add complexity, custom channels are fr
 
 ## How
 
-1. Call `invoke_agent()` with an `output_schema` to get structured output.
+1. Call [`invoke_agent()`](../reference/agentic-object-base.md#invoke_agent) with an `output_schema` to get structured output.
 2. Check the result against your criteria (not just the agent's word — verify side effects, data state, or schema validity).
 3. If it fails, retry with a clarified prompt. Limit retries to avoid infinite loops.
 

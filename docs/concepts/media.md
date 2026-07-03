@@ -1,14 +1,17 @@
 # Media Handling
 
-Agentic objects can receive images as input (the agent sees them), produce images (the developer injects them into the agent's context), and reason about them (the agent independently loads and analyzes them). All three flows are supported for image content and are enabled by different capabilities and configuration.
+Agentic objects can receive images as input (the agent sees them), produce images (the developer injects them into the agent's context), and reason about them (the agent independently loads and analyzes them).
+All three flows are supported for image content and are enabled by different capabilities and configuration.
 
 ## Prerequisite: A Vision-Capable Backend
 
-Media handling requires an LLM backend that supports vision. The chosen model must be able to process base64-encoded image content blocks. Examples include vision-capable proprietary models and open source models such as Qwen 3.6 with vision support.
+Media handling requires an LLM backend that supports vision.
+The chosen model must be able to process base64-encoded image content blocks.
+Examples include vision-capable proprietary models and open source models such as Qwen 3.6 with vision support.
 
 ## Media Input: User to Agent
 
-The simplest way to give the agent access to an image is to pass it alongside the prompt during invocation:
+The simplest way to give the agent access to an image is to pass it alongside the prompt via [`invoke_agent()`](../reference/agentic-object-base.md#invoke_agent):
 
 ```python
 result = await obj.invoke_agent(
@@ -17,7 +20,8 @@ result = await obj.invoke_agent(
 )
 ```
 
-The `image` parameter accepts a local file path or an HTTP(S) URL. The image is sent to the LLM as part of the user message.
+The `image` parameter accepts a local file path or an HTTP(S) URL.
+The image is sent to the LLM as part of the user message.
 
 Supported MIME types:
 
@@ -25,7 +29,8 @@ Supported MIME types:
 
 ## Media Output: Developer to Agent
 
-An agentic object can push images *into* the agent's context during invocation. This is how a tool implemented by the developer can send an image to the agent for analysis:
+An agentic object can push images *into* the agent's context during invocation.
+This is how a tool implemented by the developer can send an image to the agent for analysis:
 
 ```python
 class ImageAnalyzer(AgenticObject):
@@ -42,11 +47,14 @@ class ImageAnalyzer(AgenticObject):
         return "OK: Image sent to agent."
 ```
 
-The `runner` argument is automatically injected by the framework and must be declared in the tool signature. The developer provides raw bytes and a MIME type. The framework injects the image into the agent's reasoning loop. The agent will then see the image in its next iteration.
+The `runner` argument is automatically injected by the framework and must be declared in the tool signature.
+The developer provides raw bytes and a MIME type.
+The framework injects the image into the agent's reasoning loop.
+The agent will then see the image in its next iteration.
 
 ## Self-Initiated Media Access: Agent to Itself
 
-When `allow_media_access=True` is set on the agentic class (via the `@agentic_object` decorator), the agent can independently decide to load and reason about images during its own reasoning process:
+When `allow_media_access=True` is set on the agentic class (via the [`@agentic_object` decorator](../reference/decorator-args.md)), the agent can independently decide to load and reason about images during its own reasoning process:
 
 ```python
 @agentic_object(allow_media_access=True)
@@ -54,7 +62,8 @@ class ImageAnalyst(AgenticObject):
     """You can read and reason about images. Use read_media to inspect files."""
 ```
 
-When this flag is enabled, the agent can independently load and reason about images. It decides when to call `read_media` as part of its own reasoning:
+When this flag is enabled, the agent can independently load and reason about images.
+It decides when to call `read_media` as part of its own reasoning:
 
 ```python
 agent = ImageAnalyst()
@@ -80,4 +89,5 @@ User provides image ──→ invoke_agent(image=...) ──→ Agent sees image
                                            Agent calls tool ──→ _send_media(data=...) ──→ New image injected
 ```
 
-The agent can cycle through self-initiated image loading and developer-provided images as many times as needed before producing its final response. Each injected image becomes part of the conversation history and is available for future invocations if the session is persistent.
+The agent can cycle through self-initiated image loading and developer-provided images as many times as needed before producing its final response.
+Each injected image becomes part of the conversation history and is available for future invocations if the session is persistent.

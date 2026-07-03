@@ -6,6 +6,7 @@ Deep dives into the core ideas behind sOAP: how agentic objects are composed, in
 
 | Topic | Description |
 |---|---|
+| [Agentic Object Roles](./agentic-object-roles.md) | Role naming, canonical role building, user overrides, model selection |
 | [Composition](./composition.md) | Multi-inheritance, MRO-based system prompts, config merging across agentic parents |
 | [Invocation](./invocation.md) | `invoke_agent()`, `invoke()`, output schemas, thread IDs, sub-agents |
 | [Steering the Agent](./steering.md) | Tool return values and queued messages — two ways to guide the agent mid-invocation |
