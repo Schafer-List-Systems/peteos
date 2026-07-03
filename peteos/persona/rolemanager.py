@@ -10,20 +10,20 @@ _logger = get_logger(__name__)
 class RoleManager:
     """Manages roles with registration and directory loading capabilities."""
 
-    def __init__(self):
-        """Initialize RoleManager with empty role registry."""
-        self._roles: Dict[str, Role] = {}
+    _roles: Dict[str, Role] = {}
 
-    def register_role(self, role: Role) -> None:
+    @classmethod
+    def register_role(cls, role: Role) -> None:
         """
         Register a role manually.
 
         Args:
             role: The Role instance to register.
         """
-        self._roles[role.name] = role
+        cls._roles[role.name] = role
 
-    def load_from_dir(self, directory: str) -> List[str]:
+    @classmethod
+    def load_from_dir(cls, directory: str) -> List[str]:
         """
         Load all roles from a directory where subdirectories are role names.
 
@@ -48,7 +48,7 @@ class RoleManager:
             if sub_dir.is_dir():
                 try:
                     role = Role.load_from_path(str(sub_dir))
-                    self.register_role(role)
+                    cls.register_role(role)
                     loaded_roles.append(role.name)
                 except (FileNotFoundError, KeyError, ValueError) as e:
                     # Skip roles that can't be loaded
@@ -56,7 +56,8 @@ class RoleManager:
 
         return loaded_roles
 
-    def get_role(self, name: str) -> Optional[Role]:
+    @classmethod
+    def get_role(cls, name: str) -> Optional[Role]:
         """
         Get a role by name.
 
@@ -66,13 +67,14 @@ class RoleManager:
         Returns:
             The Role instance if found, None otherwise.
         """
-        return self._roles.get(name)
+        return cls._roles.get(name)
 
-    def list_roles(self) -> List[Tuple[str, Role]]:
+    @classmethod
+    def list_roles(cls) -> List[Tuple[str, Role]]:
         """
         List all registered roles.
 
         Returns:
             List of (name, Role) tuples.
         """
-        return list(self._roles.items())
+        return list(cls._roles.items())

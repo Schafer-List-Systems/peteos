@@ -26,43 +26,10 @@ _logger = get_logger(__name__)
 _AGENT_BASE_DIR = os.environ.get("PETEOS_AGENT_BASE_DIR", "/tmp/peteos")
 
 
-def _build_system_prompt(cls: type) -> str:
-    """Build the system prompt for a concrete agentic object class.
-
-    Collects docstrings from classes in the MRO that directly inherit
-    from AgenticObject (concrete agentic objects), ordered from
-    most-derived to base. Prepends standard behaviour directives.
-    """
-    class_name = cls.__name__
-
-    # Collect only concrete agentic objects — classes that directly
-    # inherit from AgenticObject — in MRO order (derived first).
-    doc_parts: list[str] = []
-    for parent in cls.__mro__:
-        if parent in (AgenticObject, object):
-            continue
-        if AgenticObject not in parent.__bases__:
-            continue
-        parent_doc = (parent.__doc__ or "").strip()
-        if parent_doc:
-            doc_parts.append(parent_doc)
-
-    if doc_parts:
-        # Return the combined class descriptions from the inheritance chain.
-        return "\n\n".join(doc_parts)
-    return (
-        f"You are an agent working on a {class_name} object. "
-        f"You have tools to read and modify the state of this object. "
-        f"Use those tools and the information you already have to fulfill the user's request. "
-        f"NEVER ask the user for more information or clarification. "
-        f"If you cannot produce the requested output, use the `produce_error` to return an error message explaining why. "
-    )
-
-
 def _collect_oap_config(cls: type) -> dict[str, Any]:
     """Collect and merge OAP config from all classes in the MRO that directly inherit from AgenticObject.
 
-    Mirrors the MRO iteration in _build_system_prompt. Collects the union of
+    Mirrors the MRO iteration pattern used in _build_system_prompt. Collects the union of
     all imports, merges import_aliases, and ORs all boolean flags across the
     diamond hierarchy so that a class D(B, C) where both B and C define
     @agentic_object with different imports gets all of them combined.
@@ -111,7 +78,7 @@ class AgenticObject:
 
     def __init__(self) -> None:
         super().__init__()
-        self._oap_role: Role = self._create_role()
+        self._oap_role: Role = AgenticObjectRegistry.create_role(self.__class__.__name__)
         self._oap_lock: threading.Lock = threading.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
@@ -124,17 +91,6 @@ class AgenticObject:
         self._oap_agent: Agent = self._create_agent()
         tool_names = [t.name for t in self._oap_tool_manager.get_tool_list()]
         _logger.debug("Registered tools for %s: %s", self.__class__.__name__, tool_names)
-
-    def _create_role(self) -> Role:
-        """Create the Role for this object."""
-        cls = self.__class__
-        system_prompt = _build_system_prompt(cls)
-        return Role(
-            name=f"oap_{cls.__name__}",
-            description=f"Agent for {cls.__name__}",
-            tool_filter=[".*"],
-            system_prompt=system_prompt,
-        )
 
     def _create_agent(self) -> Agent:
         """Create an Agent wired to this object's role and tool_manager."""

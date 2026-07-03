@@ -48,6 +48,21 @@ class Role:
         self.tool_filter = tool_filter if tool_filter is not None else []
         self.behavior_policy = behavior_policy
 
+    def __copy__(self) -> "Role":
+        import copy
+        return Role(
+            name=self.name,
+            description=self.description,
+            system_prompt=self.system_prompt,
+            system_prompt_hooks=list(self.system_prompt_hooks),
+            required_tools=list(self.required_tools),
+            execution_environment=self.execution_environment,
+            model=self.model,
+            auto_approve_tools=list(self.auto_approve_tools),
+            tool_filter=list(self.tool_filter),
+            behavior_policy=self.behavior_policy,
+        )
+
     def add_system_prompt_hook(self, hook: Callable[[], str]) -> None:
         """Add a hook that returns a dynamic fragment for the system prompt."""
         self.system_prompt_hooks.append(hook)
