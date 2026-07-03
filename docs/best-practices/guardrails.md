@@ -1,12 +1,15 @@
 # Guardrails
 
-Agents are non-deterministic — they make mistakes occasionally. Guardrails are internal checks that validate an agent's output and retry when needed.
+Agents are non-deterministic — they make mistakes occasionally.
+Guardrails are internal checks that validate an agent's output and retry when needed.
 
-In the sOAP paradigm, guardrails are easy to implement because every agent call returns a value you can inspect. Instead of intercepting the agent externally (which requires hooks, custom channels, or approval workflows), simply wrap the invocation in a method that validates the result and retries.
+In the sOAP paradigm, guardrails are easy to implement because every agent call returns a value you can inspect.
+Instead of intercepting the agent externally (which requires hooks, custom channels, or approval workflows), simply wrap the invocation in a method that validates the result and retries.
 
 ## Why
 
-External intervention is expensive: hooks add complexity, custom channels are fragile, and approval workflows block the entire system. When validation lives inside the agentic object itself, it's co-located with the invocation, runs only when needed, and doesn't affect other code paths.
+External intervention is expensive: hooks add complexity, custom channels are fragile, and approval workflows block the entire system.
+When validation lives inside the agentic object itself, it's co-located with the invocation, runs only when needed, and doesn't affect other code paths.
 
 ## How
 
@@ -37,7 +40,8 @@ async def process_email(self):
 
 ## Edge Case: Structured Output Validation
 
-When the agent returns a data structure, validate its contents — not just its type. Feed error messages back to the agent so it can correct the mistake.
+When the agent returns a data structure, validate its contents — not just its type.
+Feed error messages back to the agent so it can correct the mistake.
 
 ```python
 for attempt in range(3):

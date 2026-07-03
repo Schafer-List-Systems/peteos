@@ -4,7 +4,8 @@ Testing agentic systems in the sOAP paradigm follows familiar patterns from clas
 
 ## Unit Testing Tools
 
-Developers write tests for agentic classes just as they would for classical OOP classes — testing the tools (methods decorated with [`@tool`](../reference/decorator-args.md#tool)) that are part of the object's public interface. Since these methods are regular Python functions, standard unit tests work directly:
+Developers write tests for agentic classes just as they would for classical OOP classes — testing the tools (methods decorated with [`@tool`](../reference/decorator-args.md#tool)) that are part of the object's public interface.
+Since these methods are regular Python functions, standard unit tests work directly:
 
 ```python
 def test_add_item():
@@ -17,9 +18,11 @@ This includes testing any methods that do not involve agent invocation, making i
 
 ## Monte Carlo Testing for Agentic Behavior
 
-Testing agentic behavior is fundamentally different because LLM responses are non-deterministic. A single run may succeed or fail due to reasoning quality, even when tool definitions and prompts are correct.
+Testing agentic behavior is fundamentally different because LLM responses are non-deterministic.
+A single run may succeed or fail due to reasoning quality, even when tool definitions and prompts are correct.
 
-The sOAP paradigm addresses this with **Monte Carlo testing** using `BenchmarkRunner`. Tests are defined as functions that return `True` or `False` for each run, and multiple iterations are executed for each test case:
+The sOAP paradigm addresses this with **Monte Carlo testing** using `BenchmarkRunner`.
+Tests are defined as functions that return `True` or `False` for each run, and multiple iterations are executed for each test case:
 
 ```python
 from peteos.oap.benchmark import BenchmarkRunner, BenchmarkRow
@@ -51,11 +54,14 @@ A test defines:
 - Dimensions: input cases and iteration counts. The runner creates a Cartesian product of all dimensions, executing the test once per combination.
 - An assertion on `report.average(["success"])` — the developer sets the threshold (e.g., 80% success rate).
 
-The `BenchmarkRunner` itself does not set thresholds, create test objects, count tokens, or aggregate metrics. These are all the developer's responsibility. The runner simply executes and tracks running success rates, printing per-row progress and a final summary.
+The `BenchmarkRunner` itself does not set thresholds, create test objects, count tokens, or aggregate metrics.
+These are all the developer's responsibility.
+The runner simply executes and tracks running success rates, printing per-row progress and a final summary.
 
 ## Benchmarking Infrastructure
 
-Peteos provides a `BenchmarkRunner` utility that executes test functions across multiple iterations, tracking running success rates and producing a summary with per-dimension breakdowns. The runner does not set thresholds, count tokens, or create objects — these are the developer's responsibility.
+Peteos provides a `BenchmarkRunner` utility that executes test functions across multiple iterations, tracking running success rates and producing a summary with per-dimension breakdowns.
+The runner does not set thresholds, count tokens, or create objects — these are the developer's responsibility.
 
 This approach allows developers to:
 - **Test individual components** with classical unit tests (for deterministic tool code).
