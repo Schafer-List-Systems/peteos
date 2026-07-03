@@ -9,6 +9,8 @@ An index of all reference pages in this directory. Each page documents a single 
 | [AgenticObject](./agentic-object-base.md) | Base class for all agentic objects |
 | [ChatBotManager](./chatbot-manager.md) | Configure LLM backends |
 | [Error](./error.md) | Value object returned by `invoke_agent` on failure |
+| [Role](./role.md) | User-overridable configuration and identity for agentic objects |
+| [RoleManager](./rolemanager.md) | Load, merge, and persist role overrides |
 
 ## Configuration
 
