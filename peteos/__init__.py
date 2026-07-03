@@ -1,5 +1,16 @@
 # Peteos - Agentic application framework
 
+import asyncio
+import importlib
+import pkgutil
+
+from peteos.chatbot import ChatBotManager
+
+try:
+    loop = asyncio.get_running_loop()
+except RuntimeError:
+    asyncio.run(ChatBotManager.load_from_config())
+
 from peteos.utils.activeclass import ActiveClass
 from peteos.chatbot import (
     ChatBot,

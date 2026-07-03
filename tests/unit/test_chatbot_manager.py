@@ -593,6 +593,96 @@ class TestChatBotManagerLoadFromFile:
         assert "file-model" in ChatBotManager._backends["file-backend"].models
 
 
+class TestChatBotConfigDiscovery:
+    """Tests for load_from_config and config resolution."""
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_no_file(self):
+        """When no config file exists, logs warning and returns gracefully."""
+        with patch.object(ChatBotManager, "_resolve_config_path", return_value=None):
+            await ChatBotManager.load_from_config()
+
+        assert ChatBotManager._config_dir is None
+        assert len(ChatBotManager._backends) == 0
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_from_env_var(self, tmp_path):
+        """PETEOS_CONFIG env var takes highest priority."""
+        config_file = tmp_path / "peteos.json"
+        config_file.write_text('{"backends": [{"name": "env-backend", "url": "http://env:8000"}]}')
+
+        mock_response = {"data": [{"id": "env-model"}]}
+
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
+            with patch.object(ChatBotManager, "_resolve_config_path", return_value=str(config_file)):
+                await ChatBotManager.load_from_config()
+
+        assert ChatBotManager._config_dir == str(tmp_path)
+        assert "env-backend" in ChatBotManager._backends
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_sets_config_dir(self, tmp_path):
+        """Config directory is set to the parent of the loaded peteos.json."""
+        config_dir = tmp_path / "peteos_config"
+        config_dir.mkdir()
+        config_file = config_dir / "peteos.json"
+        config_file.write_text('{"backends": [{"name": "dir-backend", "url": "http://dir:8000"}]}')
+
+        mock_response = {"data": [{"id": "dir-model"}]}
+
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
+            with patch.object(ChatBotManager, "_resolve_config_path", return_value=str(config_file)):
+                await ChatBotManager.load_from_config()
+
+        assert ChatBotManager._config_dir == str(config_dir)
+
+    @pytest.mark.asyncio
+    async def test_config_dir_reset_on_reset(self):
+        """_config_dir is cleared on ChatBotManager.reset()."""
+        ChatBotManager._config_dir = "/test/path"
+        ChatBotManager.reset()
+        assert ChatBotManager._config_dir is None
+
+    def test_resolve_config_path_env_first(self, tmp_path):
+        """PETEOS_CONFIG env var resolves before XDG/system/local."""
+        env_file = tmp_path / "env_peteos.json"
+        env_file.write_text('{"backends": []}')
+
+        with patch("os.environ.get", side_effect=lambda key, default=None: {
+            "PETEOS_CONFIG": str(env_file),
+        }.get(key, default)):
+            resolved = ChatBotManager._resolve_config_path()
+
+        assert resolved == str(env_file)
+
+    def test_resolve_config_path_xdg_config(self, tmp_path):
+        """$XDG_CONFIG_HOME/peteos/peteos.json is resolved."""
+        xdg_path = tmp_path / "my_config" / "peteos" / "peteos.json"
+        xdg_path.parent.mkdir(parents=True)
+        xdg_path.write_text('{"backends": []}')
+
+        xdg_str = str(tmp_path / "my_config")
+
+        def fake_is_file(self):
+            return str(self) == str(xdg_path)
+
+        with patch("os.environ.get", side_effect=lambda key, default=None: {
+            "XDG_CONFIG_HOME": xdg_str,
+        }.get(key, default)):
+            with patch("pathlib.Path.is_file", fake_is_file):
+                resolved = ChatBotManager._resolve_config_path()
+
+        assert resolved == str(xdg_path)
+
+    def test_resolve_config_path_no_env(self, tmp_path):
+        """When no env vars set, returns None if no local peteos.json exists."""
+        with patch("os.environ.get", side_effect=lambda key, default=None: default):
+            with patch("pathlib.Path.is_file", return_value=False):
+                resolved = ChatBotManager._resolve_config_path()
+
+        assert resolved is None
+
+
 class AnyChatBot:
     """Helper class for matching any ChatBot instance in tests."""
 
