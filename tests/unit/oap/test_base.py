@@ -9,15 +9,19 @@ from peteos.persona.toolmanager import ToolManager
 
 
 class TestAgenticObjectInit:
+    @agentic_object()
+    class _BaseTestAO(AgenticObject):
+        pass
+
     def test_default_init(self):
-        obj = AgenticObject()
+        obj = self._BaseTestAO()
         assert obj.agent is not None
         assert obj.role is not None
-        assert obj.role.name == "oap_AgenticObject"
+        assert obj.role.name == "oap__BaseTestAO"
         assert isinstance(obj._oap_tool_manager, ToolManager)
 
     def test_agent_property(self):
-        obj = AgenticObject()
+        obj = self._BaseTestAO()
         original = obj.agent
         assert original is not None
         obj.agent = "mock_agent"
@@ -26,12 +30,12 @@ class TestAgenticObjectInit:
         obj.agent = original
 
     def test_role_auto_created(self):
-        obj = AgenticObject()
+        obj = self._BaseTestAO()
         assert isinstance(obj.role, type(obj.role))
 
     def test_system_prompt_default_no_docstring(self):
-        obj = AgenticObject()
-        assert "You are an agent working on a AgenticObject object" in obj.role.system_prompt
+        obj = self._BaseTestAO()
+        assert "You are an agent working on a _BaseTestAO object" in obj.role.system_prompt
 
     def test_system_prompt_from_class_docstring(self):
         class DocstringObj(AgenticObject):
@@ -228,10 +232,10 @@ class TestDiamondConfigCollection:
 
     def test_python_exec_sandbox_has_combined_imports(self):
         d = DiamondChild()
-        result = d._python_exec("x = numpy.array([1, 2, 3]); y = cv2.__name__")
-        assert result == "OK"
+        result = d._python_exec("def func(self):\n    x = numpy.array([1, 2, 3]); cv2.__name__\n    return len(x)")
+        assert result == 3
 
     def test_python_exec_sandbox_has_import_alias(self):
         d = DiamondChild()
-        result = d._python_exec("x = np.array([1, 2, 3])")
-        assert result == "OK"
+        result = d._python_exec("def func(self):\n    x = np.array([1, 2, 3])\n    return len(x)")
+        assert result == 3

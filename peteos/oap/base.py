@@ -158,7 +158,7 @@ class AgenticObject:
             "Usage: call `python_exec(function='...')` where `function` contains the Python `func(self)` definition.\n"
             "The function must be named exactly `func` and have the signature `func(self)`.\n"
             "Inside the function, `self` refers to the agentic object — you can call its tools and access its attributes.\n"
-            "The function must return the final result (not print it).\n"
+            "The function's return value is the result sent back to the caller (not print statements). Example: `def func(self):\n    import numpy\n    return numpy.array([1, 2, 3]).sum()`\n"
             f"{imports_str}\n"
             "Forbidden: __builtins__, __import__, network access, filesystem I/O."
         )
