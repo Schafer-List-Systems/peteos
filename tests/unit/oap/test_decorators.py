@@ -53,6 +53,7 @@ class TestAgenticObjectDecorator:
             "import_aliases": {},
             "invoke_sub_agents": False,
             "allow_code_execution": False,
+            "role": None,
         }
 
     def test_decorator_config(self):
@@ -69,6 +70,20 @@ class TestAgenticObjectDecorator:
             "import_aliases": {},
             "invoke_sub_agents": True,
             "allow_code_execution": True,
+            "role": None,
+        }
+
+    def test_decorator_role_override(self):
+        @agentic_object(role="custom_role")
+        class MyObj:
+            pass
+
+        assert MyObj._oap_config == {
+            "imports": [],
+            "import_aliases": {},
+            "invoke_sub_agents": False,
+            "allow_code_execution": False,
+            "role": "custom_role",
         }
 
     def test_imports_not_discoverable_via_attribute(self):

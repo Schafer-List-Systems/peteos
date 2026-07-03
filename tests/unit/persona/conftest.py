@@ -1,5 +1,6 @@
 """Prevent peteos/__init__.py from executing during persona tests."""
 
+import pytest
 import sys
 import types
 
@@ -17,3 +18,12 @@ sys.modules["peteos"] = _peeteos
 _logger = types.ModuleType("peteos.logger")
 _logger.get_logger = __import__("logging").getLogger
 sys.modules["peteos.logger"] = _logger
+
+
+@pytest.fixture(autouse=True)
+def _clear_rolemanager():
+    """Clear RoleManager class-level state to prevent test pollution."""
+    from peteos.persona.rolemanager import RoleManager
+    RoleManager._roles.clear()
+    yield
+    RoleManager._roles.clear()

@@ -10,6 +10,7 @@ Two decorators configure agentic objects: `@agentic_object` sets agent capabilit
     import_aliases=None,
     invoke_sub_agents=False,
     allow_code_execution=False,
+    role=None,
 )
 ```
 
@@ -19,6 +20,7 @@ Two decorators configure agentic objects: `@agentic_object` sets agent capabilit
 | `import_aliases` | `dict[str, str]` | `None` | Module name → alias mappings for the sandbox. Later aliases override earlier ones. |
 | `invoke_sub_agents` | `bool` | `False` | Enable `invoke()` method for delegating tasks to other agentic objects. |
 | `allow_code_execution` | `bool` | `False` | Enable the hidden `python_exec` tool in the sandbox. |
+| `role` | `str \| None` | `None` | Override the role name used for this agentic object. The canonical role (built from the class docstring and MRO) is still used, but the name field is set to this value for disambiguation. Can be overridden at runtime via `RoleManager`. |
 
 When composing agentic classes via multi-inheritance, boolean flags are combined with logical OR and imports are unioned across the MRO.
 
