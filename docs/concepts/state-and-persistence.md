@@ -12,7 +12,7 @@ Sessions (conversations) between an agentic object and its agent can be persiste
 
 ### Context Serialization
 
-The conversation history is represented as `Context` objects, which are serialized to a `_json_dict` containing:
+The conversation history is represented as [`Context`](../advanced/context.md) objects, which are serialized to a `_json_dict` containing:
 - `id` — a UUID identifying the context.
 - `messages` — a list of serialized `Message` objects.
 - `content_map` — a mapping from content hashes to their text.
@@ -20,7 +20,7 @@ The conversation history is represented as `Context` objects, which are serializ
 - `message_sequence` — an integer counter tracking message order.
 - `children` — references to forked child contexts.
 
-Each `Message` is also fully serializable, preserving all content parts including text, images, video, and PDFs.
+Each [`Message`](../reference/message.md) is also fully serializable, preserving all content parts including text, images, video, and PDFs.
 
 ## Context Forking
 

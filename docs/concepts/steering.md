@@ -1,6 +1,6 @@
 # Steering the Agent
 
-When `invoke_agent()` runs, the agent reasons in a loop until it returns its result.
+When [`invoke_agent()`](../reference/agentic-object-base.md#invoke_agent) runs, the agent reasons in a loop until it returns its result.
 You can steer this loop from inside tool methods — the agent receives your input either as a **tool result** or as a **new message**, and from its perspective these are two very different signals.
 
 ## Why
@@ -14,7 +14,7 @@ Which you use depends on whether the information completes a tool call or adds i
 
 ## Tool Return Values
 
-Every `@tool` decorated method returns a value that the agent sees as a **tool result**.
+Every [`@tool`](../reference/decorator-args.md#tool) decorated method returns a value that the agent sees as a **tool result**.
 The return value is injected directly as the answer to the tool call the agent just made.
 This is the primary steering channel and should be used whenever the information completes the tool's purpose.
 
