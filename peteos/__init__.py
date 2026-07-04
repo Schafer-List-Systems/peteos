@@ -1,16 +1,8 @@
 # Peteos - Agentic application framework
 
 import asyncio
-import importlib
-import pkgutil
 
-from peteos.chatbot import ChatBotManager
-
-try:
-    loop = asyncio.get_running_loop()
-except RuntimeError:
-    asyncio.run(ChatBotManager.load_from_config())
-
+from peteos.config import ConfigManager
 from peteos.utils.activeclass import ActiveClass
 from peteos.chatbot import (
     ChatBot,
@@ -19,7 +11,6 @@ from peteos.chatbot import (
     ChatBotManager,
     BackendInfo,
     ChatBotResponse,
-    GenericChatBotResponse,
     AnthropicChatBotResponse,
     Message,
     HTTPClient,
@@ -33,28 +24,36 @@ __all__ = [
     "ChatBot",
     "ChatBotManager",
     "ChatBotResponse",
+    "ConfigManager",
     "HTTPClient",
     "Message",
     "OpenAIChatBot",
 ]
 
+# Bootstrap backends and roles from peteos.json at import time.
+# asyncio.run() cannot be called inside a running event loop, so we detect
+# whether one exists first; if not, create one and run ConfigManager.init().
 try:
-    from peteos.agent import Agent
-    from peteos.executionenvironment import ExecutionEnvironment
-    from peteos.replexecutionenvironment import REPLExecutionEnvironment
-    from peteos.role import Role
-    from peteos.rolemanager import RoleManager
-    from peteos.session import Session, invoke_agent, _extract_last_assistant_text
+    asyncio.get_running_loop()
+except RuntimeError:
+    asyncio.run(ConfigManager.init())
+
+
+try:
+    from peteos.persona.agent import Agent
+    from peteos.engine.executionenvironment import ExecutionEnvironment
+    from peteos.persona.role import Role
+    from peteos.persona.rolemanager import RoleManager
+    from peteos.conversation.session import Session
+    from peteos.engine.runner import invoke_agent
 
     __all__.extend([
         "Agent",
         "ExecutionEnvironment",
         "invoke_agent",
-        "REPLExecutionEnvironment",
         "Role",
         "RoleManager",
         "Session",
-        "_extract_last_assistant_text",
     ])
 except ImportError:
     pass
