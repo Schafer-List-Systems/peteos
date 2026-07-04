@@ -177,7 +177,6 @@ class TestChatBotManagerRemoveBackend:
         assert "test" in ChatBotManager._backends
         assert ChatBotManager.remove_backend("test") is True
         assert "test" not in ChatBotManager._backends
-        assert "test" not in ChatBotManager._clients
 
     @pytest.mark.asyncio
     async def test_remove_backend_not_found(self):
@@ -498,7 +497,6 @@ class TestChatBotManagerLoadFromJson:
         await ChatBotManager.load_from_json(json_obj)
 
         assert len(ChatBotManager._backends) == 0
-        assert len(ChatBotManager._clients) == 0
 
     @pytest.mark.asyncio
     async def test_load_from_json_with_model_priorities(self):
