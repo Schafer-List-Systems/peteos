@@ -66,6 +66,13 @@ class GeminiChatBot(ChatBot):
         _logger.debug("Gemini request: model=%s, contents=%d, tools=%d",
                        self._config.model, len(body.get("contents", [])), len(body.get("tools", [])))
 
+        # Debug: dump model parts to trace thought_signature round-trip
+        for ci, c in enumerate(body.get("contents", [])):
+            for pi, part in enumerate(c.get("parts", [])):
+                has_ts = "thought_signature" in part
+                key = json.dumps({k: part[k] for k in part if k != "thought_signature"}, ensure_ascii=False, default=str)
+                _logger.debug("Gemini request contents[%d] parts[%d] role=%s key=%s has_thought_signature=%s", ci, pi, c.get("role"), key[:120], has_ts)
+
         # Build endpoint URL with model name
         base_url = f"{self._config.url}{self._config.chat_endpoint}{self._config.model}"
         if streaming_mode:
@@ -373,19 +380,21 @@ class GeminiChatBot(ChatBot):
                         "name": tc.get("name"),
                         "args": json.loads(tc.get("arguments", "{}")),
                     }
+                    part_obj: dict[str, Any] = {"functionCall": fc_part}
                     ts = tc.get("thought_signature")
                     if ts:
-                        fc_part["thought_signature"] = ts
-                    parts.append({"functionCall": fc_part})
+                        part_obj["thought_signature"] = ts
+                    parts.append(part_obj)
             elif part_type == "tool_use":
                 fc_part: dict[str, Any] = {
                     "name": raw.get("name"),
                     "args": json.loads(raw.get("arguments", "{}")),
                 }
+                part_obj: dict[str, Any] = {"functionCall": fc_part}
                 ts = raw.get("thought_signature")
                 if ts:
-                    fc_part["thought_signature"] = ts
-                parts.append({"functionCall": fc_part})
+                    part_obj["thought_signature"] = ts
+                parts.append(part_obj)
             else:
                 part_data = self._build_gemini_content_part(part)
                 if part_data:
@@ -551,8 +560,10 @@ class GeminiChatBotResponse(GenericChatBotResponse):
                     "name": fc.get("name", ""),
                     "arguments": json.dumps(fc.get("args", {})),
                 }
-                if "thought_signature" in fc:
-                    tool_use["thought_signature"] = fc["thought_signature"]
+                # Gemini may return thought_signature in either snake_case or camelCase
+                ts = part.get("thought_signature") or part.get("thoughtSignature")
+                if ts:
+                    tool_use["thought_signature"] = ts
                 content_array.append(tool_use)
             elif "inline_data" in part:
                 _logger.warning("Gemini response contains inline_data — not directly supported")

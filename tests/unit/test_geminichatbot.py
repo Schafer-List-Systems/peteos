@@ -91,11 +91,8 @@ class TestGeminiChatBotResponse:
         events = [{
             "candidates": [{
                 "content": {"role": "model", "parts": [{
-                    "functionCall": {
-                        "name": "get_weather",
-                        "args": {"city": "Zurich"},
-                        "thought_signature": "abc123",
-                    }
+                    "functionCall": {"name": "get_weather", "args": {"city": "Zurich"}},
+                    "thought_signature": "abc123",
                 }]},
                 "finishReason": "STOP",
             }]
@@ -312,7 +309,7 @@ class TestGeminiChatBotRequest:
         parts = body["contents"][-1]["parts"]
         fc = parts[0]["functionCall"]
         assert fc["name"] == "get_weather"
-        assert fc["thought_signature"] == "abc123"
+        assert parts[0]["thought_signature"] == "abc123"
 
     @pytest.mark.asyncio
     async def test_build_body_tool_result(self):
