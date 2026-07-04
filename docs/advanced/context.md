@@ -116,4 +116,4 @@ Sum of token counts across all messages in this context.
 save(session_dir: str | Path) -> None
 ```
 
-Save the context to `{context_id}.json` in the given session directory.
+Save the context to `{YYYYMMDD}-{context_id}.json` in the given session directory, where the date prefix is the context creation date.
