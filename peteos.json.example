@@ -1,0 +1,63 @@
+{
+  "backends": [
+    {
+      "name": "local",
+      "url": "http://localhost:3001",
+      "model_priorities": {
+        "qwen/qwen3.6-35b-a3b": 1000
+      }
+    },
+    {
+      "name": "gemini",
+      "url": "https://generativelanguage.googleapis.com",
+      "api_type": "gemini",
+      "api_key": "GEMINI_API_KEY",
+      "model_priorities": {
+        "gemini-3.1-flash-lite": 100,
+        "gemini-3.1-flash-lite-image": 100,
+        "gemini-flash-lite-latest": 100,
+        "gemini-3.1-flash-tts-preview": 100,
+        "gemini-3.1-flash-lite-preview": 100,
+        "gemini-2.5-flash": 90,
+        "gemini-2.5-flash-preview-tts": 90,
+        "gemini-flash-latest": 90,
+        "gemini-3.1-flash-image": 80,
+        "gemini-3.1-flash-image-preview": 80,
+        "gemini-3.5-flash": 80,
+        "gemini-2.5-pro": 50,
+        "gemini-2.5-pro-preview-tts": 50,
+        "gemini-3.1-pro-preview": 50,
+        "gemini-3.1-pro-preview-customtools": 50,
+        "gemini-3-pro-image": 40,
+        "gemini-3-pro-image-preview": 40,
+        "gemini-pro-latest": 40,
+        "gemini-3-flash-preview": 30,
+        "gemini-omni-flash-preview": 30,
+        "gemini-robotics-er-1.5-preview": 20,
+        "gemini-robotics-er-1.6-preview": 20,
+        "gemma-4-26b-a4b-it": 15,
+        "gemma-4-31b-it": 15,
+        "lyria-3-clip-preview": 10,
+        "lyria-3-pro-preview": 10,
+        "nano-banana-pro-preview": 10
+      }
+    },
+    {
+      "name": "anthropic",
+      "url": "https://api.anthropic.com",
+      "api_type": "anthropic",
+      "api_key": "ANTHROPIC_API_KEY",
+      "model_priorities": {
+        "claude-haiku-4-5-20251001": 100,
+        "claude-sonnet-4-6": 80,
+        "claude-sonnet-4-5-20250929": 80,
+        "claude-sonnet-5": 80,
+        "claude-opus-4-8": 30,
+        "claude-opus-4-7": 30,
+        "claude-opus-4-6": 20,
+        "claude-opus-4-5-20251101": 15,
+        "claude-fable-5": 10
+      }
+    }
+  ]
+}
