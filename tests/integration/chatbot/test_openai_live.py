@@ -270,9 +270,12 @@ class TestOpenAILiveNonStreaming:
             pass
 
         # Either valid response or tool_choice-not-supported error
-        if response.data:
-            assert "role" in response.data
-            assert "content" in response.data
+        if "error" in response.data:
+            # vLLM may reject tool_choice without tools defined — this is expected
+            return
+        assert response.data
+        assert "role" in response.data
+        assert "content" in response.data
 
     @pytest.mark.asyncio
     async def test_send_context_non_streaming_generation_config(self, live_openai_chatbot):
@@ -296,34 +299,3 @@ class TestOpenAILiveNonStreaming:
 
         assert "role" in response.data
         assert "content" in response.data
-
-
-class TestOpenAILiveModelProperties:
-    """Test live OpenAI ChatBot model property access."""
-
-    @pytest.mark.asyncio
-    async def test_model_property_returns_config_model(self, live_openai_chatbot, chatbot_config):
-        """Model property returns the configured model name."""
-        _skip_if_not_configured()
-
-        assert live_openai_chatbot.model == chatbot_config["model"]
-
-    @pytest.mark.asyncio
-    async def test_model_setter_changes_config(self, live_openai_chatbot):
-        """Model setter updates the config."""
-        _skip_if_not_configured()
-
-        old_model = live_openai_chatbot.model
-        live_openai_chatbot.model = "test-model-override"
-        assert live_openai_chatbot._config.model == "test-model-override"
-        live_openai_chatbot.model = old_model
-
-    @pytest.mark.asyncio
-    async def test_list_available_models(self, live_openai_chatbot):
-        """list_available_models returns at least the configured model."""
-        _skip_if_not_configured()
-
-        models = live_openai_chatbot.list_available_models()
-        assert isinstance(models, list)
-        assert len(models) >= 1
-        assert live_openai_chatbot.model in models

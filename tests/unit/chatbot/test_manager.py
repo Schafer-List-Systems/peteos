@@ -110,8 +110,8 @@ async def test_add_backend_explicit_api_type():
 
 @pytest.mark.asyncio
 async def test_add_backend_invalid_api_type():
-    """Adding backend with invalid api_type raises ValueError."""
-    with pytest.raises(ValueError, match="Invalid api_type"):
+    """Adding backend with invalid api_type raises RuntimeError."""
+    with pytest.raises(RuntimeError, match="No provider registered"):
         await ChatBotManager.add_backend("bad", "http://test:8000", api_type="foobar")
 
 
@@ -173,7 +173,6 @@ async def test_remove_backend_success():
     assert "test" in ChatBotManager._backends
     assert ChatBotManager.remove_backend("test") is True
     assert "test" not in ChatBotManager._backends
-    assert "test" not in ChatBotManager._clients
 
 
 @pytest.mark.asyncio
@@ -362,7 +361,6 @@ async def test_load_from_json_empty():
     await ChatBotManager.load_from_json(json_obj)
 
     assert len(ChatBotManager._backends) == 0
-    assert len(ChatBotManager._clients) == 0
 
 
 @pytest.mark.asyncio
@@ -394,7 +392,7 @@ async def test_load_from_file_invalid_json(tmp_path):
 
 @pytest.mark.asyncio
 async def test_reset_clears_all_state():
-    """reset() clears backends and clients."""
+    """reset() clears all backend state."""
     mock_providers = _mock_providers(openai_models=["model-1"])
     mock_providers["openai"].create_chatbot = MagicMock(return_value=OpenAIChatBot(MagicMock(), _chatbot_config()))
 
@@ -402,12 +400,10 @@ async def test_reset_clears_all_state():
         await ChatBotManager.add_backend("test", "http://test:8000")
 
     assert len(ChatBotManager._backends) == 1
-    assert len(ChatBotManager._clients) == 1
 
     ChatBotManager.reset()
 
     assert len(ChatBotManager._backends) == 0
-    assert len(ChatBotManager._clients) == 0
 
 
 @pytest.mark.asyncio
