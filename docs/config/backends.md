@@ -97,3 +97,9 @@ asyncio.run(ChatBotManager.load_from_file("/custom/path/config.json"))
 ```
 
 Or load programmatically with `add_backend()`.
+
+## Security
+
+API keys from the configuration are never stored in a way that can be read back from the program.
+After the backend is set up, the key is removed from all user-accessible runtime data structures.
+This mitigates the risk of API key exposure through internal data structures via prompt injection attacks.
