@@ -37,21 +37,24 @@ class GeminiChatBot(ChatBot):
             bot_cfg["chat_endpoint"] = self.DEFAULT_CHAT_ENDPOINT
         if bot_cfg.get("max_tokens") is None:
             bot_cfg["max_tokens"] = self.DEFAULT_MAX_TOKENS
-        super().__init__(http_client, ChatBotConfig.from_dict(bot_cfg))
+        super().__init__(ChatBotConfig.from_dict(bot_cfg))
         self._models: List[str] = []
+
+        # Capture api_key locally and build executors — api_key is then
+        # captured in the closure and removed from config.
+        api_key = self._config.api_key
+        secure_headers: Dict[str, str] = {}
+        if api_key:
+            secure_headers["x-goog-api-key"] = api_key
+        self._post_executor = self._build_post_executor(http_client, secure_headers)
+        self._stream_executor = self._build_stream_executor(http_client, secure_headers)
+        self._config.api_key = None  # type: ignore[assignment]
 
     def list_available_models(self) -> List[str]:
         """List available models from the models endpoint or return [model]."""
         if self._models:
             return self._models
         return [self._config.model]
-
-    def get_headers(self) -> Dict[str, str]:
-        """Return Gemini API auth headers when an API key is configured."""
-        headers: Dict[str, str] = {}
-        if self._config.api_key:
-            headers["x-goog-api-key"] = self._config.api_key
-        return headers
 
     async def send_context(
         self,
@@ -83,10 +86,10 @@ class GeminiChatBot(ChatBot):
         _logger.debug("Gemini endpoint: %s", url)
 
         if streaming_mode:
-            stream = self._http_client.stream_post(url, body, self.get_headers())
+            stream = self._stream_executor(url, body, self.get_headers())
             return GeminiChatBotResponse(stream, {})
         else:
-            response_data = await self._http_client.post(url, body, self.get_headers())
+            response_data = await self._post_executor(url, body, self.get_headers())
             return GeminiChatBotResponse.from_json(response_data)
 
     @staticmethod

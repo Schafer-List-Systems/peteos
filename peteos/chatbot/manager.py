@@ -38,7 +38,6 @@ class ChatBotManager:
 
     # Class-level state
     _backends: Dict[str, BackendInfo] = {}
-    _clients: Dict[str, HTTPClient] = {}
     _timeout: Optional[float] = None
     _config_dir: Optional[str] = None  # directory containing loaded peteos.json
     _providers: Dict[str, BackendProvider] = {
@@ -63,7 +62,6 @@ class ChatBotManager:
         Use in tests or when reloading configuration.
         """
         cls._backends.clear()
-        cls._clients.clear()
         cls._config_dir = None
 
     @staticmethod
@@ -179,7 +177,7 @@ class ChatBotManager:
             **{"api_type": api_type},
             **kwargs,
         })
-        cls._clients[name] = HTTPClient(
+        client = HTTPClient(
             timeout=cls._timeout,
             retry_delays=config.retry_delays,
         )
@@ -210,7 +208,7 @@ class ChatBotManager:
                 "model": model_id,
                 "priority": (config.model_priorities or {}).get(model_id, 0),
             })
-            chatbot = provider.create_chatbot(cls._clients[name], chatbot_config)
+            chatbot = provider.create_chatbot(client, chatbot_config)
             chatbots[model_id] = chatbot
 
         cls._backends[name].api_type = config.api_type
@@ -229,7 +227,6 @@ class ChatBotManager:
         """
         if name in cls._backends:
             del cls._backends[name]
-            del cls._clients[name]
             return True
         return False
 
@@ -323,7 +320,6 @@ class ChatBotManager:
             json_obj: Dict with "backends" key containing list of backend configs.
         """
         cls._backends.clear()
-        cls._clients.clear()
 
         for backend_config in json_obj.get("backends", []):
             config = BackendConfig.from_dict(backend_config)
@@ -331,7 +327,7 @@ class ChatBotManager:
             if config.api_type is not None and config.api_type not in ("openai", "anthropic", "gemini"):
                 raise ValueError(f"Invalid api_type in config: {config.api_type}")
 
-            cls._clients[config.name] = HTTPClient(
+            client = HTTPClient(
                 timeout=cls._timeout,
                 retry_delays=config.retry_delays,
             )
@@ -360,7 +356,7 @@ class ChatBotManager:
                     "model": model_id,
                     "priority": (config.model_priorities or {}).get(model_id, 0),
                 })
-                chatbot = provider.create_chatbot(cls._clients[config.name], chatbot_config)
+                chatbot = provider.create_chatbot(client, chatbot_config)
                 chatbots[model_id] = chatbot
 
             cls._backends[config.name].api_type = config.api_type

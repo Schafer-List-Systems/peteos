@@ -1,7 +1,7 @@
 """Abstract ChatBot base class and implementations."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from peteos.utils import get_logger
 from .httpclient import HTTPClient
@@ -11,6 +11,9 @@ from peteos.conversation.context import Context
 
 _logger = get_logger(__name__)
 
+# Executor type: async func(url, body, caller_headers) -> response
+PostExecutor = Callable[..., Any]
+
 
 class ChatBot(ABC):
     """Abstract base class for chatbot implementations.
@@ -19,15 +22,13 @@ class ChatBot(ABC):
     and translate their response schemas into a common interface.
     """
 
-    def __init__(self, http_client: HTTPClient, config: ChatBotConfig):
+    def __init__(self, config: ChatBotConfig):
         """
         Initialize ChatBot.
 
         Args:
-            http_client: HTTP client for making API requests.
             config: ChatBot configuration dataclass with all defaults applied.
         """
-        self._http_client = http_client
         self._config = config
 
     @abstractmethod
@@ -84,6 +85,69 @@ class ChatBot(ABC):
     def get_headers(self) -> Dict[str, str]:
         """Return extra HTTP headers to include with every API request.
 
-        Override in subclasses to provide API-specific auth/version headers.
+        Override in subclasses to provide API-specific auth/version headers
+        that will be merged into the request at execution time.
         """
         return {}
+
+    def _build_post_executor(
+        self,
+        http_client: HTTPClient,
+        secure_headers: Dict[str, str],
+    ) -> PostExecutor:
+        """Factory that builds a POST executor closure.
+
+        The executor captures the supplied HTTP client and the secure
+        headers (which may include API keys) in its closure. Callers
+        never see the raw values — they are merged into a local dict and
+        passed only to the HTTP client.
+
+        Args:
+            http_client: The HTTP client instance to use.
+            secure_headers: Headers to merge on every call, including any
+                API keys or other secrets.
+
+        Returns:
+            An async callable ``(url, body, caller_headers) -> response``.
+        """
+        async def executor(
+            url: str,
+            body: Dict[str, Any],
+            caller_headers: Optional[Dict[str, str]],
+        ) -> Any:
+            safe = dict(caller_headers or {})
+            safe.update(secure_headers)
+            return await http_client.post(url, body, headers=safe)
+
+        return executor
+
+    def _build_stream_executor(
+        self,
+        http_client: HTTPClient,
+        secure_headers: Dict[str, str],
+    ) -> PostExecutor:
+        """Factory that builds a streaming POST executor closure.
+
+        Same pattern as ``_build_post_executor`` but calls
+        ``http_client.stream_post`` to return an async generator.
+
+        Args:
+            http_client: The HTTP client instance to use.
+            secure_headers: Headers to merge on every call, including any
+                API keys or other secrets.
+
+        Returns:
+            An async callable ``(url, body, caller_headers) ->
+            AsyncGenerator[str, None]``.
+        """
+        async def executor(
+            url: str,
+            body: Dict[str, Any],
+            caller_headers: Optional[Dict[str, str]],
+        ) -> AsyncGenerator[str, None]:  # type: ignore[return]
+            safe = dict(caller_headers or {})
+            safe.update(secure_headers)
+            async for line in http_client.stream_post(url, body, headers=safe):
+                yield line
+
+        return executor
