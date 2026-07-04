@@ -168,22 +168,24 @@ class ChatBotManager:
         if name in cls._backends:
             raise ValueError(f"Backend '{name}' already exists")
 
-        if api_type is not None and api_type not in ("openai", "anthropic", "gemini"):
-            raise ValueError(f"Invalid api_type: {api_type}. Must be 'openai', 'anthropic', or 'gemini'")
-
         config = BackendConfig.from_dict({
             "name": name,
             "url": url,
             **{"api_type": api_type},
             **kwargs,
         })
+        return await cls._add_backend(config)
+
+    @classmethod
+    async def _add_backend(cls, config: BackendConfig) -> BackendInfo:
+        """Add a backend from a BackendConfig (no duplicate or validation check)."""
         client = HTTPClient(
             timeout=cls._timeout,
             retry_delays=config.retry_delays,
         )
 
         # Add placeholder before detection so methods can look up url
-        cls._backends[name] = BackendInfo(
+        cls._backends[config.name] = BackendInfo(
             name=config.name,
             url=config.url,
             api_type=config.api_type,
@@ -192,7 +194,7 @@ class ChatBotManager:
 
         # Auto-detect api_type or delegate to provider
         if config.api_type is None:
-            config.api_type, models = await cls._detect_api_and_list_models(name, config.api_key)
+            config.api_type, models = await cls._detect_api_and_list_models(config.name, config.api_key)
         else:
             provider = cls._providers.get(config.api_type)
             if provider is None:
@@ -211,9 +213,9 @@ class ChatBotManager:
             chatbot = provider.create_chatbot(client, chatbot_config)
             chatbots[model_id] = chatbot
 
-        cls._backends[name].api_type = config.api_type
-        cls._backends[name].models = chatbots
-        return cls._backends[name]
+        cls._backends[config.name].api_type = config.api_type
+        cls._backends[config.name].models = chatbots
+        return cls._backends[config.name]
 
     @classmethod
     def remove_backend(cls, name: str) -> bool:
@@ -327,40 +329,7 @@ class ChatBotManager:
             if config.api_type is not None and config.api_type not in ("openai", "anthropic", "gemini"):
                 raise ValueError(f"Invalid api_type in config: {config.api_type}")
 
-            client = HTTPClient(
-                timeout=cls._timeout,
-                retry_delays=config.retry_delays,
-            )
-            backend_info = BackendInfo(
-                name=config.name,
-                url=config.url,
-                api_type=config.api_type,
-                models={},
-            )
-            cls._backends[config.name] = backend_info
-
-            if config.api_type is None:
-                config.api_type, models = await cls._detect_api_and_list_models(config.name, config.api_key)
-            else:
-                provider = cls._providers.get(config.api_type)
-                if provider is None:
-                    raise RuntimeError(f"No provider registered for api_type: {config.api_type}")
-                models = await provider.list_models(config.url, config.api_key)
-
-            # Create ChatBot instances via provider
-            provider = cls._providers[config.api_type]
-            chatbots: Dict[str, Any] = {}
-            for model_id in models:
-                chatbot_config = ChatBotConfig.from_dict({
-                    **vars(config),
-                    "model": model_id,
-                    "priority": (config.model_priorities or {}).get(model_id, 0),
-                })
-                chatbot = provider.create_chatbot(client, chatbot_config)
-                chatbots[model_id] = chatbot
-
-            cls._backends[config.name].api_type = config.api_type
-            cls._backends[config.name].models = chatbots
+            await cls._add_backend(config)
 
     @classmethod
     async def load_from_file(cls, filepath: str) -> None:
