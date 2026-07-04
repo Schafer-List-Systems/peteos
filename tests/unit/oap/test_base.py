@@ -17,7 +17,7 @@ class TestAgenticObjectInit:
         obj = self._BaseTestAO()
         assert obj.agent is not None
         assert obj.role is not None
-        assert obj.role.name == "oap__BaseTestAO"
+        assert obj.role.name == "_BaseTestAO"
         assert isinstance(obj._oap_tool_manager, ToolManager)
 
     def test_agent_property(self):
