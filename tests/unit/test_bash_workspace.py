@@ -44,7 +44,7 @@ class TestBashWorkspace:
     def test_bash_exec_timeout(self):
         """Test that long-running commands are killed."""
         obj = BashWorkspace()
-        result = obj.bash_exec("sleep 60")
+        result = obj.bash_exec("sleep 2", timeout=1)
         assert "timed out" in result
 
     def test_bash_exec_stderr(self):

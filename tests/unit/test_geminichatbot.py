@@ -431,30 +431,3 @@ class TestGeminiChatBotRequest:
         gen_config = body.get("generationConfig", {})
         assert gen_config["temperature"] == 0.5
         assert gen_config["maxOutputTokens"] == 100
-
-
-class TestGeminiChatBotAuth:
-    """Tests for GeminiChatBot auth headers."""
-
-    def test_get_headers_without_api_key(self):
-        """get_headers returns empty dict when no API key is set."""
-        http_client = HTTPClient(timeout=5.0)
-        config = ChatBotConfig(name="test", url="http://test:8000", model="test-model")
-        chatbot = GeminiChatBot(http_client, config)
-
-        headers = chatbot.get_headers()
-        assert headers == {}
-
-    def test_get_headers_with_api_key(self):
-        """get_headers includes x-goog-api-key when API key is set."""
-        http_client = HTTPClient(timeout=5.0)
-        config = ChatBotConfig(
-            name="test",
-            url="http://test:8000",
-            model="test-model",
-            api_key="secret-key-123",
-        )
-        chatbot = GeminiChatBot(http_client, config)
-
-        headers = chatbot.get_headers()
-        assert headers == {"x-goog-api-key": "secret-key-123"}

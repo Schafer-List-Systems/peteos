@@ -113,7 +113,7 @@ class BashWorkspace(AgenticObject):
         return base in _SAFE_COMMANDS
 
     @tool
-    def bash_exec(self, command: str) -> str:
+    def bash_exec(self, command: str, timeout: int = 30) -> str:
         """Execute a bash command in the sandboxed workspace.
 
         Args:
@@ -153,7 +153,7 @@ class BashWorkspace(AgenticObject):
                 env=self._env,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
             )
             _logger.debug("[bash_exec] stdout=%r, stderr=%r, returncode=%d", result.stdout, result.stderr, result.returncode)
             output = f"exit_code: {result.returncode}"
