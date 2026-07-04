@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import uuid
 from pathlib import Path
@@ -161,7 +162,10 @@ class Context:
         """
         self._json_dict = json_dict
         self._json_dict.setdefault("messages", [])
-        self._json_dict.setdefault("id", str(uuid.uuid4()))
+        self._json_dict.setdefault(
+            "id",
+            f"{datetime.date.today().strftime('%Y%m%d')}-{uuid.uuid4()}",
+        )
         self._json_dict.setdefault("content_map", {})
         self._json_dict.setdefault("anchor_points", [])
         self._json_dict.setdefault("message_sequence", 0)
