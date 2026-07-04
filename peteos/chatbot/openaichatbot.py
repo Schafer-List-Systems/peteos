@@ -115,21 +115,24 @@ class OpenAIChatBot(ChatBot):
             bot_cfg["request_translations"] = self.REQUEST_TRANSLATIONS
         if bot_cfg.get("max_tokens") is None:
             bot_cfg["max_tokens"] = self.DEFAULT_MAX_TOKENS
-        super().__init__(http_client, ChatBotConfig.from_dict(bot_cfg))
+        super().__init__(ChatBotConfig.from_dict(bot_cfg))
         self._models: List[str] = []
+
+        # Capture api_key locally and build executors — api_key is then
+        # captured in the closure and removed from config.
+        api_key = self._config.api_key
+        secure_headers: Dict[str, str] = {}
+        if api_key:
+            secure_headers["Authorization"] = f"Bearer {api_key}"
+        self._post_executor = self._build_post_executor(http_client, secure_headers)
+        self._stream_executor = self._build_stream_executor(http_client, secure_headers)
+        self._config.api_key = None  # type: ignore[assignment]
 
     def list_available_models(self) -> List[str]:
         """List available models from the models endpoint or return [model]."""
         if self._models:
             return self._models
         return [self._config.model]
-
-    def get_headers(self) -> Dict[str, str]:
-        """Return API auth headers when an API key is configured."""
-        headers: Dict[str, str] = {}
-        if self._config.api_key:
-            headers["Authorization"] = f"Bearer {self._config.api_key}"
-        return headers
 
     async def send_context(
         self,
@@ -141,13 +144,14 @@ class OpenAIChatBot(ChatBot):
         streaming_mode = self._config.streaming if streaming is None else streaming
         body = self._build_body(context, generation_config, streaming)
 
+        endpoint = f"{self._config.url}{self._config.chat_endpoint}"
         _logger.debug("OpenAI request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
 
         if streaming_mode:
-            stream = self._http_client.stream_post(f"{self._config.url}{self._config.chat_endpoint}", body, self.get_headers())
+            stream = self._stream_executor(endpoint, body, self.get_headers())
             return OpenAIChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._http_client.post(f"{self._config.url}{self._config.chat_endpoint}", body, self.get_headers())
+            response_data = await self._post_executor(endpoint, body, self.get_headers())
             return OpenAIChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(self, context: Context, generation_config: Optional[Dict[str, Any]] = None, streaming: bool | None = None) -> Dict[str, Any]:
