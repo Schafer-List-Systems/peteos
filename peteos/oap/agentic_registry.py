@@ -101,7 +101,7 @@ class AgenticObjectRegistry:
     @classmethod
     def _resolve_canonical_role(cls, cls_name: str, agentic_class: Type) -> Role:
         """Build the canonical Role for the given class."""
-        role_name = getattr(agentic_class, "_oap_config", {}).get("role") or f"oap_{cls_name}"
+        role_name = getattr(agentic_class, "_oap_config", {}).get("role") or cls_name
         canonical = Role(
             name=role_name,
             description=f"Agent for {cls_name}",
