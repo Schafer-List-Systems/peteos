@@ -270,9 +270,12 @@ class TestOpenAILiveNonStreaming:
             pass
 
         # Either valid response or tool_choice-not-supported error
-        if response.data:
-            assert "role" in response.data
-            assert "content" in response.data
+        if "error" in response.data:
+            # vLLM may reject tool_choice without tools defined — this is expected
+            return
+        assert response.data
+        assert "role" in response.data
+        assert "content" in response.data
 
     @pytest.mark.asyncio
     async def test_send_context_non_streaming_generation_config(self, live_openai_chatbot):
