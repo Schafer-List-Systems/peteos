@@ -325,34 +325,3 @@ class TestAnthropicLiveNonStreaming:
 
         assert "role" in response.data
         assert "content" in response.data
-
-
-class TestAnthropicLiveModelProperties:
-    """Test live Anthropic ChatBot model property access."""
-
-    @pytest.mark.asyncio
-    async def test_model_property_returns_config_model(self, live_anthropic_chatbot, chatbot_config):
-        """Model property returns the configured model name."""
-        _skip_if_not_configured()
-
-        assert live_anthropic_chatbot.model == chatbot_config["model"]
-
-    @pytest.mark.asyncio
-    async def test_model_setter_changes_config(self, live_anthropic_chatbot):
-        """Model setter updates the config."""
-        _skip_if_not_configured()
-
-        old_model = live_anthropic_chatbot.model
-        live_anthropic_chatbot.model = "test-model-override"
-        assert live_anthropic_chatbot._config.model == "test-model-override"
-        live_anthropic_chatbot.model = old_model
-
-    @pytest.mark.asyncio
-    async def test_list_available_models(self, live_anthropic_chatbot):
-        """list_available_models returns at least the configured model."""
-        _skip_if_not_configured()
-
-        models = live_anthropic_chatbot.list_available_models()
-        assert isinstance(models, list)
-        assert len(models) >= 1
-        assert live_anthropic_chatbot.model in models

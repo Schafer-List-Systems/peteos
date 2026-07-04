@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio"]
 camera = ["opencv-python>=4.8.0", "numpy>=1.24.0"]
+web = ["beautifulsoup4", "lxml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -18,6 +18,8 @@ Without env vars, tests are skipped with a message explaining what's needed.
 """
 
 import os
+from typing import Any, Dict, Optional
+
 import pytest
 import pytest_asyncio
 from aiohttp import ClientSession, ClientTimeout
@@ -53,13 +55,16 @@ def _session_http_client_factory(session, base_url):
             self._session = sess
             self._base_url = base_url
 
-        async def post(self, url, body):
+        async def post(self, url, body, headers: Optional[Dict[str, str]] = None):
             # The full URL is passed by ChatBot; strip base_url to get the relative path
             relative_path = url[len(self._base_url):] if url.startswith(self._base_url) else url
-            async with self._session.post(relative_path, json=body) as resp:
+            kwargs: dict[str, Any] = {"json": body}
+            if headers:
+                kwargs["headers"] = headers
+            async with self._session.post(relative_path, **kwargs) as resp:
                 return await resp.json()
 
-        async def stream_post(self, url, body):
+        async def stream_post(self, url, body, headers: Optional[Dict[str, str]] = None):
             """Yield raw SSE lines from the response."""
             relative_path = url[len(self._base_url):] if url.startswith(self._base_url) else url
             async with self._session.post(relative_path, json=body) as resp:
