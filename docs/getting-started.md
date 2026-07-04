@@ -26,19 +26,31 @@ pip install .
 
 This installs Peteos as a package so you can `import peteos` from your own code.
 
-Peteos requires Python 3.10 or later. Its core dependencies are `aiohttp`, `httpx`, and `tiktoken` (for token counting). If you plan to use camera-related agentic objects, install the optional extras:
+Peteos requires Python 3.10 or later. Its core dependencies are `aiohttp`, `httpx`, and `tiktoken` (for token counting). Optional extras cover feature-specific dependencies:
 
 ```bash
-pip install ".[camera]"
+pip install ".[camera]"   # camera-related agentic objects
+pip install ".[web]"      # web browsing agentic objects
+pip install -e ".[dev]"   # test and lint dependencies
 ```
 
-For development, install the test and lint dependencies:
+Install multiple extras together by separating them with commas:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[camera,web,dev]"
 ```
 
 The `-e` flag installs Peteos in editable (development) mode, so changes to the source are reflected immediately without needing to reinstall.
+
+### Verifying the Installation
+
+Run the unit tests to confirm everything works:
+
+```bash
+python -m pytest tests/unit/ -v
+```
+
+This tests the core framework without requiring an LLM backend.
 
 
 ## Setting Up the Environment
@@ -57,6 +69,20 @@ The backend URL is passed at runtime — no hardcoded endpoints.
 Additional options such as `streaming` and `max_tokens` can be configured per backend.
 A single backend may expose multiple models, and the agent harness automatically selects one if the backend supports more than one.
 Model patterns can be used to restrict which models are considered, and in case of ambiguity the harness picks a default. Details on configuration, model selection, and the full set of options are covered in the **[ChatBotManager reference](./reference/chatbot-manager.md)**.
+
+### Verifying Against a Live Backend
+
+With an LLM backend running, verify the integration with the chatbot tests:
+
+```bash
+CHATBOT_TEST_BACKEND_URL=http://localhost:8000 \
+CHATBOT_TEST_BACKEND_NAME=test \
+CHATBOT_TEST_API_KEY=YOUR_API_KEY \
+CHATBOT_TEST_MODEL=LLM_MODEL \
+PYTHONPATH=. python -m pytest tests/integration/chatbot/test_[openai,gemini,anthropic]_live.py -v -m chatbot_integration
+```
+
+Each test checks the chatbot API surface — model listing, streaming, non-streaming, and structured responses. Tests are skipped automatically if environment variables are missing.
 
 ---
 
