@@ -262,6 +262,107 @@ class TestChatBotManagerListChatbots:
 
         assert len(results) == 0
 
+    @pytest.mark.asyncio
+    async def test_list_chatbots_sorted_by_priority(self):
+        """Test that list_chatbots sorts by priority descending, then model_id."""
+
+        mock_response = {
+            "data": [
+                {"id": "gpt-3.5-turbo"},
+                {"id": "gpt-4"},
+                {"id": "gpt-4o"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.add_backend(
+                "priority-backend",
+                "http://test:8000",
+                model_priorities={"gpt-4o": 10, "gpt-4": 5},
+            )
+
+        results = ChatBotManager.list_chatbots("gpt")
+
+        assert len(results) == 3
+        assert results[0][0] == "gpt-4o"  # priority 10
+        assert results[1][0] == "gpt-4"   # priority 5
+        assert results[2][0] == "gpt-3.5-turbo"  # priority 0 (default)
+
+    @pytest.mark.asyncio
+    async def test_list_chatbots_priority_breaks_alphabetical_tie(self):
+        """When priorities differ, they override alphabetical ordering."""
+
+        mock_response = {
+            "data": [
+                {"id": "gpt-3.5-turbo"},
+                {"id": "gpt-4"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            # gpt-3.5 is alphabetically first, but gpt-4 has higher priority
+            await ChatBotManager.add_backend(
+                "tie-breaker-backend",
+                "http://test:8000",
+                model_priorities={"gpt-4": 1},
+            )
+
+        results = ChatBotManager.list_chatbots("gpt")
+
+        assert results[0][0] == "gpt-4"  # higher priority, despite later alphabet
+        assert results[1][0] == "gpt-3.5-turbo"
+
+    @pytest.mark.asyncio
+    async def test_list_chatbots_default_priority_is_zero(self):
+        """Models without explicit priority get 0 and stay alphabetical."""
+
+        mock_response = {
+            "data": [
+                {"id": "model-b"},
+                {"id": "model-a"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.add_backend(
+                "default-priority-backend",
+                "http://test:8000",
+            )
+
+        results = ChatBotManager.list_chatbots(".*")
+
+        assert len(results) == 2
+        assert results[0][0] == "model-a"  # alphabetical tiebreaker
+        assert results[1][0] == "model-b"
+
+    @pytest.mark.asyncio
+    async def test_chatbot_priority_property(self):
+        """ChatBot instances expose priority via .priority property."""
+
+        mock_response = {"data": [{"id": "priority-model"}]}
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.add_backend(
+                "prop-backend",
+                "http://test:8000",
+                model_priorities={"priority-model": 42},
+            )
+
+        chatbot = ChatBotManager._backends["prop-backend"].models["priority-model"]
+        assert chatbot.priority == 42
+
 
 class TestChatBotManagerLoadFromJson:
     """Tests for load_from_json method."""
@@ -399,6 +500,75 @@ class TestChatBotManagerLoadFromJson:
         assert len(ChatBotManager._backends) == 0
         assert len(ChatBotManager._clients) == 0
 
+    @pytest.mark.asyncio
+    async def test_load_from_json_with_model_priorities(self):
+        """Test loading backend with model_priorities from JSON."""
+
+        json_obj = {
+            "backends": [
+                {
+                    "name": "prioritized-backend",
+                    "url": "http://prioritized:8000",
+                    "model_priorities": {
+                        "premium-model": 10,
+                        "standard-model": 0,
+                    },
+                }
+            ]
+        }
+
+        mock_response = {
+            "data": [
+                {"id": "premium-model"},
+                {"id": "standard-model"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.load_from_json(json_obj)
+
+        results = ChatBotManager.list_chatbots(".*")
+
+        assert len(results) == 2
+        assert results[0][0] == "premium-model"  # priority 10
+        assert results[1][0] == "standard-model"  # priority 0
+
+    @pytest.mark.asyncio
+    async def test_load_from_json_with_empty_model_priorities(self):
+        """Test loading backend with empty model_priorities dict."""
+
+        json_obj = {
+            "backends": [
+                {
+                    "name": "no-priority-backend",
+                    "url": "http://noprio:8000",
+                    "model_priorities": {},
+                }
+            ]
+        }
+
+        mock_response = {
+            "data": [
+                {"id": "model-b"},
+                {"id": "model-a"},
+            ]
+        }
+
+        with patch(
+            "httpx.AsyncClient",
+            _make_httpx_mock(return_value=mock_response),
+        ):
+            await ChatBotManager.load_from_json(json_obj)
+
+        results = ChatBotManager.list_chatbots(".*")
+
+        assert len(results) == 2
+        assert results[0][0] == "model-a"  # alphabetical tiebreaker
+        assert results[1][0] == "model-b"
+
 
 class TestChatBotManagerLoadFromFile:
     """Tests for load_from_file method."""
@@ -421,6 +591,96 @@ class TestChatBotManagerLoadFromFile:
         assert "file-backend" in ChatBotManager._backends
         assert ChatBotManager._backends["file-backend"].api_type == "openai"
         assert "file-model" in ChatBotManager._backends["file-backend"].models
+
+
+class TestChatBotConfigDiscovery:
+    """Tests for load_from_config and config resolution."""
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_no_file(self):
+        """When no config file exists, logs warning and returns gracefully."""
+        with patch.object(ChatBotManager, "_resolve_config_path", return_value=None):
+            await ChatBotManager.load_from_config()
+
+        assert ChatBotManager._config_dir is None
+        assert len(ChatBotManager._backends) == 0
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_from_env_var(self, tmp_path):
+        """PETEOS_CONFIG env var takes highest priority."""
+        config_file = tmp_path / "peteos.json"
+        config_file.write_text('{"backends": [{"name": "env-backend", "url": "http://env:8000"}]}')
+
+        mock_response = {"data": [{"id": "env-model"}]}
+
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
+            with patch.object(ChatBotManager, "_resolve_config_path", return_value=str(config_file)):
+                await ChatBotManager.load_from_config()
+
+        assert ChatBotManager._config_dir == str(tmp_path)
+        assert "env-backend" in ChatBotManager._backends
+
+    @pytest.mark.asyncio
+    async def test_load_from_config_sets_config_dir(self, tmp_path):
+        """Config directory is set to the parent of the loaded peteos.json."""
+        config_dir = tmp_path / "peteos_config"
+        config_dir.mkdir()
+        config_file = config_dir / "peteos.json"
+        config_file.write_text('{"backends": [{"name": "dir-backend", "url": "http://dir:8000"}]}')
+
+        mock_response = {"data": [{"id": "dir-model"}]}
+
+        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
+            with patch.object(ChatBotManager, "_resolve_config_path", return_value=str(config_file)):
+                await ChatBotManager.load_from_config()
+
+        assert ChatBotManager._config_dir == str(config_dir)
+
+    @pytest.mark.asyncio
+    async def test_config_dir_reset_on_reset(self):
+        """_config_dir is cleared on ChatBotManager.reset()."""
+        ChatBotManager._config_dir = "/test/path"
+        ChatBotManager.reset()
+        assert ChatBotManager._config_dir is None
+
+    def test_resolve_config_path_env_first(self, tmp_path):
+        """PETEOS_CONFIG env var resolves before XDG/system/local."""
+        env_file = tmp_path / "env_peteos.json"
+        env_file.write_text('{"backends": []}')
+
+        with patch("os.environ.get", side_effect=lambda key, default=None: {
+            "PETEOS_CONFIG": str(env_file),
+        }.get(key, default)):
+            resolved = ChatBotManager._resolve_config_path()
+
+        assert resolved == str(env_file)
+
+    def test_resolve_config_path_xdg_config(self, tmp_path):
+        """$XDG_CONFIG_HOME/peteos/peteos.json is resolved."""
+        xdg_path = tmp_path / "my_config" / "peteos" / "peteos.json"
+        xdg_path.parent.mkdir(parents=True)
+        xdg_path.write_text('{"backends": []}')
+
+        xdg_str = str(tmp_path / "my_config")
+
+        def fake_is_file(self):
+            return str(self) == str(xdg_path)
+
+        with patch("os.environ.get", side_effect=lambda key, default=None: {
+            "XDG_CONFIG_HOME": xdg_str,
+        }.get(key, default)):
+            with patch("pathlib.Path.is_file", fake_is_file):
+                resolved = ChatBotManager._resolve_config_path()
+
+        assert resolved == str(xdg_path)
+
+    def test_resolve_config_path_no_env(self, tmp_path):
+        """When no env vars set, returns None if no local peteos.json exists."""
+        with patch("os.environ.get", side_effect=lambda key, default=None: default):
+            with patch("pathlib.Path.is_file", return_value=False):
+                resolved = ChatBotManager._resolve_config_path()
+
+        assert resolved is None
 
 
 class AnyChatBot:

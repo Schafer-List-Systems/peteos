@@ -1,7 +1,9 @@
 """ChatBot manager for multiple backend providers."""
 
 import json
+import os
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,6 +14,9 @@ from .backendprovider import BackendProvider
 from .openaiprovider import OpenAIChatBotProvider
 from .anthropicprovider import AnthropicChatBotProvider
 from .geminiprovider import GeminiChatBotProvider
+from peteos.utils import get_logger
+
+_logger = get_logger(__name__)
 
 
 @dataclass
@@ -35,6 +40,7 @@ class ChatBotManager:
     _backends: Dict[str, BackendInfo] = {}
     _clients: Dict[str, HTTPClient] = {}
     _timeout: Optional[float] = None
+    _config_dir: Optional[str] = None  # directory containing loaded peteos.json
     _providers: Dict[str, BackendProvider] = {
         "openai": OpenAIChatBotProvider(),
         "anthropic": AnthropicChatBotProvider(),
@@ -58,6 +64,84 @@ class ChatBotManager:
         """
         cls._backends.clear()
         cls._clients.clear()
+        cls._config_dir = None
+
+    @staticmethod
+    def _resolve_config_path() -> Optional[str]:
+        """Resolve the path to peteos.json using standard discovery order.
+
+        Resolution order (first found wins):
+            1. PETEOS_CONFIG environment variable (full path)
+            2. $XDG_CONFIG_HOME/peteos/peteos.json (defaults to ~/.config/peteos/peteos.json)
+            3. /etc/peteos/peteos.json
+            4. ./peteos.json (current working directory)
+
+        Returns:
+            Absolute path to peteos.json, or None if no config file exists.
+        """
+        # 1. Explicit env var
+        env_path = os.environ.get("PETEOS_CONFIG")
+        if env_path and Path(env_path).is_file():
+            return os.path.abspath(env_path)
+
+        # 2. XDG config directory
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if not xdg_config:
+            xdg_config = str(Path.home() / ".config")
+        xdg_path = Path(xdg_config) / "peteos" / "peteos.json"
+        if xdg_path.is_file():
+            return str(xdg_path)
+
+        # 3. System config
+        system_path = "/etc/peteos/peteos.json"
+        if Path(system_path).is_file():
+            return system_path
+
+        # 4. Current working directory
+        local_path = Path.cwd() / "peteos.json"
+        if local_path.is_file():
+            return str(local_path)
+
+        return None
+
+    @staticmethod
+    def _load_config_file(filepath: str) -> dict:
+        """Load and parse a peteos.json config file.
+
+        Args:
+            filepath: Absolute path to the JSON config file.
+
+        Returns:
+            Parsed JSON dict.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            json.JSONDecodeError: If the file contains invalid JSON.
+        """
+        with open(filepath, "r") as f:
+            return json.load(f)
+
+    @classmethod
+    async def load_from_config(cls) -> None:
+        """Load backend configuration from the first discovered peteos.json.
+
+        Discovers the config file using standard locations (see _resolve_config_path).
+        If no config file is found, logs a warning and does nothing.
+        The directory containing the loaded config is stored as _config_dir
+        for use by other subsystems (e.g., role loading from {config_dir}/roles/).
+
+        Backends are loaded via the existing load_from_json method.
+        """
+        filepath = cls._resolve_config_path()
+        if filepath is None:
+            _logger.warning("No peteos.json config file found in standard locations")
+            cls._config_dir = None
+            return
+
+        config_dir = str(Path(filepath).parent)
+        cls._config_dir = config_dir
+        json_obj = cls._load_config_file(filepath)
+        await cls.load_from_json(json_obj)
 
     @classmethod
     async def add_backend(
@@ -124,6 +208,7 @@ class ChatBotManager:
             chatbot_config = ChatBotConfig.from_dict({
                 **vars(config),
                 "model": model_id,
+                "priority": (config.model_priorities or {}).get(model_id, 0),
             })
             chatbot = provider.create_chatbot(cls._clients[name], chatbot_config)
             chatbots[model_id] = chatbot
@@ -202,7 +287,8 @@ class ChatBotManager:
             model_regex: Regex pattern to match model IDs.
 
         Returns:
-            List of (model_id, ChatBot) tuples, sorted by model_id.
+            List of (model_id, ChatBot) tuples, sorted by descending priority
+            (higher priority first), then alphabetically by model_id for ties.
         """
         pattern = re.compile(model_regex)
         results = []
@@ -212,7 +298,7 @@ class ChatBotManager:
                 if pattern.search(model_id):
                     results.append((model_id, chatbot))
 
-        return sorted(results, key=lambda x: x[0])
+        return sorted(results, key=lambda x: (-x[1].priority, x[0]))
 
     @classmethod
     async def load_from_json(cls, json_obj: dict) -> None:
@@ -272,6 +358,7 @@ class ChatBotManager:
                 chatbot_config = ChatBotConfig.from_dict({
                     **vars(config),
                     "model": model_id,
+                    "priority": (config.model_priorities or {}).get(model_id, 0),
                 })
                 chatbot = provider.create_chatbot(cls._clients[config.name], chatbot_config)
                 chatbots[model_id] = chatbot

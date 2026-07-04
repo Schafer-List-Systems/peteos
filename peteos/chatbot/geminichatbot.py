@@ -22,7 +22,7 @@ class GeminiChatBot(ChatBot):
     Uses the Gemini REST API directly:
     - Chat endpoint: /v1beta/models/{model}:generateContent
     - Streaming: /v1beta/models/{model}:streamGenerateContent
-    - Auth: ?key={api_key} query parameter (set via api_key in config)
+    - Auth: x-goog-api-key header (set via api_key in config)
 
     Gemini-specific request/response handling is entirely contained here.
     """
@@ -46,6 +46,13 @@ class GeminiChatBot(ChatBot):
             return self._models
         return [self._config.model]
 
+    def get_headers(self) -> Dict[str, str]:
+        """Return Gemini API auth headers when an API key is configured."""
+        headers: Dict[str, str] = {}
+        if self._config.api_key:
+            headers["x-goog-api-key"] = self._config.api_key
+        return headers
+
     async def send_context(
         self,
         context: Context,
@@ -59,16 +66,12 @@ class GeminiChatBot(ChatBot):
         _logger.debug("Gemini request: model=%s, contents=%d, tools=%d",
                        self._config.model, len(body.get("contents", [])), len(body.get("tools", [])))
 
-        # Build endpoint URL with model name and api_key query param
+        # Build endpoint URL with model name
         base_url = f"{self._config.url}{self._config.chat_endpoint}{self._config.model}"
         if streaming_mode:
             url = f"{base_url}:streamGenerateContent"
         else:
             url = f"{base_url}:generateContent"
-
-        # Add api_key from config as query param
-        if self._config.api_key:
-            url += f"?key={self._config.api_key}"
 
         _logger.debug("Gemini endpoint: %s", url)
 
@@ -370,53 +373,24 @@ class GeminiChatBot(ChatBot):
                         "name": tc.get("name"),
                         "args": json.loads(tc.get("arguments", "{}")),
                     }
+                    ts = tc.get("thought_signature")
+                    if ts:
+                        fc_part["thought_signature"] = ts
                     parts.append({"functionCall": fc_part})
             elif part_type == "tool_use":
                 fc_part: dict[str, Any] = {
                     "name": raw.get("name"),
                     "args": json.loads(raw.get("arguments", "{}")),
                 }
+                ts = raw.get("thought_signature")
+                if ts:
+                    fc_part["thought_signature"] = ts
                 parts.append({"functionCall": fc_part})
             else:
                 part_data = self._build_gemini_content_part(part)
                 if part_data:
                     parts.append(part_data)
         return parts
-
-        if tools:
-            body["tools"] = tools
-
-        # Handle tool_choice in generationConfig
-        if generation_config:
-            tool_choice = generation_config.get("tool_choice")
-            if tool_choice:
-                if isinstance(tool_choice, dict):
-                    tc_type = tool_choice.get("type", "auto")
-                    if tc_type == "any":
-                        body["generationConfig"]["tool_config"] = {
-                            "any_function_config": {}
-                        }
-                    elif tc_type == "specific":
-                        body["generationConfig"]["tool_config"] = {
-                            "function_calling_config": {
-                                "mode": "ANY",
-                                "allowed_function_names": [tool_choice.get("name", "")],
-                            }
-                        }
-                    else:
-                        body["generationConfig"]["tool_config"] = {
-                            "function_calling_config": {
-                                "mode": "AUTO" if tc_type == "auto" else tc_type.upper(),
-                            }
-                        }
-                elif isinstance(tool_choice, str):
-                    body["generationConfig"]["tool_config"] = {
-                        "function_calling_config": {
-                            "mode": tool_choice.upper(),
-                        }
-                    }
-
-        return body
 
 
 class GeminiChatBotResponse(GenericChatBotResponse):
@@ -571,12 +545,15 @@ class GeminiChatBotResponse(GenericChatBotResponse):
                 })
             elif "functionCall" in part:
                 fc = part["functionCall"]
-                content_array.append({
+                tool_use: Dict[str, Any] = {
                     "index": len(content_array),
                     "type": "tool_use",
                     "name": fc.get("name", ""),
                     "arguments": json.dumps(fc.get("args", {})),
-                })
+                }
+                if "thought_signature" in fc:
+                    tool_use["thought_signature"] = fc["thought_signature"]
+                content_array.append(tool_use)
             elif "inline_data" in part:
                 _logger.warning("Gemini response contains inline_data — not directly supported")
                 content_array.append({

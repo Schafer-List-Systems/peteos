@@ -31,6 +31,7 @@ class BackendConfig:
     max_tokens: int = 4096
     retry_delays: Optional[list[float]] = None
     api_key: Optional[str] = None
+    model_priorities: Optional[Dict[str, int]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "BackendConfig":
