@@ -244,6 +244,9 @@ class AnthropicChatBot(ChatBot):
                             if "arguments" in content_item:
                                 content_item["input"] = json.loads(content_item["arguments"])
                                 del content_item["arguments"]
+                            # Framework uses call_id, Anthropic uses id
+                            if "call_id" in content_item:
+                                content_item["id"] = content_item.pop("call_id")
                             content.append(content_item)
                     elif raw.get("type") == "thinking":
                         content.append({
@@ -251,6 +254,15 @@ class AnthropicChatBot(ChatBot):
                             "thinking": raw["text"],
                         })
                     else:
+                        # Framework uses call_id, Anthropic uses id
+                        # Framework uses arguments JSON string, Anthropic uses input dict
+                        if raw.get("type") == "tool_use":
+                            raw = dict(raw)
+                            if "call_id" in raw:
+                                raw["id"] = raw.pop("call_id")
+                            if "arguments" in raw:
+                                raw["input"] = json.loads(raw["arguments"])
+                                del raw["arguments"]
                         content.append(raw)
                 messages.append({
                     "role": role,
