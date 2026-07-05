@@ -29,17 +29,24 @@ class Agent:
     - Channels consume notifications from their own notification queues
 
     The session's event loop runs in a background task (created by start()).
+
+    The ``agent_base`` class attribute must be set by ``ConfigManager.init()``
+    before any Agent instances are created.
     """
+
+    agent_base: str = ""
 
     def __init__(
         self,
         role: Role,
         tool_manager: ToolManager,
-        agent_dir: str,
+        agent_base: str | None = None,
     ):
         self._role = role
         self._tool_manager = tool_manager
-        self._agent_dir = agent_dir
+        base = agent_base or self.__class__.agent_base
+        self._agent_dir = str(Path(base) / role.name)
+        Path(self._agent_dir).mkdir(parents=True, exist_ok=True)
 
         # Session management
         self._sessions: Dict[str, Session] = {}
@@ -49,6 +56,7 @@ class Agent:
         system_prompt_msg = SystemPromptMessage.create(self._role.system_prompt)
         tool_defs_msg = ToolDefinitionsMessage()
         session = Session.create(self._agent_dir, system_prompt_msg, tool_defs_msg)
+        session.session_dir.mkdir(exist_ok=True)
         self._sessions[session.uuid] = session
 
         session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_LIST_HOOK_NAME, self._tool_list_hook)

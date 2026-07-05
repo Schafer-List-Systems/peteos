@@ -129,6 +129,7 @@ class Context:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(self._json_dict, f, indent=2)
+        _logger.debug("Saved context %s to %s", self.id, path)
 
     def total_token_count(self, encoding: str = "cl100k_base") -> int:
         """Sum of token counts across all messages.

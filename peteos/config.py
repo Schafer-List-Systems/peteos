@@ -19,6 +19,7 @@ _logger = get_logger(__name__)
 class ConfigResult:
     """Result of loading the Peteos configuration."""
     config_dir: Optional[str] = None
+    agent_dir: Optional[str] = None
     loaded_backends: list = field(default_factory=list)
     loaded_roles: list = field(default_factory=list)
 
@@ -103,6 +104,11 @@ class ConfigManager:
         loaded_backends = list(ChatBotManager._backends.keys())
         _logger.info("Loaded %d backend(s) from peteos.json", len(loaded_backends))
 
+        # Set Agent.agent_base before role loading (roles create Agent instances)
+        agent_base = os.path.join(config_dir, "agents")
+        from peteos.persona.agent import Agent
+        Agent.agent_base = agent_base
+
         # Bootstrap roles from {config_dir}/roles/
         roles_dir = os.path.join(config_dir, "roles")
         loaded_roles: list = []
@@ -118,6 +124,7 @@ class ConfigManager:
 
         return ConfigResult(
             config_dir=config_dir,
+            agent_dir=agent_base,
             loaded_backends=loaded_backends,
             loaded_roles=loaded_roles,
         )

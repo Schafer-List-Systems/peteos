@@ -18,7 +18,7 @@ def agent():
     """Create a fresh Agent for each test."""
     role = Role(name="test", description="Test role", model=".*")
     tool_manager = ToolManager()
-    return Agent(role, tool_manager, agent_dir="/tmp/agent_test")
+    return Agent(role, tool_manager, agent_base="/tmp/agent_test")
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def agent_with_sessions():
     """Create a fresh Agent with auto-cleanup."""
     role = Role(name="test", description="Test role", model=".*")
     tool_manager = ToolManager()
-    ag = Agent(role, tool_manager, agent_dir="/tmp/agent_test")
+    ag = Agent(role, tool_manager, agent_base="/tmp/agent_test")
     yield ag
     # No is_running()/stop() on persona Session — just clear dict
     ag._sessions.clear()
@@ -36,7 +36,7 @@ def agent_with_sessions():
 def agent_with_assistant_role():
     role = Role(name="assistant", description="Assistant role", model=".*")
     tool_manager = ToolManager()
-    ag = Agent(role, tool_manager, agent_dir="/tmp/agent_test")
+    ag = Agent(role, tool_manager, agent_base="/tmp/agent_test")
     yield ag
     ag._sessions.clear()
 
@@ -50,7 +50,7 @@ def agent_with_auto_approve():
         auto_approve_tools=["web_fetch"]
     )
     tool_manager = ToolManager()
-    ag = Agent(role, tool_manager, agent_dir="/tmp/agent_test")
+    ag = Agent(role, tool_manager, agent_base="/tmp/agent_test")
     yield ag
     ag._sessions.clear()
 
@@ -63,7 +63,7 @@ class TestAgentInit:
         assert len(agent._sessions) == 0
 
     def test_agent_dir_property(self, agent):
-        assert agent.agent_dir == "/tmp/agent_test"
+        assert agent.agent_dir == "/tmp/agent_test/test"
 
     def test_role_property(self, agent):
         assert agent.role.name == "test"
@@ -194,7 +194,7 @@ class TestAgentToolHooks:
         tool_manager = ToolManager()
         tool_manager.register_tool(Tool(name="calc", description="calculator", func=lambda: None))
         role = Role(name="test", description="Test role", model=".*")
-        agent = Agent(role, tool_manager, agent_dir="/tmp/agent_test")
+        agent = Agent(role, tool_manager, agent_base="/tmp/agent_test")
         session = await agent.create_session()
         result = agent._tool_list_hook()
         parsed = json.loads(result)
@@ -219,7 +219,7 @@ class TestAgentToolHooks:
     async def test_tool_filter_hook_returns_role_filter(self):
         role = Role(name="filtered", description="F", tool_filter=["calc.*", "read.*"])
         tool_manager = ToolManager()
-        agent = Agent(role, tool_manager, agent_dir="/tmp/agent_test")
+        agent = Agent(role, tool_manager, agent_base="/tmp/agent_test")
         session = await agent.create_session()
         result = agent._tool_filter_hook()
         parsed = json.loads(result)

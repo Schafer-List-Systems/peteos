@@ -10,6 +10,10 @@ from peteos.conversation.message import Message
 from .system_prompt_message import SystemPromptMessage
 from .tool_definitions_message import ToolDefinitionsMessage
 
+from peteos.utils import get_logger
+
+_logger = get_logger(__name__)
+
 
 class Session:
     """A session representing a single interaction thread.
@@ -31,6 +35,7 @@ class Session:
         self._json_dict.setdefault("uuid", str(uuid.uuid4()))
         self._json_dict.setdefault("active_context_id", None)
         self._json_dict.setdefault("auto_approve_tools", [])
+        self._autosave = True
         self._hooks: dict[str, Callable[[], str]] = {}
         self._active_context: Context | None = None
 
@@ -93,6 +98,7 @@ class Session:
 
     def set_active_context(self, context: Context) -> None:
         """Set the active context, synchronizing both the JSON dict ID and the Python object reference."""
+        self.save_active_context()
         self._active_context = context
         self.raw_dict["active_context_id"] = context.id
 
@@ -183,6 +189,7 @@ class Session:
             tool_definitions_message=tool_definitions_message,
         )
         session.raw_dict["active_context_id"] = session._active_context.id
+        _logger.info("Created session %s in %s", session.uuid, session.session_dir)
         return session
 
     @classmethod
@@ -211,12 +218,26 @@ class Session:
             session._active_context = Context.load(context_path)
         return session
 
+    def save_active_context(self) -> None:
+        """Save the active context to disk if autosave is enabled and the session directory exists."""
+        if not self._autosave:
+            return
+        if self.session_dir.exists() and self._active_context is not None:
+            self._active_context.save(self.session_dir)
+
     def save(self) -> None:
         """Save the session and its active context to disk."""
         session_path = self.session_dir / "session.json"
         session_path.parent.mkdir(parents=True, exist_ok=True)
         with open(session_path, "w") as f:
             json.dump(self._json_dict, f, indent=2)
+        _logger.info("Saved session.json to %s", session_path)
 
-        if self._active_context is not None:
-            self._active_context.save(self.session_dir)
+        self.save_active_context()
+
+    def __del__(self) -> None:
+        """Auto-save the session and its active context on destruction."""
+        try:
+            self.save()
+        except Exception:
+            pass

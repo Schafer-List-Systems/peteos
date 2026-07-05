@@ -100,7 +100,6 @@ class AgenticObject:
         return Agent(
             self._oap_role,
             self._oap_tool_manager,
-            "",
         )
 
     def _register_tools(self) -> None:
