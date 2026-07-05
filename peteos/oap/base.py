@@ -457,6 +457,12 @@ class AgenticObject:
         """The Role used for this object's invocations."""
         return self._oap_role
 
+    async def _start_session(self, session: Session) -> Runner:
+        runner = Runner(self._oap_agent, session.uuid)
+        await runner.start()
+        session.is_active = True
+        return runner
+
     async def invoke_agent(
         self,
         prompt: str,
@@ -515,17 +521,11 @@ class AgenticObject:
                             f"Session {stored_uuid} is already active; "
                             "recursive invoke_agent on the same persistent thread is not allowed"
                         )
-                    runner = Runner(self._oap_agent, session.uuid)
-                    _logger.debug("invoke_agent[%s]: starting existing runner", self.__class__.__name__)
-                    await runner.start()
-                    session.is_active = True
+                    runner = await self._start_session(session)
         if session is None or runner is None:
             _logger.debug("invoke_agent[%s]: creating new session and runner", self.__class__.__name__)
             session = await self._oap_agent.create_session()
-            runner = Runner(self._oap_agent, session.uuid)
-            _logger.debug("invoke_agent[%s]: starting new runner", self.__class__.__name__)
-            await runner.start()
-            session.is_active = True
+            runner = await self._start_session(session)
             if persistent_thread_id is not None:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
 
