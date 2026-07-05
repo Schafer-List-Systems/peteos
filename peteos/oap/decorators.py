@@ -24,6 +24,26 @@ def tool(
     return apply
 
 
+def sandbox(
+    name: str | None | Callable = None,
+    description: str | None = None,
+) -> Callable[[Callable], Callable] | Callable:
+    """Mark a method on an AgenticObject subclass as callable from sandbox code.
+
+    Supports both @sandbox and @sandbox(name="custom_name").
+    A method can be both @tool (agent-loop) and @sandbox (sandbox-self).
+    """
+    def apply(func: Callable) -> Callable:
+        func._sandbox_name = name if isinstance(name, str) else func.__name__
+        func._sandbox_description = description or (func.__doc__ or "").strip()
+        return func
+
+    # Handle @sandbox (no parentheses) — func passed as first positional arg
+    if callable(name):
+        return apply(name)
+    return apply
+
+
 def agentic_object(
     imports: list[object] | None = None,
     import_aliases: dict[str, str] | None = None,

@@ -16,7 +16,7 @@ from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.utils import get_logger
 from peteos.oap.error import Error
-from peteos.oap.sandbox import build_sandbox_description, create_sandbox_globals
+from peteos.oap.sandbox import SandboxSelf, build_sandbox_description, create_sandbox_globals
 
 from peteos.oap.decorators import tool
 from peteos.oap.agentic_registry import AgenticObjectRegistry
@@ -219,16 +219,27 @@ class AgenticObject:
             name = new_funcs[0]
             obj = sandbox_globals[name]
 
-            # Attach produce_output/produce_error to self so the model uses
-            # self.produce_output() — same pattern as every other tool.
-            sandbox_self = self
-            sandbox_self.produce_output = lambda data: self._produce_output(data, runner=runner)
-            sandbox_self.produce_error = lambda message: self._produce_error(message, runner=runner)
+            # Create an empty SandboxSelf and populate it with closure-based
+            # proxies.  Each lambda captures real_self and runner in its scope,
+            # so sandboxed code has no way to reach them via introspection.
+            real_self = self
+            sandbox_self = SandboxSelf()
+
+            def _produce_output(data: Any) -> str:
+                return real_self._produce_output(data, runner=runner)
+
+            def _produce_error(message: str) -> str:
+                return real_self._produce_error(message, runner=runner)
+
+            setattr(sandbox_self, "produce_output", _produce_output)
+            setattr(sandbox_self, "produce_error", _produce_error)
+
+            SandboxSelf.populate(sandbox_self, real_self)
+
             try:
                 return obj(sandbox_self) if obj.__code__.co_argcount == 1 else obj()
             finally:
-                del sandbox_self.produce_output
-                del sandbox_self.produce_error
+                pass
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
 
