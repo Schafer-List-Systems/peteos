@@ -1,4 +1,4 @@
-"""Unit tests for Runner and AgenticState."""
+"""Unit tests for Runner and SessionState."""
 
 import asyncio
 import uuid as _uuid
@@ -15,67 +15,68 @@ from peteos.engine.executionenvironment import (
 )
 from peteos.engine.exec_status import ExecStatus
 from peteos.conversation.message import ContentPart, Message
-from peteos.engine.runner import AgenticState, ApprovalEvent, Runner
+from peteos.conversation.session import SessionState, SessionState
+from peteos.engine.runner import ApprovalEvent, Runner
 
 
 # ---------------------------------------------------------------------------
-# AgenticState
+# SessionState
 # ---------------------------------------------------------------------------
 
-class TestAgenticState:
+class TestSessionState:
     def test_initial_state_is_empty(self):
-        state = AgenticState()
+        state = SessionState()
         assert state.list() == []
         assert state.get("nonexistent") is None
 
     def test_create_and_get(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("key1", "value1")
         assert state.get("key1") == "value1"
         assert state.list() == ["key1"]
 
     def test_create_raises_if_exists(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("key1", "value1")
         with pytest.raises(ValueError, match="already exists"):
             state.create("key1", "value2")
 
     def test_create_raises_on_none_value(self):
-        state = AgenticState()
+        state = SessionState()
         with pytest.raises(ValueError, match="must not be None"):
             state.create("key1", None)
 
     def test_update_compare_and_swap(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("key1", "old")
         state.update("key1", "old", "new")
         assert state.get("key1") == "new"
 
     def test_update_raises_if_key_missing(self):
-        state = AgenticState()
+        state = SessionState()
         with pytest.raises(KeyError, match="does not exist"):
             state.update("key1", "old", "new")
 
     def test_update_raises_on_none_old(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("key1", "val")
         with pytest.raises(ValueError, match="old_value must not be None"):
             state.update("key1", None, "new")
 
     def test_update_raises_on_none_new(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("key1", "val")
         with pytest.raises(ValueError, match="new_value must not be None"):
             state.update("key1", "val", None)
 
     def test_update_raises_on_mismatch(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("key1", "wrong")
         with pytest.raises(ValueError, match=r"has value 'wrong', expected 'correct'"):
             state.update("key1", "correct", "new")
 
     def test_delete(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("key1", "val")
         assert state.get("key1") == "val"
         state.delete("key1")
@@ -83,12 +84,12 @@ class TestAgenticState:
         assert state.list() == []
 
     def test_delete_raises_if_missing(self):
-        state = AgenticState()
+        state = SessionState()
         with pytest.raises(KeyError, match="does not exist"):
             state.delete("key1")
 
     def test_multiple_keys(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("a", "1")
         state.create("b", "2")
         state.create("c", "3")
@@ -96,7 +97,7 @@ class TestAgenticState:
         assert set(keys) == {"a", "b", "c"}
 
     def test_delete_order_preserved(self):
-        state = AgenticState()
+        state = SessionState()
         state.create("a", "1")
         state.create("b", "2")
         state.create("c", "3")
@@ -165,6 +166,7 @@ def _make_mock_session(
     session.auto_approve_tools = list(role.auto_approve_tools)
     session.tool_failure_policy = tool_failure_policy
     session.active_context = ctx
+    session.state = SessionState()
     return session
 
 
@@ -232,7 +234,7 @@ class TestRunnerInit:
         session = _make_mock_session()
         agent = _make_mock_agent(session)
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
-        assert isinstance(runner.state, AgenticState)
+        assert isinstance(runner.state, SessionState)
 
     def test_init_creates_execution_environment(self, chatbot_manager_mock):
         session = _make_mock_session()

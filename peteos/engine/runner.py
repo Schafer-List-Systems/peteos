@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid as _uuid
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
+from peteos.conversation.session import SessionState
 from peteos.chatbot import ChatBot, ChatBotManager, ContentPart, Message
 
 from peteos.utils.activeclass import ActiveClass
@@ -50,7 +51,7 @@ async def invoke_agent(
         Dict with keys:
             - answer (str): Last assistant text.
             - history (list[Message]): Full chat history.
-            - state (dict[str, str]): AgenticState data.
+            - state (dict[str, str]): SessionState data.
 
     Raises:
         ValueError: If agent is not provided.
@@ -72,7 +73,6 @@ async def invoke_agent(
         await runner.queue_message(user_message)
         await asyncio.wait_for(done.wait(), timeout=timeout)
         answer = _extract_last_assistant_text(session.active_context)
-        return_state = dict(runner._state._data)
     finally:
         try:
             runner._execution_environment.deregister_hook("after_step", on_finished)
@@ -86,61 +86,8 @@ async def invoke_agent(
     return {
         "answer": answer,
         "history": list(session.active_context.messages),
-        "state": return_state,
+        "state": dict(runner._session.state.to_dict()),
     }
-
-
-class AgenticState:
-    """Mutable key-value store for agents to leave intermediate state.
-
-    Variables store strings. Five distinct methods with clear semantics:
-
-    - get(name): returns the value or None if not found
-    - create(name, value): creates a new variable (raises if exists)
-    - update(name, old_value, new_value): compare-and-swap (both non-None)
-    - delete(name): removes a variable (raises if not found)
-    - list(): returns all variable names
-    """
-
-    def __init__(self) -> None:
-        self._data: dict[str, str] = {}
-
-    def get(self, name: str) -> Optional[str]:
-        """Get a variable's value."""
-        return self._data.get(name)
-
-    def create(self, name: str, value: str) -> None:
-        """Create a new variable."""
-        if name in self._data:
-            raise ValueError(f"Variable '{name}' already exists in AgenticState")
-        if value is None:
-            raise ValueError("Value must not be None")
-        self._data[name] = value
-
-    def update(self, name: str, old_value: str, new_value: str) -> None:
-        """Update a variable with compare-and-swap semantics."""
-        if old_value is None:
-            raise ValueError("old_value must not be None")
-        if new_value is None:
-            raise ValueError("new_value must not be None")
-        if name not in self._data:
-            raise KeyError(f"Variable '{name}' does not exist in AgenticState")
-        current = self._data[name]
-        if current != old_value:
-            raise ValueError(
-                f"Variable '{name}' has value {current!r}, expected {old_value!r}"
-            )
-        self._data[name] = new_value
-
-    def delete(self, name: str) -> None:
-        """Delete a variable."""
-        if name not in self._data:
-            raise KeyError(f"Variable '{name}' does not exist in AgenticState")
-        del self._data[name]
-
-    def list(self) -> list[str]:
-        """Return a list of all variable names."""
-        return list(self._data.keys())
 
 
 class Runner(ActiveClass):
@@ -150,7 +97,7 @@ class Runner(ActiveClass):
 
     - Message queue for incoming messages (``queue_message``)
     - Channel subscriptions and notification publishing
-    - ``AgenticState`` key-value store
+    - ``SessionState`` key-value store (via ``state`` property)
     - ``step()`` reasoning iteration (chatbot -> active_context -> EE -> status)
 
     Tool call management, approval workflow, and tool execution are
@@ -175,7 +122,6 @@ class Runner(ActiveClass):
         self._agent = agent
         self._session_uuid = session_uuid
         self.uuid = session_uuid
-        self._state = AgenticState()
         self._channels: set[Channel] = set()
         self._idle: asyncio.Event = asyncio.Event()
 
@@ -217,9 +163,9 @@ class Runner(ActiveClass):
         return self._execution_environment
 
     @property
-    def state(self) -> AgenticState:
-        """Access the runner's mutable state store."""
-        return self._state
+    def state(self) -> SessionState:
+        """Access the session's mutable state store."""
+        return self._session.state
 
     # ------------------------------------------------------------------ #
     # Chatbot selection

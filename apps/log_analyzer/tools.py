@@ -1,7 +1,6 @@
 """Log Analyzer tools — stub implementations for wake/sleep state and filtering."""
 
 import logging
-import uuid
 from typing import TYPE_CHECKING
 
 from peteos.persona.toolmanager import ToolManager
@@ -336,7 +335,7 @@ def set_approval_result(
 ) -> str:
     """Set the review decision. Call with approved='yes' or 'no' and a reason.
 
-    Writes the decision to the reviewer runner's AgenticState so the
+    Writes the decision to the reviewer runner's SessionState so the
     invoking agent can read it out.
 
     Args:
@@ -356,8 +355,8 @@ def set_approval_result(
         return "Error: reason must be non-empty."
 
     try:
-        runner._state.create("approved", approved)
-        runner._state.create("reason", reason)
+        runner.state.create("approved", approved)
+        runner.state.create("reason", reason)
     except ValueError as e:
         return f"Error: {e}"
 

@@ -10,8 +10,8 @@ from peteos.engine.channel import Channel, NotificationEvent
 from peteos.utils.activeclass import ActiveClass
 from peteos.engine.executionenvironment import ExecutionEnvironment, ToolCallGroup
 from peteos.engine.exec_status import ExecStatus
+from peteos.conversation.session import SessionState
 from peteos.engine.runner import (
-    AgenticState,
     ApprovalEvent,
     Runner,
     ToolApprovalStatus,
@@ -24,7 +24,6 @@ Driver = Runner
 
 __all__ = [
     "ActiveClass",
-    "AgenticState",
     "ApprovalEvent",
     "Channel",
     "Driver",  # deprecated alias for Runner
@@ -32,6 +31,7 @@ __all__ = [
     "ExecutionEnvironment",
     "NotificationEvent",
     "Runner",
+    "SessionState",
     "ToolCallGroup",
     "ToolApprovalStatus",
     "ToolCallRecord",

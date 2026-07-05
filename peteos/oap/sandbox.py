@@ -43,6 +43,50 @@ _SAFE_BUILTINS: dict[str, Any] = {
 }
 
 
+class SandboxSelf:
+    """Per-invocation wrapper passed as `self` into sandbox code.
+
+    An empty object that gets populated with proxy methods per
+    invocation.  The proxy lambdas capture the real self and runner in
+    their closure scope, so the sandboxed code has no way to reach the
+    underlying AgenticObject or runner via introspection.
+
+    The ``invoke`` method is attached conditionally by ``_python_exec``
+    when sub-agent invocation is enabled on the parent AgenticObject.
+    """
+    pass
+
+    @staticmethod
+    def populate(sandbox_self: "SandboxSelf", real_self: object) -> None:
+        """Attach proxied @tool and @sandbox methods to an empty SandboxSelf.
+
+        Walks the MRO of *real_self*'s class, finds methods decorated
+        with ``@tool`` or ``@sandbox``, and attaches them as proxy
+        attributes using the ``_sandbox_name`` (falling back to the
+        Python method name).
+
+        Args:
+            sandbox_self: The empty SandboxSelf instance to populate.
+            real_self: The AgenticObject instance whose methods to proxy.
+        """
+        registered: set[str] = set()
+        for cls in real_self.__class__.__mro__:
+            for method_name, method in cls.__dict__.items():
+                if not callable(method):
+                    continue
+                if method_name in registered:
+                    continue
+                if hasattr(method, "_tool_name"):
+                    sandbox_name = method._tool_name
+                elif hasattr(method, "_sandbox_name"):
+                    sandbox_name = method._sandbox_name
+                else:
+                    continue
+                registered.add(method_name)
+                proxy_fn = getattr(real_self, method_name)
+                setattr(sandbox_self, sandbox_name, proxy_fn)
+
+
 def build_sandbox_description(imports: list[object] | None = None) -> str:
     """Build the description string for the python_exec tool.
 
@@ -54,7 +98,8 @@ def build_sandbox_description(imports: list[object] | None = None) -> str:
     """
     prompt = (
         "The value must be a Python function with the exact signature "
-        "`func(self)` where `self` is the agentic object instance. "
+        "`func(self)` where `self` is a wrapper object for the agentic "
+        "instance. "
         "Define exactly one function named `func` — the harness will find "
         "and execute it. The function must return the final result (not print it). "
         "Use `self.produce_output(result)` or `self.produce_error(message)` to return data or signal failure. "

@@ -9,7 +9,7 @@ import pytest
 
 from peteos.conversation.context import Context
 from peteos.conversation.message import ContentPart, Message
-from peteos.conversation.session import Session
+from peteos.conversation.session import Session, SessionState
 from peteos.conversation.system_prompt_message import SystemPromptMessage
 from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 
@@ -363,3 +363,63 @@ class TestSessionHooksMaterializeContent:
 
         # The content map should be populated
         assert len(ctx.content_map) > 0
+
+
+class TestSessionState:
+    """Tests for SessionState key-value store."""
+
+    def test_get_returns_none_for_missing(self):
+        state = SessionState()
+        assert state.get("nonexistent") is None
+
+    def test_get_returns_value(self):
+        state = SessionState({"key": "value"})
+        assert state.get("key") == "value"
+
+    def test_create_new_variable(self):
+        state = SessionState()
+        state.create("new_key", "new_value")
+        assert state.get("new_key") == "new_value"
+
+    def test_create_raises_if_exists(self):
+        state = SessionState({"key": "old"})
+        with pytest.raises(ValueError, match="already exists"):
+            state.create("key", "new")
+
+    def test_create_raises_for_none_value(self):
+        state = SessionState()
+        with pytest.raises(ValueError, match="must not be None"):
+            state.create("key", None)
+
+    def test_update_existing_variable(self):
+        state = SessionState({"key": "old"})
+        state.update("key", "old", "new")
+        assert state.get("key") == "new"
+
+    def test_update_raises_if_value_changed(self):
+        state = SessionState({"key": "actual"})
+        with pytest.raises(ValueError, match="has value"):
+            state.update("key", "expected", "new")
+
+    def test_update_raises_if_old_value_none(self):
+        state = SessionState({"key": "value"})
+        with pytest.raises(ValueError, match="must not be None"):
+            state.update("key", None, "new")
+
+    def test_delete_existing_variable(self):
+        state = SessionState({"key": "value"})
+        state.delete("key")
+        assert state.get("key") is None
+
+    def test_delete_raises_if_missing(self):
+        state = SessionState()
+        with pytest.raises(KeyError, match="does not exist"):
+            state.delete("nonexistent")
+
+    def test_list_returns_keys(self):
+        state = SessionState({"a": "1", "b": "2"})
+        assert set(state.list()) == {"a", "b"}
+
+    def test_to_dict(self):
+        state = SessionState({"key": "value"})
+        assert state.to_dict() == {"key": "value"}
