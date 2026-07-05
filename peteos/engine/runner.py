@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid as _uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from peteos.conversation.session import SessionState
-from peteos.chatbot import ChatBot, ChatBotManager, ContentPart, Message
+from peteos.chatbot import ChatBot, ChatBotManager, Message
 
 from peteos.utils.activeclass import ActiveClass
 from peteos.engine.exec_status import ExecStatus
@@ -31,65 +31,6 @@ if TYPE_CHECKING:
 _logger = get_logger(__name__)
 
 
-async def invoke_agent(
-        prompt: str,
-        agent: "Agent",
-        *,
-        timeout: float,
-) -> dict[str, Any]:
-    """Invoke an agent and return its final answer.
-
-    Creates a session and runner pair, queues the prompt,
-    waits for processing to complete, and returns the assistant's answer.
-
-    Args:
-        prompt: The prompt to send to the agent.
-        agent: Agent with role and tool manager.
-        timeout: Maximum seconds to wait.
-
-    Returns:
-        Dict with keys:
-            - answer (str): Last assistant text.
-            - history (list[Message]): Full chat history.
-            - state (dict[str, str]): SessionState data.
-
-    Raises:
-        ValueError: If agent is not provided.
-        TimeoutError: If timeout expires.
-    """
-    session = await agent.create_session()
-    runner = Runner(agent, session.uuid)
-
-    done: asyncio.Event = asyncio.Event()
-
-    def on_finished(status: ExecStatus) -> None:
-        if status == ExecStatus.FINISHED:
-            done.set()
-
-    runner._execution_environment.register_hook("after_step", on_finished)
-
-    try:
-        user_message = Message.create(role="user", content_parts=[ContentPart.create_text(prompt)])
-        await runner.queue_message(user_message)
-        await asyncio.wait_for(done.wait(), timeout=timeout)
-        answer = _extract_last_assistant_text(session.active_context)
-    finally:
-        try:
-            runner._execution_environment.deregister_hook("after_step", on_finished)
-        except (ValueError, Exception):
-            pass
-        try:
-            await runner.stop()
-        except (Exception, RuntimeError):
-            pass
-
-    return {
-        "answer": answer,
-        "history": list(session.active_context.messages),
-        "state": dict(runner._session.state.to_dict()),
-    }
-
-
 class Runner(ActiveClass):
     """Active event-loop with message queue and the REPL reasoning loop.
 
@@ -107,7 +48,7 @@ class Runner(ActiveClass):
     each reasoning iteration.
     """
 
-    def __init__(self, agent: "Agent", session_uuid: "uuid.UUID", chatbot: "ChatBot | None" = None) -> None:
+    def __init__(self, agent: "Agent", session_uuid: "_uuid.UUID", chatbot: "ChatBot | None" = None) -> None:
         """Initialize the runner for a specific session.
 
         Grabs role, tool manager from the agent.

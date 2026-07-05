@@ -45,12 +45,10 @@ try:
     from peteos.persona.role import Role
     from peteos.persona.rolemanager import RoleManager
     from peteos.conversation.session import Session
-    from peteos.engine.runner import invoke_agent
 
     __all__.extend([
         "Agent",
         "ExecutionEnvironment",
-        "invoke_agent",
         "Role",
         "RoleManager",
         "Session",
