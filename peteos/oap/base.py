@@ -461,15 +461,22 @@ class AgenticObject:
                 _logger.debug("invoke_agent[%s]: reusing thread %s", self.__class__.__name__, persistent_thread_id)
                 session = self._oap_agent.get_session(stored_uuid)
                 if session is not None:
+                    if session.is_active:
+                        return Error(
+                            f"Session {stored_uuid} is already active; "
+                            "recursive invoke_agent on the same persistent thread is not allowed"
+                        )
                     runner = Runner(self._oap_agent, session.uuid)
                     _logger.debug("invoke_agent[%s]: starting existing runner", self.__class__.__name__)
                     await runner.start()
+                    session.is_active = True
         if session is None or runner is None:
             _logger.debug("invoke_agent[%s]: creating new session and runner", self.__class__.__name__)
             session = await self._oap_agent.create_session()
             runner = Runner(self._oap_agent, session.uuid)
             _logger.debug("invoke_agent[%s]: starting new runner", self.__class__.__name__)
             await runner.start()
+            session.is_active = True
             if persistent_thread_id is not None:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
 
@@ -575,6 +582,9 @@ class AgenticObject:
                         runner.state.delete("_oap_error")
                 except KeyError:
                     pass
+            # Always deactivate the session so the next invoke can reuse it
+            if session is not None:
+                session.is_active = False
             if persistent_thread_id is None:
                 try:
                     await runner.stop()

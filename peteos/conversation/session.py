@@ -101,6 +101,7 @@ class Session:
         self._json_dict.setdefault("active_context_id", None)
         self._json_dict.setdefault("auto_approve_tools", [])
         self._json_dict.setdefault("state_data", {})
+        self._json_dict.setdefault("is_active", False)
         self._autosave = True
         self._hooks: dict[str, Callable[[], str]] = {}
         self._active_context: Context | None = None
@@ -171,6 +172,15 @@ class Session:
         serializing the session automatically serializes its state.
         """
         return self._state
+
+    @property
+    def is_active(self) -> bool:
+        """Whether this session is currently in use by a running runner."""
+        return bool(self._json_dict.get("is_active"))
+
+    @is_active.setter
+    def is_active(self, value: bool) -> None:
+        self._json_dict["is_active"] = value
 
     def set_active_context(self, context: Context) -> None:
         """Set the active context, synchronizing both the JSON dict ID and the Python object reference."""
