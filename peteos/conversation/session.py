@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import json
 import uuid
@@ -32,7 +33,10 @@ class Session:
 
         self._parent_dir = parent_dir
         self._json_dict = json_dict
-        self._json_dict.setdefault("uuid", str(uuid.uuid4()))
+        self._json_dict.setdefault(
+            "uuid",
+            f"{datetime.date.today().strftime('%Y%m%d')}-{uuid.uuid4()}",
+        )
         self._json_dict.setdefault("active_context_id", None)
         self._json_dict.setdefault("auto_approve_tools", [])
         self._autosave = True
