@@ -82,9 +82,11 @@ class TestRoleManagerLoadFromDir:
             good = Path(tmpdir) / "good"
             good.mkdir()
             (good / "description.md").write_text("Good role.")
-            # Invalid role (no description)
+            # Invalid role (malformed config.json causes load failure)
             bad = Path(tmpdir) / "bad"
             bad.mkdir()
+            (bad / "description.md").write_text("Bad role.")
+            (bad / "config.json").write_text("{ invalid json")
             manager = RoleManager()
             loaded = manager.load_from_dir(tmpdir)
             assert loaded == ["good"]
@@ -111,10 +113,11 @@ class TestRoleManagerLoadFromDir:
         with tempfile.TemporaryDirectory() as tmpdir:
             empty_dir = Path(tmpdir) / "empty_role"
             empty_dir.mkdir()
-            # No description.md — should be skipped
+            # No description.md and invalid config.json — should be skipped
             good_dir = Path(tmpdir) / "good"
             good_dir.mkdir()
             (good_dir / "description.md").write_text("Good.")
+            (empty_dir / "config.json").write_text("{ bad json")
             manager = RoleManager()
             loaded = manager.load_from_dir(tmpdir)
             assert loaded == ["good"]
