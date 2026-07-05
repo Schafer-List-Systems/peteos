@@ -18,11 +18,11 @@ RoleManager.load_from_dir(directory) → list[str]
 
 Loads all roles from a directory where each subdirectory is a role name. Returns a list of successfully loaded role names.
 
-Each subdirectory must contain at least a `description.md`. It may also contain `system_prompt.md` and `config.json`:
+Each subdirectory may contain a `description.md` and/or `system_prompt.md` along with an optional `config.json`:
 
 ```
 my-role/
-  description.md          # Required
+  description.md          # Optional
   system_prompt.md        # Optional
   config.json             # Optional
 ```
