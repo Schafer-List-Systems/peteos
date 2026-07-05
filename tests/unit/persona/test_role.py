@@ -227,13 +227,6 @@ class TestRoleLoadFromPath:
             assert role.tool_filter == ["t1"]
             assert role.behavior_policy == "continuous"
 
-    def test_missing_description_raises(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            role_dir = Path(tmpdir) / "bare"
-            role_dir.mkdir()
-            with pytest.raises(FileNotFoundError, match="Description not found"):
-                Role.load_from_path(str(role_dir))
-
     def test_name_from_directory_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             role_dir = Path(tmpdir) / "my_custom_role"

@@ -9,7 +9,7 @@ class Role:
     def __init__(
         self,
         name: str,
-        description: str,
+        description: Optional[str] = None,
         system_prompt: Optional[str] = None,
         system_prompt_hooks: Optional[list[Callable[[], str]]] = None,
         required_tools: Optional[list[str]] = None,
@@ -88,7 +88,7 @@ class Role:
             A new Role instance.
         """
         name = data["name"]
-        description = data["description"]
+        description = data.get("description")
         system_prompt = data.get("system_prompt")
         required_tools = data.get("required_tools", [])
         execution_environment = data.get("execution_environment", "REPL")
@@ -130,8 +130,9 @@ class Role:
         """
         Creates a new role from a directory.
 
-        Description is loaded from 'description.md' (or 'config.json' as fallback).
-        System prompt is loaded from 'system_prompt.md' (or 'config.json' as fallback).
+        Description is loaded from 'description.md' (or 'config.json.description' as fallback).
+        System prompt is loaded from 'system_prompt.md' (or 'config.json.system_prompt' as fallback).
+        Both fields are optional and default to None.
         Required tools and execution environment come from 'config.json' only.
 
         Markdown files have precedence over config.json entries.
@@ -149,15 +150,11 @@ class Role:
 
         # Markdown files have precedence over config.json
         description_path = path_obj / "description.md"
+        description = None
         if description_path.exists():
             description = description_path.read_text()
         elif "description" in config:
-            description = config["description"]
-        else:
-            raise FileNotFoundError(
-                f"Description not found in {path}. "
-                "Expected either description.md or config.json with 'description' key"
-            )
+            description = config.get("description")
 
         system_prompt_path = path_obj / "system_prompt.md"
         if system_prompt_path.exists():

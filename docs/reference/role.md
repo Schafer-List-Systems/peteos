@@ -9,7 +9,7 @@ from peteos.persona.role import Role
 
 Role(
     name: str,
-    description: str,
+    description: str | None,
     system_prompt: str | None = None,
     system_prompt_hooks: list[Callable[[], str]] | None = None,
     required_tools: list[str] | None = None,
@@ -24,7 +24,7 @@ Role(
 | Parameter | Default | Description |
 |---|---|---|
 | `name` | required | Unique identifier for the role. |
-| `description` | required | Brief description of what the agent does. |
+| `description` | `None` | Brief description of what the agent does. |
 | `system_prompt` | `None` | Static text that forms the agent's initial instructions. |
 | `system_prompt_hooks` | `None` | Callbacks invoked at session creation to append dynamic fragments to the system prompt. |
 | `required_tools` | `None` | Tools that must be available for this role. |
