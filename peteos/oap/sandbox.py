@@ -50,6 +50,9 @@ class SandboxSelf:
     invocation.  The proxy lambdas capture the real self and runner in
     their closure scope, so the sandboxed code has no way to reach the
     underlying AgenticObject or runner via introspection.
+
+    The ``invoke`` method is attached conditionally by ``_python_exec``
+    when sub-agent invocation is enabled on the parent AgenticObject.
     """
     pass
 
@@ -71,15 +74,15 @@ class SandboxSelf:
             for method_name, method in cls.__dict__.items():
                 if not callable(method):
                     continue
-                method_name_lower = method_name.lower()
-                if method_name_lower in registered:
+                if method_name in registered:
                     continue
-                is_tool = hasattr(method, "_tool_name")
-                is_sandbox = hasattr(method, "_sandbox_name")
-                if not is_tool and not is_sandbox:
+                if hasattr(method, "_tool_name"):
+                    sandbox_name = method._tool_name
+                elif hasattr(method, "_sandbox_name"):
+                    sandbox_name = method._sandbox_name
+                else:
                     continue
-                registered.add(method_name_lower)
-                sandbox_name = getattr(method, "_sandbox_name", method_name)
+                registered.add(method_name)
                 proxy_fn = getattr(real_self, method_name)
                 setattr(sandbox_self, sandbox_name, proxy_fn)
 

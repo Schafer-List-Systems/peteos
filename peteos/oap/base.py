@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import json
 import os
 import threading
@@ -196,7 +198,10 @@ class AgenticObject:
         original_keys = set(sandbox_globals.keys())
 
         try:
+            # exec the code to let it define symbols in the sandbox namespace
             exec(function, sandbox_globals)
+
+            # search for the newly defined function (must be exactly one)
             new_keys = set(sandbox_globals.keys()) - original_keys
             new_funcs: list[str] = []
             for k in new_keys:
@@ -217,7 +222,7 @@ class AgenticObject:
                     f"Found: {new_funcs}."
                 )
             name = new_funcs[0]
-            obj = sandbox_globals[name]
+            function_obj = sandbox_globals[name]
 
             # Create an empty SandboxSelf and populate it with closure-based
             # proxies.  Each lambda captures real_self and runner in its scope,
@@ -234,10 +239,43 @@ class AgenticObject:
             setattr(sandbox_self, "produce_output", _produce_output)
             setattr(sandbox_self, "produce_error", _produce_error)
 
+            # Conditionally attach invoke when sub-agent invocation is enabled
+            if config.get("invoke_sub_agents", False):
+                parent_ptid = runner.state.get("_persistent_thread_id") if runner else None
+
+                def _invoke(
+                    target,
+                    prompt,
+                    output_schema=None,
+                    persistent=False,
+                    timeout=None,
+                ):
+                    ptid = parent_ptid if persistent else None
+
+                    def _run():
+                        _loop = asyncio.new_event_loop()
+                        try:
+                            return _loop.run_until_complete(
+                                target.invoke_agent(
+                                    prompt=prompt,
+                                    output_schema=output_schema,
+                                    timeout=timeout,
+                                    persistent_thread_id=ptid,
+                                )
+                            )
+                        finally:
+                            _loop.close()
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        return executor.submit(_run).result()
+
+                setattr(sandbox_self, "invoke", _invoke)
+
+            # now populate the all tool-decorated and sandbox-decorated member functions
             SandboxSelf.populate(sandbox_self, real_self)
 
             try:
-                return obj(sandbox_self) if obj.__code__.co_argcount == 1 else obj()
+                return function_obj(sandbox_self) if function_obj.__code__.co_argcount == 1 else function_obj()
             finally:
                 pass
         except Exception as e:
@@ -491,6 +529,11 @@ class AgenticObject:
             if persistent_thread_id is not None:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
 
+        if persistent_thread_id is not None:
+            try:
+                runner.state.create("_persistent_thread_id", persistent_thread_id)
+            except ValueError:
+                pass  # key may already exist from a prior invoke_agent call on the same persistent session
         try:
             async def _on_step_done(r: Runner, status: ExecStatus) -> ExecStatus | None:
                 produced = r.state.get("_oap_produced_data")
@@ -603,42 +646,3 @@ class AgenticObject:
                 except Exception:
                     pass
             self.release()
-
-    async def invoke(
-        self,
-        target: "AgenticObject",
-        prompt: str,
-        output_schema: type | None = None,
-        persistent: bool = False,
-        timeout: float | None = None,
-    ) -> Any:
-        """Invoke a sub-agent on a target AgenticObject.
-
-        Verifies that self allows sub-agent invocation, then forwards to
-        target.invoke_agent().
-
-        Args:
-            target: The sub-object to invoke the sub-agent on.
-            prompt: Task description for the sub-agent.
-            output_schema: Expected return type (dataclass, etc.).
-            persistent: If True, inherit the parent's thread ID.
-            timeout: Maximum seconds to wait for the invocation lock on the target.
-
-        Returns:
-            Structured output, Error object, or raises Exception.
-
-        Raises:
-            ValueError: Target has no _oap_agent set.
-            TimeoutError: Lock not acquired within timeout.
-        """
-        # --- Gatekeeper: verify self allows sub-agent invocation ---
-        config = _collect_oap_config(self.__class__)
-        if not config.get("invoke_sub_agents", False):
-            return Error("Sub-agent invocation not enabled")
-
-        # --- Forward to target's invoke_agent ---
-        return await target.invoke_agent(
-            prompt=prompt,
-            output_schema=output_schema,
-            timeout=timeout,
-        )
