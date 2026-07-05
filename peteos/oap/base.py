@@ -403,10 +403,6 @@ class AgenticObject:
         """The Agent instance used for LLM invocations."""
         return self._oap_agent
 
-    @agent.setter
-    def agent(self, value: Agent | None) -> None:
-        self._oap_agent = value
-
     @property
     def role(self) -> Role:
         """The Role used for this object's invocations."""

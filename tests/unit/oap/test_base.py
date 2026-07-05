@@ -20,15 +20,6 @@ class TestAgenticObjectInit:
         assert obj.role.name == "_BaseTestAO"
         assert isinstance(obj._oap_tool_manager, ToolManager)
 
-    def test_agent_property(self):
-        obj = self._BaseTestAO()
-        original = obj.agent
-        assert original is not None
-        obj.agent = "mock_agent"
-        assert obj.agent == "mock_agent"
-        # Should be able to restore
-        obj.agent = original
-
     def test_role_auto_created(self):
         obj = self._BaseTestAO()
         assert isinstance(obj.role, type(obj.role))
