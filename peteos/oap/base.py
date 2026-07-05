@@ -344,7 +344,7 @@ class AgenticObject:
     def _produce_error(self, message: str, runner: "Runner | None" = None) -> str:
         """Protected tool: signals the agent could not fulfill the task.
 
-        Writes the error message to the runner's AgenticState so that
+        Writes the error message to the runner's SessionState so that
         invoke_agent returns an Error object.
 
         Args:

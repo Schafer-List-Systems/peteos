@@ -3,7 +3,68 @@ import hashlib
 import json
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Optional
+
+
+class SessionState:
+    """Mutable key-value store for leaving intermediate state.
+
+    Variables store strings. Backed by a dictionary inside the session's
+    JSON dict so serializing the session also serializes its state.
+
+    Five distinct methods with clear semantics:
+
+    - get(name): returns the value or None if not found
+    - create(name, value): creates a new variable (raises if exists)
+    - update(name, old_value, new_value): compare-and-swap (both non-None)
+    - delete(name): removes a variable (raises if not found)
+    - list(): returns all variable names
+    """
+
+    def __init__(self, data: dict[str, str] | None = None) -> None:
+        self._data: dict[str, str] = data if data is not None else {}
+
+    def get(self, name: str) -> Optional[str]:
+        """Get a variable's value."""
+        return self._data.get(name)
+
+    def create(self, name: str, value: str) -> None:
+        """Create a new variable."""
+        if name in self._data:
+            raise ValueError(f"Variable '{name}' already exists")
+        if value is None:
+            raise ValueError("Value must not be None")
+        self._data[name] = value
+
+    def update(self, name: str, old_value: str, new_value: str) -> None:
+        """Update with compare-and-swap semantics."""
+        if old_value is None:
+            raise ValueError("old_value must not be None")
+        if new_value is None:
+            raise ValueError("new_value must not be None")
+        if name not in self._data:
+            raise KeyError(f"Variable '{name}' does not exist")
+        current = self._data[name]
+        if current != old_value:
+            raise ValueError(
+                f"Variable '{name}' has value {current!r}, expected {old_value!r}"
+            )
+        self._data[name] = new_value
+
+    def delete(self, name: str) -> None:
+        """Delete a variable."""
+        if name not in self._data:
+            raise KeyError(f"Variable '{name}' does not exist")
+        del self._data[name]
+
+    def list(self) -> list[str]:
+        """Return a list of all variable names."""
+        return list(self._data.keys())
+
+    def to_dict(self) -> dict[str, str]:
+        """Return the underlying data dict for serialization."""
+        return self._data
+
 
 from peteos.conversation.context import Context
 from peteos.conversation.message import Message
@@ -39,9 +100,11 @@ class Session:
         )
         self._json_dict.setdefault("active_context_id", None)
         self._json_dict.setdefault("auto_approve_tools", [])
+        self._json_dict.setdefault("state_data", {})
         self._autosave = True
         self._hooks: dict[str, Callable[[], str]] = {}
         self._active_context: Context | None = None
+        self._state: SessionState = SessionState(self._json_dict.setdefault("state_data", {}))
 
     @property
     def session_dir(self) -> Path:
@@ -99,6 +162,15 @@ class Session:
     def uuid(self) -> str:
         """Return the session UUID."""
         return self.raw_dict["uuid"]
+
+    @property
+    def state(self) -> SessionState:
+        """Return the session's mutable key-value store.
+
+        Lives inside the session's JSON dict as ``state_data`` so
+        serializing the session automatically serializes its state.
+        """
+        return self._state
 
     def set_active_context(self, context: Context) -> None:
         """Set the active context, synchronizing both the JSON dict ID and the Python object reference."""
