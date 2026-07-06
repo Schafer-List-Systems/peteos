@@ -16,6 +16,22 @@ This is OOP extended to three levels rather than the usual two. Agentic classes 
 
 Agentic objects are created by instantiating an agentic class. A single agentic class can have many agentic object instances, just like any regular OOP class. Each agentic object carries its own state and agency.
 
+```mermaid
+classDiagram
+    direction LR
+    class AOClass
+    class AOInstance {
+        +invoke() structured response
+    }
+    class Session {
+        +is_active bool
+    }
+
+    AOClass "1" --> "*" AOInstance : instantiated into
+    AOInstance "1" --> "*" Session : owner
+    AOInstance ..> Session : "Invocation Creates"
+```
+
 ### Sessions
 
 Just as classes are instantiated into objects, objects are invoked into sessions. Every agentic object can maintain **multiple sessions concurrently**, and sessions are identified by their thread ID (or thread name).
@@ -34,6 +50,19 @@ This mirrors the OOP pattern of deciding whether to create a new instance or reu
 ## Call Stacks Across Objects
 
 An agentic object acting within a session can itself invoke other agentic objects — on its own class or on different ones. This creates a **traceback** that spans across multiple objects and sessions, analogous to a call stack in traditional code execution.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant A as AO-A (Session-A)
+    participant B as AO-B (Session-B)
+
+    Caller->>A: invoke()
+    A->>A: create or load session
+    A->>B: invoke()
+    B-->>A: result
+    A-->>Caller: result
+```
 
 Each invocation in the traceback creates or reuses a session on the target agentic object. When sessions are materialized on disk (along with their contexts), the full invocation chain becomes traceable — the chat history can be walked back across object boundaries and session boundaries.
 
