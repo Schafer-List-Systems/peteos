@@ -12,7 +12,7 @@ Modern AI technology, including LLMs and agentic systems, enables solutions to t
 
 ## The Agentic Object
 
-This is where Peteos closes the gap. It introduces the concept of **agentic objects** — objects that can be invoked, reasoned with, and empowered to interact with their own state.
+This is where Peteos closes the gap. It introduces the concept of **agentic objects** — objects that can be invoked, reasoned with, and empowered to interact with their own state. For the full philosophy behind how and why agentic objects work, see [sOAP](./soap.md).
 
 An agentic object is an object of an agentic class. It can be invoked or "spoken to," and it has the ability to observe and modify its own internal state. It perceives its environment, makes decisions, and takes actions — all while remaining a first-class object within your OOP codebase.
 
