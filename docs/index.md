@@ -6,7 +6,8 @@ Peteos is a library for developing agentic software, built on **Simple Object-Ag
 
 | Page | Description                                                                                      |
 |---|--------------------------------------------------------------------------------------------------|
-| [Introduction](./introduction.md) | What sOAP is, what problem it solves, and why the object is the center of agency and persistence |
+| [Introduction](./introduction.md) | A brief introduction to the sOAP paradigm |
+| [sOAP](./soap.md) | The sOAP philosophy, core principles, and mental model for agentic objects |
 | [Getting Started](./getting-started.md) | Installation, LLM backend setup, and your first agentic objects                                  |
 
 ## Learn
