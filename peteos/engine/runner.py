@@ -331,6 +331,27 @@ class Runner(ActiveClass):
             tool_call = record.tool_call
             tool_name = tool_call.name
 
+            # Fire on_tool_call invocation hooks — first string return denies
+            _invocation_hooks = self._session._invocation_hooks or {}
+            tool_args = json.loads(tool_call.arguments) if tool_call.arguments else {}
+            if "on_tool_call" in _invocation_hooks:
+                ctx = {
+                    "role": self._agent.role.name,
+                    "session": self._session,
+                    "tool_name": tool_name,
+                    "arguments": tool_args,
+                }
+                for hook in _invocation_hooks["on_tool_call"]:
+                    result = hook(ctx)
+                    if result is not None:
+                        record.approval_status = ToolApprovalStatus.DENIED
+                        record.denied_reason = result
+                        _logger.debug(
+                            "runner[_handle_tool_group]: tool call %s denied by hook: %s",
+                            tool_name, result,
+                        )
+                        break
+
             if record.approval_status == ToolApprovalStatus.DENIED:
                 denial_msg = record.denied_reason or "Tool call was denied by user."
                 await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, denial_msg, False)
