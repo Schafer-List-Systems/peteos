@@ -632,6 +632,7 @@ class AgenticObject:
                     _logger.debug("invoke_agent[%s]: produced_data found", self.__class__.__name__)
                     try:
                         final_result = parse_data(produced_data, self._oap_current_output_schema)
+                        return final_result
                     except ValueError as e:
                         _logger.warning("invoke_agent[%s]: produced data failed to parse: %s", self.__class__.__name__, e)
                         final_result = Error(f"Agent produced data that failed schema validation: {e}")

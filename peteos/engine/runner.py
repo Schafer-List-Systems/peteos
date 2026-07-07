@@ -331,10 +331,15 @@ class Runner(ActiveClass):
             tool_call = record.tool_call
             tool_name = tool_call.name
 
-            # Fire on_tool_call invocation hooks — first string return denies
+            # Already denied (e.g., tool not found) — skip hooks and execution
+            if record.approval_status == ToolApprovalStatus.DENIED:
+                _logger.debug("[runner] Tool call %s already denied, skipping", tool_name)
+                break
+
+            # on_tool_call hooks only fire on APPROVED records
             _invocation_hooks = self._session._invocation_hooks or {}
-            tool_args = json.loads(tool_call.arguments) if tool_call.arguments else {}
             if "on_tool_call" in _invocation_hooks:
+                tool_args = json.loads(tool_call.arguments) if tool_call.arguments else {}
                 ctx = {
                     "role": self._agent.role.name,
                     "session": self._session,
@@ -346,19 +351,14 @@ class Runner(ActiveClass):
                     if result is not None:
                         record.approval_status = ToolApprovalStatus.DENIED
                         record.denied_reason = result
-                        _logger.debug(
-                            "runner[_handle_tool_group]: tool call %s denied by hook: %s",
-                            tool_name, result,
-                        )
+                        foreground.deny_all_remaining(result)
                         break
 
-            if record.approval_status == ToolApprovalStatus.DENIED:
-                denial_msg = record.denied_reason or "Tool call was denied by user."
-                await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, denial_msg, False)
-                _logger.debug("[runner] Tool call %s was denied by user", tool_name)
-                break
+                if record.approval_status == ToolApprovalStatus.DENIED:
+                    break
 
             result_str, success = await self._execution_environment.execute_and_inject(tool_call, runner=self)
+            record.execution_status = ToolExecutionStatus.EXECUTED
             if not success and result_str.startswith("Error: Tool '"):
                 _logger.debug("[runner] Tool %s not found", tool_name)
                 break
