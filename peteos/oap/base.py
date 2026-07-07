@@ -545,7 +545,32 @@ class AgenticObject:
         if hooks is not None:
             session.invocation_hooks = hooks
             _logger.debug("invoke_agent[%s]: stored %d hooks on session %s", self.__class__.__name__, len(hooks), session.uuid)
+
+        # Fire on_invoke hooks — first non-None string prevents invocation
+        _invocation_prevented: str | None = None
+        if hooks:
+            ctx = {
+                "role": self._oap_role.name,
+                "prompt": prompt,
+                "session": session,
+            }
+            for hook in hooks.get("on_invoke", []):
+                result = hook(ctx)
+                if result is not None:
+                    _invocation_prevented = result
+                    _logger.debug(
+                        "invoke_agent[%s]: invocation prevented by hook: %s",
+                        self.__class__.__name__, result,
+                    )
+                    break
+        final_result: Any = None
         try:
+            if _invocation_prevented is not None:
+                session.is_active = False
+                session.invocation_hooks = {}
+                self.release()
+                return Error(_invocation_prevented)
+
             async def _on_step_done(r: Runner, status: ExecStatus) -> ExecStatus | None:
                 produced = r.state.get("_oap_produced_data")
                 errored = r.state.get("_oap_error")
@@ -599,6 +624,7 @@ class AgenticObject:
             start_time = time.time()
 
             iteration = 0
+            final_result: Any = None
             while True:
                 iteration += 1
                 _logger.debug("invoke_agent[%s]: waiting for idle (iter %d)", self.__class__.__name__, iteration)
@@ -606,16 +632,18 @@ class AgenticObject:
                 _logger.debug("invoke_agent[%s]: idle reached (iter %d), checking state", self.__class__.__name__, iteration)
                 produced_data = runner.state.get("_oap_produced_data")
                 if produced_data is not None:
-                    _logger.debug("invoke_agent[%s]: produced_data found, returning", self.__class__.__name__)
+                    _logger.debug("invoke_agent[%s]: produced_data found", self.__class__.__name__)
                     try:
-                        return parse_data(produced_data, self._oap_current_output_schema)
+                        final_result = parse_data(produced_data, self._oap_current_output_schema)
                     except ValueError as e:
                         _logger.warning("invoke_agent[%s]: produced data failed to parse: %s", self.__class__.__name__, e)
-                        return Error(f"Agent produced data that failed schema validation: {e}")
+                        final_result = Error(f"Agent produced data that failed schema validation: {e}")
+                    break
                 error_msg = runner.state.get("_oap_error")
                 if error_msg is not None:
-                    _logger.debug("invoke_agent[%s]: error found, returning", self.__class__.__name__)
-                    return Error(error_msg)
+                    _logger.debug("invoke_agent[%s]: error found", self.__class__.__name__)
+                    final_result = Error(error_msg)
+                    break
 
                 elapsed = time.time() - start_time
                 if timeout is not None and elapsed > timeout:
@@ -625,7 +653,8 @@ class AgenticObject:
                         persistent_thread_id,
                         elapsed,
                     )
-                    return Error(f"Agent did not produce output within {timeout}s timeout")
+                    final_result = Error(f"Agent did not produce output within {timeout}s timeout")
+                    break
 
                 _logger.debug("invoke_agent[%s]: queuing reminder (iter %d)", self.__class__.__name__, iteration)
                 await runner.queue_message(Message.create(
@@ -633,6 +662,18 @@ class AgenticObject:
                     content_parts=[ContentPart.create_text(reminder_msg)],
                 ))
         finally:
+            # Fire on_invoke_complete hooks before cleanup
+            if hooks and session is not None and final_result is not None:
+                ctx = {
+                    "role": self._oap_role.name,
+                    "prompt": prompt,
+                    "session": session,
+                    "result": final_result,
+                }
+                for hook in hooks.get("on_invoke_complete", []):
+                    hook(ctx)
+                    _logger.debug("invoke_agent[%s]: fired on_invoke_complete hook", self.__class__.__name__)
+
             # Clear OAP state variables so the next invocation starts fresh
             if runner is not None:
                 try:
