@@ -9,7 +9,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, is_dataclass
-from typing import Any
+from typing import Any, Callable
 
 from peteos.conversation import ContentPart, Message
 from peteos.conversation.session import Session
@@ -251,6 +251,7 @@ class AgenticObject:
                     timeout=None,
                 ):
                     ptid = parent_ptid if persistent else None
+                    parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
 
                     def _run():
                         _loop = asyncio.new_event_loop()
@@ -261,6 +262,7 @@ class AgenticObject:
                                     output_schema=output_schema,
                                     timeout=timeout,
                                     persistent_thread_id=ptid,
+                                    hooks=parent_hooks,
                                 )
                             )
                         finally:
@@ -470,6 +472,7 @@ class AgenticObject:
         persistent_thread_id: str | None = None,
         timeout: float | None = None,
         image: str | None = None,
+        hooks: dict[str, list[Callable]] | None = None,
     ) -> Any:
         """Invoke this object's agent.
 
@@ -487,6 +490,9 @@ class AgenticObject:
             image: Optional local file path or HTTP(S) URL to attach an image
                 to the prompt. The image is base64-encoded and sent alongside
                 the text prompt.
+            hooks: Optional dictionary of hook names to lists of callables.
+                These hooks are stored on the session for the duration of the
+                invocation and forwarded recursively to sub-agents.
 
         Returns:
             Structured output, Error object, or raises Exception.
@@ -534,6 +540,11 @@ class AgenticObject:
                 runner.state.create("_persistent_thread_id", persistent_thread_id)
             except ValueError:
                 pass  # key may already exist from a prior invoke_agent call on the same persistent session
+
+        # Store invocation hooks on the session
+        if hooks is not None:
+            session.invocation_hooks = hooks
+            _logger.debug("invoke_agent[%s]: stored %d hooks on session %s", self.__class__.__name__, len(hooks), session.uuid)
         try:
             async def _on_step_done(r: Runner, status: ExecStatus) -> ExecStatus | None:
                 produced = r.state.get("_oap_produced_data")
@@ -639,6 +650,8 @@ class AgenticObject:
             # Always deactivate the session so the next invoke can reuse it
             if session is not None:
                 session.is_active = False
+                session.invocation_hooks = {}
+                _logger.debug("invoke_agent[%s]: cleared invocation hooks on session %s", self.__class__.__name__, session.uuid)
             if persistent_thread_id is None:
                 try:
                     await runner.stop()

@@ -145,7 +145,7 @@ class TestAgentHooks:
         session = await agent_with_sessions.create_session()
         # The Session should have hooks registered for tool list and tool filter
         # These are registered on the tool_definitions_message
-        assert len(session._hooks) > 0
+        assert len(session._message_hooks) > 0
 
     @pytest.mark.asyncio
     async def test_on_before_tool_execution_pending(self, agent_with_sessions):
@@ -251,7 +251,7 @@ class TestAgentLoad:
         session.save()
         loaded = agent_with_sessions.load(str(session.uuid))
         # Hooks should still be registered (re-registered by load)
-        assert len(loaded._hooks) > 0
+        assert len(loaded._message_hooks) > 0
 
     @pytest.mark.asyncio
     async def test_load_stores_session_in_dict(self, agent_with_sessions):

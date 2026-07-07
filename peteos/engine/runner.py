@@ -89,6 +89,11 @@ class Runner(ActiveClass):
         return self._agent
 
     @property
+    def session(self) -> "Session":
+        """Return the Session this runner controls."""
+        return self._session
+
+    @property
     def session_uuid(self) -> "_uuid.UUID":
         """Return the session UUID this runner controls."""
         return self._session_uuid
