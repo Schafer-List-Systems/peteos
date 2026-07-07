@@ -566,9 +566,6 @@ class AgenticObject:
         final_result: Any = None
         try:
             if _invocation_prevented is not None:
-                session.is_active = False
-                session.invocation_hooks = {}
-                self.release()
                 return Error(_invocation_prevented)
 
             async def _on_step_done(r: Runner, status: ExecStatus) -> ExecStatus | None:
@@ -691,7 +688,7 @@ class AgenticObject:
             # Always deactivate the session so the next invoke can reuse it
             if session is not None:
                 session.is_active = False
-                session.invocation_hooks = {}
+                session._invocation_hooks.clear()
                 _logger.debug("invoke_agent[%s]: cleared invocation hooks on session %s", self.__class__.__name__, session.uuid)
             if persistent_thread_id is None:
                 try:
