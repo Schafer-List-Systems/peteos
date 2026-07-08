@@ -1,7 +1,7 @@
 """Backend configuration dataclass for chatbot backends."""
 
 from dataclasses import dataclass, fields, MISSING
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -23,7 +23,7 @@ class BackendConfig:
     """
 
     name: str
-    url: str
+    url: Optional[str] = None
     api_type: Optional[str] = None
     chat_endpoint: Optional[str] = None
     models_endpoint: Optional[str] = None
