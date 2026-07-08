@@ -54,9 +54,10 @@ class ChatBotManager:
 
     @classmethod
     def reset(cls) -> None:
-        """Clear all backends and clients.
+        """Clear all backends.
 
-        Use in tests or when reloading configuration.
+        Use in tests or when reloading configuration. Does not remove
+        registered providers — use ``unregister_provider`` for that.
         """
         cls._backends.clear()
 
@@ -64,7 +65,7 @@ class ChatBotManager:
     async def add_backend(
         cls,
         name: str,
-        url: str,
+        url: Optional[str] = None,
         api_type: Optional[str] = None,
         **kwargs
     ) -> BackendInfo:
@@ -73,8 +74,10 @@ class ChatBotManager:
         Args:
             name: Unique identifier for the backend.
             url: Base URL of the API (e.g., "http://localhost:8000").
-            api_type: Optional API type override ("openai", "anthropic", or "gemini").
-                     If not provided, API type is auto-detected.
+                 Optional for mock providers.
+            api_type: Optional API type override ("openai", "anthropic", "gemini",
+                      or any registered provider type like "simple-mock").
+                     If not provided, API type is auto-detected (requires url).
             **kwargs: Configuration options (streaming, max_tokens, api_key, etc.).
 
         Returns:
@@ -122,8 +125,9 @@ class ChatBotManager:
 
         # Create ChatBot instances via provider
         provider = cls._providers[config.api_type]
+        model_ids = models
         chatbots: Dict[str, Any] = {}
-        for model_id in models:
+        for model_id in model_ids:
             chatbot_config = ChatBotConfig.from_dict({
                 **vars(config),
                 "model": model_id,
@@ -148,6 +152,36 @@ class ChatBotManager:
         """
         if name in cls._backends:
             del cls._backends[name]
+            return True
+        return False
+
+    @classmethod
+    def register_provider(cls, api_type: str, provider: "BackendProvider") -> None:
+        """Register a new backend provider.
+
+        Args:
+            api_type: Unique API type identifier (e.g. "simple-mock").
+            provider: BackendProvider instance to handle chatbot creation.
+
+        Raises:
+            ValueError: If provider with same api_type already exists.
+        """
+        if api_type in cls._providers:
+            raise ValueError(f"Provider already registered for api_type: {api_type}")
+        cls._providers[api_type] = provider
+
+    @classmethod
+    def unregister_provider(cls, api_type: str) -> bool:
+        """Remove a backend provider.
+
+        Args:
+            api_type: API type identifier of the provider to remove.
+
+        Returns:
+            True if provider was removed, False if not found.
+        """
+        if api_type in cls._providers:
+            del cls._providers[api_type]
             return True
         return False
 
