@@ -17,6 +17,9 @@ from peteos.conversation.message import ContentPart, Message
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import ToolManager
 
+if TYPE_CHECKING:
+    from peteos.engine.runner import Runner
+
 _logger = get_logger(__name__)
 
 
@@ -91,6 +94,14 @@ class ToolCallGroup:
             if r.approval_status != ToolApprovalStatus.PENDING:
                 return self.records.pop(i)
         return None
+
+    def deny_all_remaining(self, reason: str) -> None:
+        """Deny all records that haven't executed yet."""
+        for r in self.records:
+            if r.execution_status != ToolExecutionStatus.EXECUTED:
+                r.approval_status = ToolApprovalStatus.DENIED
+                r.execution_status = ToolExecutionStatus.DENIED
+                r.denied_reason = f"Tool group denied: {reason}"
 
     def set_result_message(self, message: Message) -> None:
         self.result_message = message
@@ -279,7 +290,7 @@ class ExecutionEnvironment:
                 return record
         return None
 
-    def _handle_approval(self, event: Any) -> tuple[bool, Optional[str]]:
+    def _handle_approval(self, event: ApprovalEvent) -> tuple[bool, Optional[str]]:
         """Handle an approval/denial event for a pending tool call.
 
         If the tool call is denied, all remaining PENDING records in the
@@ -296,11 +307,7 @@ class ExecutionEnvironment:
                     return True, group.id
                 else:
                     record.approval_status = ToolApprovalStatus.DENIED
-                    for other in group.records:
-                        if other.tool_call_id != event.tool_call_id and other.approval_status == ToolApprovalStatus.PENDING:
-                            other.approval_status = ToolApprovalStatus.DENIED
-                            other.execution_status = ToolExecutionStatus.DENIED
-                            other.denied_reason = "Tool group denied by user."
+                    group.deny_all_remaining("Tool group denied by user.")
                     return False, group.id
         return False, None
 

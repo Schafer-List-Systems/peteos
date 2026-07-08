@@ -13,6 +13,7 @@ import pytest
 
 from peteos.agentic_objects.bash_workspace import BashWorkspace
 from peteos.oap.error import Error
+from peteos.oap.token_counter import RecursiveTokenCounter
 from dataclasses import dataclass
 
 
@@ -92,3 +93,24 @@ class TestBashWorkspaceIntegration:
         assert isinstance(result, HashResult)
         assert len(result.hex_digest) == 64
         assert result.hex_digest == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+    @pytest.mark.oap
+    async def test_agent_sha256_hash_with_token_counting(self):
+        """Same as test_agent_sha256_hash but with RecursiveTokenCounter tracking."""
+        obj = BashWorkspace()
+        counter, hooks = RecursiveTokenCounter.make_counter()
+        result = await obj.invoke_agent(
+            prompt=(
+                "Write file 'hashme.txt' with content 'hello'. "
+                "Compute its sha256 hash. "
+                "Return a HashResult with the hex digest."
+            ),
+            output_schema=HashResult,
+            timeout=None,
+            hooks=hooks,
+        )
+        assert isinstance(result, (HashResult, Error)), f"Expected HashResult, got {type(result).__name__}: {result}"
+        assert isinstance(result, HashResult)
+        assert len(result.hex_digest) == 64
+        assert result.hex_digest == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        assert counter.total_delta <= 2000, f"Token count {counter.total_delta} exceeds 2000"

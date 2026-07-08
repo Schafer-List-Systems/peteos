@@ -103,9 +103,22 @@ class Session:
         self._json_dict.setdefault("state_data", {})
         self._json_dict.setdefault("is_active", False)
         self._autosave = True
-        self._hooks: dict[str, Callable[[], str]] = {}
+        self._message_hooks: dict[str, Callable[[], str]] = {}
         self._active_context: Context | None = None
         self._state: SessionState = SessionState(self._json_dict.setdefault("state_data", {}))
+        self._invocation_hooks: dict[str, list[Callable]] = {}
+
+    @property
+    def invocation_hooks(self) -> dict[str, list[Callable]]:
+        """Return the current invocation hooks."""
+        return self._invocation_hooks
+
+    @invocation_hooks.setter
+    def invocation_hooks(self, hooks: dict[str, list[Callable]]) -> None:
+        """Set the invocation hooks for this session."""
+        if self._invocation_hooks:
+            raise ValueError("Invocation hooks are already set for this session")
+        self._invocation_hooks = hooks
 
     @property
     def session_dir(self) -> Path:
@@ -115,7 +128,7 @@ class Session:
     def register_hook(self, message: Message, name: str, callback: Callable[[], str]) -> str:
         """Register a hook on a message in the active context."""
         hook_id = self._make_hook_id(name)
-        self._hooks[hook_id] = callback
+        self._message_hooks[hook_id] = callback
         message.raw_dict["_hook_ids"].append(hook_id)
         if self._active_context is not None:
             self._active_context._update_hook_index()
@@ -132,7 +145,7 @@ class Session:
         content_text so messages can resolve hook outputs during materialize().
         """
         hook_to_hash: dict[str, str] = {}
-        for hook_id, callback in self._hooks.items():
+        for hook_id, callback in self._message_hooks.items():
             content = callback()
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             hook_to_hash[hook_id] = content_hash
