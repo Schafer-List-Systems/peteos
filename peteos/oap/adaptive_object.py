@@ -7,39 +7,8 @@ from typing import Any, Callable
 
 from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
 from peteos.oap.decorators import agentic_object
-from peteos.oap.sandbox import _exec_sandboxed
+from peteos.oap.sandbox import _exec_sandboxed, sandbox_compile
 from peteos.persona.toolmanager import Tool
-
-
-def _build_persisted_tool_proxy(
-    real_self: "AdaptiveObject",
-    func_name: str,
-) -> Callable[..., str]:
-    """Build a proxy callable that executes a persisted function in SandboxSelf.
-
-    The proxy delegates all sandbox logic to ``_exec_sandboxed``, which
-    provides the same environment as ``python_exec``: full globals,
-    closure-based produce_output/produce_error, conditional invoke,
-    and SandboxSelf.populate() for tool/sandbox method proxies.
-
-    Args:
-        real_self: The AdaptiveObject instance.
-        func_name: The stored function name.
-
-    Returns:
-        A proxy that forwards *args/**kwargs to the stored function.
-    """
-    config = _collect_oap_config(real_self.__class__)
-    stored = real_self._oap_persisted_tools[func_name]
-
-    def proxy(
-        *args: Any,
-        **kwargs: Any,
-    ) -> str:
-        result = _exec_sandboxed(config, stored["code"], real_self, None, *args, **kwargs)
-        return str(result) if result is not None else "OK"
-
-    return proxy
 
 
 @agentic_object(persist_functions=True)
@@ -80,6 +49,32 @@ class AdaptiveObject(AgenticObject):
                 func=self._remove_tool,
             )
         )
+
+    def _build_persisted_tool_proxy(self, func_name: str) -> Callable[..., str]:
+        """Build a proxy callable that executes a persisted function in SandboxSelf.
+
+        The proxy delegates all sandbox logic to ``_exec_sandboxed``, which
+        provides the same environment as ``python_exec``: full globals,
+        closure-based produce_output/produce_error, conditional invoke,
+        and SandboxSelf.populate() for tool/sandbox method proxies.
+
+        Args:
+            func_name: The stored function name.
+
+        Returns:
+            A proxy that forwards *args/**kwargs to the stored function.
+        """
+        config = _collect_oap_config(self.__class__)
+        stored = self._oap_persisted_tools[func_name]
+
+        def proxy(
+            *args: Any,
+            **kwargs: Any,
+        ) -> str:
+            result = _exec_sandboxed(config, stored["code"], self, None, *args, **kwargs)
+            return str(result) if result is not None else "OK"
+
+        return proxy
 
     def _persist_function(self, code: str, description: str) -> str:
         """Persist a Python function definition as a new tool.
@@ -161,7 +156,7 @@ class AdaptiveObject(AgenticObject):
 
         # Register a proxy as the Tool.func — it executes the code in a
         # sandbox with SandboxSelf at call time.
-        proxy = _build_persisted_tool_proxy(self, func_name)
+        proxy = self._build_persisted_tool_proxy(func_name)
         tool = Tool(name=func_name, description=description, func=proxy, parameters=parameters)
         self._oap_tool_manager.register_tool(tool)
 

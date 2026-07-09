@@ -152,6 +152,74 @@ def _restricted_import(name: str, registry: dict[str, Any]) -> Any:
     return resolved
 
 
+def sandbox_compile(
+    config: dict[str, Any],
+    code: str,
+) -> "tuple[dict[str, Any], list[Any]] | str":
+    """Exec *code* in a sandbox and return the globals plus newly defined callables.
+
+    This is a pure compilation step — it does not filter by signature or
+    invoke the function. Callers decide which of the returned callables to
+    use and how to invoke them.
+
+    Args:
+        config: MRO-merged OAP config dict.
+        code: Python code to exec.
+
+    Returns:
+        A (globals, new_callables) tuple on success, or an error string.
+    """
+    sandbox_globals = create_sandbox_globals(config)
+    original_keys = set(sandbox_globals.keys())
+
+    try:
+        exec(code, sandbox_globals)
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+
+    new_callables: list[Any] = []
+    for k in set(sandbox_globals.keys()) - original_keys:
+        obj = sandbox_globals[k]
+        if callable(obj) and hasattr(obj, "__code__"):
+            new_callables.append(obj)
+
+    return sandbox_globals, new_callables
+
+
+def filter_callables_by_args(
+    callables: list[Callable],
+    *args: Any,
+    **kwargs: Any,
+) -> list[Callable]:
+    """Filter *callables* to those compatible with the given arguments.
+
+    Returns functions with ``argcount == n`` (where *n* is the total number
+    of positional + keyword arguments), plus functions with ``argcount == n``
+    ``+ 1`` where the sole extra parameter is named ``"self"`` (matched for
+    SandboxSelf dispatch).
+
+    Args:
+        callables: Callables from ``sandbox_compile``.
+        *args: Positional arguments that will be passed to the function.
+        **kwargs: Keyword arguments that will be passed to the function.
+
+    Returns:
+        Matching callables.
+    """
+    n = len(args) + len(kwargs)
+    matching: list[Callable] = []
+    for func in callables:
+        try:
+            argcount = func.__code__.co_argcount
+        except AttributeError:
+            continue
+        if argcount == n:
+            matching.append(func)
+        elif argcount == n + 1 and func.__code__.co_varnames[0] == "self":
+            matching.append(func)
+    return matching
+
+
 def _exec_sandboxed(
     config: dict[str, Any],
     code: str,
@@ -160,20 +228,13 @@ def _exec_sandboxed(
     *args: Any,
     **kwargs: Any,
 ) -> str:
-    """Execute *code* in a sandbox and return the result as a string.
-
-    End-to-end pipeline:
-    1. Create globals via ``create_sandbox_globals``.
-    2. Exec the code, find the one matching function.
-    3. Create SandboxSelf, populate it (closures, invoke, tool proxies).
-    4. Call the function with or without ``self`` based on its signature.
-    5. Return the result as a string.
+    """Execute sandboxed Python code and return the result as a string.
 
     The caller passes ``*args`` and ``**kwargs`` which will be forwarded
     to the found function.  If the function's argcount is *n* + 1 and
-    its first parameter is named ``"self"``, SandboxSelf is passed as
-    the first argument.  Otherwise the function is called with only the
-    provided args/kwargs.
+    its first parameter is named ``"self"``, a SandboxSelf wrapper is
+    passed as the first argument.  Otherwise the function is called with
+    only the provided args/kwargs.
 
     Args:
         config: MRO-merged OAP config dict.
@@ -186,34 +247,16 @@ def _exec_sandboxed(
     Returns:
         The function's result as a string, or an error string.
     """
-    sandbox_globals = create_sandbox_globals(config)
-    original_keys = set(sandbox_globals.keys())
+    result = sandbox_compile(config, code)
+    if isinstance(result, str):
+        return result
+    sandbox_globals, new_callables = result
 
-    try:
-        exec(code, sandbox_globals)
-    except Exception as e:
-        return f"Error: {type(e).__name__}: {e}"
+    matching = filter_callables_by_args(new_callables, *args, **kwargs)
+    if len(matching) != 1:
+        return f"Error: expected exactly one new function. Found: {[m.__name__ for m in matching]}."
 
-    n = len(args) + len(kwargs)
-    new_keys = set(sandbox_globals.keys()) - original_keys
-    new_funcs: list[str] = []
-    for k in new_keys:
-        obj = sandbox_globals[k]
-        if not callable(obj) or not hasattr(obj, "__code__"):
-            continue
-        try:
-            argcount = obj.__code__.co_argcount
-        except AttributeError:
-            continue
-        if argcount == n:
-            new_funcs.append(k)
-        elif argcount == n + 1 and obj.__code__.co_varnames[0] == "self":
-            new_funcs.append(k)
-
-    if len(new_funcs) != 1:
-        return f"Error: expected exactly one new function. Found: {new_funcs}."
-
-    function_obj: Callable = sandbox_globals[new_funcs[0]]
+    function_obj = matching[0]
 
     sandbox_self = SandboxSelf()
 
@@ -265,7 +308,7 @@ def _exec_sandboxed(
     try:
         return (
             function_obj(sandbox_self, *args, **kwargs)
-            if function_obj.__code__.co_argcount == n + 1
+            if function_obj.__code__.co_argcount == len(args) + len(kwargs) + 1
             else function_obj(*args, **kwargs)
         )
     except Exception as e:
