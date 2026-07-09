@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+import concurrent.futures
+from typing import Any, Callable
 
 # Safe builtins: pure functions for data manipulation and output.
 # No file I/O, no network, no type() metaclass tricks, no exec/eval.
@@ -148,3 +150,123 @@ def _restricted_import(name: str, registry: dict[str, Any]) -> Any:
     if resolved is None:
         raise ImportError(f"No module named {name!r}")
     return resolved
+
+
+def _exec_sandboxed(
+    config: dict[str, Any],
+    code: str,
+    real_self: object,
+    runner: "Any" = None,
+    *args: Any,
+    **kwargs: Any,
+) -> str:
+    """Execute *code* in a sandbox and return the result as a string.
+
+    End-to-end pipeline:
+    1. Create globals via ``create_sandbox_globals``.
+    2. Exec the code, find the one matching function.
+    3. Create SandboxSelf, populate it (closures, invoke, tool proxies).
+    4. Call the function with or without ``self`` based on its signature.
+    5. Return the result as a string.
+
+    The caller passes ``*args`` and ``**kwargs`` which will be forwarded
+    to the found function.  If the function's argcount is *n* + 1 and
+    its first parameter is named ``"self"``, SandboxSelf is passed as
+    the first argument.  Otherwise the function is called with only the
+    provided args/kwargs.
+
+    Args:
+        config: MRO-merged OAP config dict.
+        code: Python code to exec (should define exactly one function).
+        real_self: The AgenticObject instance for closure-based proxies.
+        runner: Optional Runner passed to produce_output/produce_error.
+        *args: Positional arguments forwarded to the found function.
+        **kwargs: Keyword arguments forwarded to the found function.
+
+    Returns:
+        The function's result as a string, or an error string.
+    """
+    sandbox_globals = create_sandbox_globals(config)
+    original_keys = set(sandbox_globals.keys())
+
+    try:
+        exec(code, sandbox_globals)
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+
+    n = len(args) + len(kwargs)
+    new_keys = set(sandbox_globals.keys()) - original_keys
+    new_funcs: list[str] = []
+    for k in new_keys:
+        obj = sandbox_globals[k]
+        if not callable(obj) or not hasattr(obj, "__code__"):
+            continue
+        try:
+            argcount = obj.__code__.co_argcount
+        except AttributeError:
+            continue
+        if argcount == n:
+            new_funcs.append(k)
+        elif argcount == n + 1 and obj.__code__.co_varnames[0] == "self":
+            new_funcs.append(k)
+
+    if len(new_funcs) != 1:
+        return f"Error: expected exactly one new function. Found: {new_funcs}."
+
+    function_obj: Callable = sandbox_globals[new_funcs[0]]
+
+    sandbox_self = SandboxSelf()
+
+    def _produce_output(data: Any) -> str:
+        return real_self._produce_output(data, runner=runner)  # type: ignore[arg-type]
+
+    def _produce_error(message: str) -> str:
+        return real_self._produce_error(message, runner=runner)  # type: ignore[arg-type]
+
+    setattr(sandbox_self, "produce_output", _produce_output)
+    setattr(sandbox_self, "produce_error", _produce_error)
+
+    # Conditionally attach invoke when sub-agent invocation is enabled
+    if config.get("invoke_sub_agents", False):
+        parent_ptid = runner.state.get("_persistent_thread_id") if runner else None
+
+        def _invoke(
+            target,
+            prompt,
+            output_schema=None,
+            persistent=False,
+            timeout=None,
+        ):
+            ptid = parent_ptid if persistent else None
+            parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
+
+            def _run():
+                _loop = asyncio.new_event_loop()
+                try:
+                    return _loop.run_until_complete(
+                        target.invoke_agent(
+                            prompt=prompt,
+                            output_schema=output_schema,
+                            timeout=timeout,
+                            persistent_thread_id=ptid,
+                            hooks=parent_hooks,
+                        )
+                    )
+                finally:
+                    _loop.close()
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(_run).result()
+
+        setattr(sandbox_self, "invoke", _invoke)
+
+    SandboxSelf.populate(sandbox_self, real_self)
+
+    try:
+        return (
+            function_obj(sandbox_self, *args, **kwargs)
+            if function_obj.__code__.co_argcount == n + 1
+            else function_obj(*args, **kwargs)
+        )
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import inspect
 import json
 import os
@@ -19,9 +17,12 @@ from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.utils import get_logger
 from peteos.oap.error import Error
-from peteos.oap.sandbox import SandboxSelf, build_sandbox_description, create_sandbox_globals
+from peteos.oap.sandbox import (
+    _exec_sandboxed,
+    build_sandbox_description,
+)
 
-from peteos.oap.decorators import agentic_object, tool
+from peteos.oap.decorators import tool
 from peteos.oap.agentic_registry import AgenticObjectRegistry
 
 _logger = get_logger(__name__)
@@ -198,94 +199,7 @@ class AgenticObject:
     def _python_exec(self, function: str, runner: Runner | None = None) -> str:
         """Protected tool: executes sandboxed Python code."""
         config = _collect_oap_config(self.__class__)
-        sandbox_globals = create_sandbox_globals(config)
-        original_keys = set(sandbox_globals.keys())
-
-        try:
-            # exec the code to let it define symbols in the sandbox namespace
-            exec(function, sandbox_globals)
-
-            # search for the newly defined function (must be exactly one)
-            new_keys = set(sandbox_globals.keys()) - original_keys
-            new_funcs: list[str] = []
-            for k in new_keys:
-                obj = sandbox_globals[k]
-                if not callable(obj) or not hasattr(obj, "__code__"):
-                    continue
-                try:
-                    argcount = obj.__code__.co_argcount
-                except AttributeError:
-                    continue
-                if argcount in (0, 1):
-                    if argcount == 1 and obj.__code__.co_varnames[0] != "self":
-                        continue
-                    new_funcs.append(k)
-            if len(new_funcs) != 1:
-                return (
-                    "Error: expected exactly one new function. "
-                    f"Found: {new_funcs}."
-                )
-            name = new_funcs[0]
-            function_obj = sandbox_globals[name]
-
-            # Create an empty SandboxSelf and populate it with closure-based
-            # proxies.  Each lambda captures real_self and runner in its scope,
-            # so sandboxed code has no way to reach them via introspection.
-            real_self = self
-            sandbox_self = SandboxSelf()
-
-            def _produce_output(data: Any) -> str:
-                return real_self._produce_output(data, runner=runner)
-
-            def _produce_error(message: str) -> str:
-                return real_self._produce_error(message, runner=runner)
-
-            setattr(sandbox_self, "produce_output", _produce_output)
-            setattr(sandbox_self, "produce_error", _produce_error)
-
-            # Conditionally attach invoke when sub-agent invocation is enabled
-            if config.get("invoke_sub_agents", False):
-                parent_ptid = runner.state.get("_persistent_thread_id") if runner else None
-
-                def _invoke(
-                    target,
-                    prompt,
-                    output_schema=None,
-                    persistent=False,
-                    timeout=None,
-                ):
-                    ptid = parent_ptid if persistent else None
-                    parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
-
-                    def _run():
-                        _loop = asyncio.new_event_loop()
-                        try:
-                            return _loop.run_until_complete(
-                                target.invoke_agent(
-                                    prompt=prompt,
-                                    output_schema=output_schema,
-                                    timeout=timeout,
-                                    persistent_thread_id=ptid,
-                                    hooks=parent_hooks,
-                                )
-                            )
-                        finally:
-                            _loop.close()
-
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        return executor.submit(_run).result()
-
-                setattr(sandbox_self, "invoke", _invoke)
-
-            # now populate the all tool-decorated and sandbox-decorated member functions
-            SandboxSelf.populate(sandbox_self, real_self)
-
-            try:
-                return function_obj(sandbox_self) if function_obj.__code__.co_argcount == 1 else function_obj()
-            finally:
-                pass
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        return _exec_sandboxed(config, function, self, runner)
 
     @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
     def _produce_output(self, data: str, runner: "Runner | None" = None) -> str:

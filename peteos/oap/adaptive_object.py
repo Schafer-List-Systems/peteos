@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
 from peteos.oap.decorators import agentic_object
-from peteos.oap.sandbox import SandboxSelf
+from peteos.oap.sandbox import _exec_sandboxed
 from peteos.persona.toolmanager import Tool
 
 
@@ -17,59 +17,26 @@ def _build_persisted_tool_proxy(
 ) -> Callable[..., str]:
     """Build a proxy callable that executes a persisted function in SandboxSelf.
 
-    At call time this proxy:
-    1. Builds a fresh sandbox globals dict.
-    2. Execs the stored code to find the function.
-    3. Creates a SandboxSelf (preventing direct access to the real AgenticObject).
-    4. Calls the function with SandboxSelf as ``self``.
-    5. Returns the result as a string.
+    The proxy delegates all sandbox logic to ``_exec_sandboxed``, which
+    provides the same environment as ``python_exec``: full globals,
+    closure-based produce_output/produce_error, conditional invoke,
+    and SandboxSelf.populate() for tool/sandbox method proxies.
+
+    Args:
+        real_self: The AdaptiveObject instance.
+        func_name: The stored function name.
+
+    Returns:
+        A proxy that forwards *args/**kwargs to the stored function.
     """
     config = _collect_oap_config(real_self.__class__)
+    stored = real_self._oap_persisted_tools[func_name]
 
-    def proxy(**kwargs: Any) -> str:
-        sandbox_globals: dict[str, Any] = {
-            "__builtins__": {"str": str, "int": int, "float": float, "bool": bool, "list": list,
-                             "dict": dict, "set": set, "tuple": tuple, "len": len, "range": range,
-                             "enumerate": enumerate, "zip": zip, "map": map, "filter": filter,
-                             "sorted": sorted, "reversed": reversed, "abs": abs, "min": min,
-                             "max": max, "sum": sum, "round": round, "divmod": divmod,
-                             "any": any, "all": all, "print": print, "isinstance": isinstance,
-                             "type": type},
-        }
-        if config.get("imports"):
-            for mod in config["imports"]:
-                mod_name = mod.__name__ if hasattr(mod, "__name__") else str(mod)
-                sandbox_globals[mod_name] = mod
-
-        stored = real_self._oap_persisted_tools[func_name]
-        try:
-            exec(stored["code"], sandbox_globals)
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
-
-        new_names = [k for k in sandbox_globals if k != "__builtins__" and callable(sandbox_globals[k])]
-        if len(new_names) != 1:
-            return f"Error: expected exactly one function. Found: {new_names or 'none'}."
-
-        func_obj = sandbox_globals[new_names[0]]
-
-        sandbox_self = SandboxSelf()
-        setattr(sandbox_self, "produce_output", lambda data: f"Error: produce_output unavailable in sandbox")
-        setattr(sandbox_self, "produce_error", lambda msg: f"Error: produce_error unavailable in sandbox")
-
-        try:
-            sig = inspect.signature(func_obj)
-            # Match _python_exec's pattern: only pass sandbox_self if the
-            # function has exactly 1 arg named "self" (co_argcount check).
-            if func_obj.__code__.co_argcount == 1 and func_obj.__code__.co_varnames[0] == "self":
-                bound = sig.bind(sandbox_self, **kwargs)
-            else:
-                bound = sig.bind(**kwargs)
-            bound.apply_defaults()
-            result = func_obj(*bound.args, **bound.kwargs)
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
-
+    def proxy(
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        result = _exec_sandboxed(config, stored["code"], real_self, None, *args, **kwargs)
         return str(result) if result is not None else "OK"
 
     return proxy
