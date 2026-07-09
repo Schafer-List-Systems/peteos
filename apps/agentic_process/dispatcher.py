@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid as uuid_mod
 
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import tool
 
 from apps.agentic_process.email_client import fetch_email, send_email

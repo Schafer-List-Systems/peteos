@@ -15,7 +15,7 @@ def _build_system_prompt(cls: type) -> str:
     from AgenticObject (concrete agentic objects), ordered from
     most-derived to base. Prepends standard behaviour directives.
     """
-    from peteos.oap.base import AgenticObject
+    from peteos.oap.agentic_object import AgenticObject
 
     class_name = cls.__name__
 

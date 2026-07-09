@@ -2,7 +2,7 @@
 
 import pytest
 
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.error import Error
 from peteos.persona.toolmanager import ToolManager

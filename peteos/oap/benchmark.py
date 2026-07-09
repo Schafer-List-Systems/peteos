@@ -12,7 +12,7 @@ import sys
 from itertools import product
 from typing import TYPE_CHECKING, Any, Callable
 
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import tool
 from peteos.oap.error import Error
 

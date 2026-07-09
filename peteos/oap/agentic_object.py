@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import inspect
 import json
 import os
 import threading
 import time
-from dataclasses import dataclass, is_dataclass
+from dataclasses import is_dataclass
 from typing import Any, Callable
 
 from peteos.conversation import ContentPart, Message
@@ -20,7 +21,7 @@ from peteos.utils import get_logger
 from peteos.oap.error import Error
 from peteos.oap.sandbox import SandboxSelf, build_sandbox_description, create_sandbox_globals
 
-from peteos.oap.decorators import tool
+from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.agentic_registry import AgenticObjectRegistry
 
 _logger = get_logger(__name__)
@@ -41,6 +42,7 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     allow_code_execution = False
     allow_media_access = False
     invoke_sub_agents = False
+    persist_functions = False
     for parent in cls.__mro__:
         if parent in (AgenticObject, object):
             continue
@@ -51,12 +53,14 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
             allow_code_execution |= cfg.get("allow_code_execution", False)
             allow_media_access |= cfg.get("allow_media_access", False)
             invoke_sub_agents |= cfg.get("invoke_sub_agents", False)
+            persist_functions |= cfg.get("persist_functions", False)
             imports.update(cfg.get("imports", []))
             import_aliases.update(cfg.get("import_aliases", {}))
     return {
         "allow_code_execution": allow_code_execution,
         "allow_media_access": allow_media_access,
         "invoke_sub_agents": invoke_sub_agents,
+        "persist_functions": persist_functions,
         "imports": list(imports),
         "import_aliases": import_aliases,
     }
@@ -698,3 +702,4 @@ class AgenticObject:
                 except Exception:
                     pass
             self.release()
+

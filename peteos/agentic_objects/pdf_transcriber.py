@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from peteos.oap.base import AgenticObject, Error
+from peteos.oap.agentic_object import AgenticObject, Error
 
 
 class PdfTranscriber(AgenticObject):

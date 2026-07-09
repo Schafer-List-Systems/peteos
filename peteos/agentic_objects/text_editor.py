@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
