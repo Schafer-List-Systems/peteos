@@ -73,12 +73,11 @@ class SimpleMockChatBot(ChatBot):
             return SimpleMockChatBotResponse(self._responses.pop(0))
 
         # Exhausted — simulate HTTP 500
-        async def _error_stream() -> AsyncGenerator[str, None]:
-            yield "[DONE]"
-
-        response = ChatBotResponse(_error_stream())
+        # Must return SimpleMockChatBotResponse (which has __aiter__) because
+        # the runner always does `async for _ in response`
+        empty_msg = Message.create("assistant", [])
+        response = SimpleMockChatBotResponse(empty_msg)
         response._data["error"] = "unexpected request — no more mock responses"
-        response._message_cache = None
         return response
 
     def list_available_models(self) -> List[str]:
