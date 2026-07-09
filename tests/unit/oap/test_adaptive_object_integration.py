@@ -135,7 +135,7 @@ class TestToolDefsAfterMaterialize:
     def test_persisted_function_visible_after_materialize(self):
         """After persist_function, the new tool should appear in tool defs."""
         obj = AdaptiveTestObj()
-        obj._persist_function(
+        obj.persist_function(
             "def square(x: int) -> int:\n    return x * x",
             "Square a number",
         )
@@ -152,11 +152,11 @@ class TestToolDefsAfterMaterialize:
     def test_removed_tool_disappears_after_materialize(self):
         """After remove_tool, the removed tool should be gone from tool defs."""
         obj = AdaptiveTestObj()
-        obj._persist_function(
+        obj.persist_function(
             "def triple(x: int) -> int:\n    return x * 3",
             "Triple a number",
         )
-        obj._remove_tool("triple")
+        obj.remove_tool("triple")
         session, _, _ = _make_session_with_agent(obj)
 
         session.materialize()
@@ -170,7 +170,7 @@ class TestToolDefsAfterMaterialize:
     def test_persist_then_remove_and_verify(self):
         """Persist, materialize (visible), remove, materialize (gone)."""
         obj = AdaptiveTestObj()
-        obj._persist_function(
+        obj.persist_function(
             "def double(x: int) -> int:\n    return x * 2",
             "Double a number",
         )
@@ -181,7 +181,7 @@ class TestToolDefsAfterMaterialize:
         tool_names_before = [t.name for t in content if t.type == "tool"]
         assert "double" in tool_names_before
 
-        obj._remove_tool("double")
+        obj.remove_tool("double")
         session.materialize()
         content = session.active_context.tool_definitions_message.content
         tool_names_after = [t.name for t in content if t.type == "tool"]
@@ -228,7 +228,7 @@ class TestMockChatBotCapturesToolDefs:
         assert "persist_function" in tools_0
 
         # Step 2: persist and re-materialize
-        obj._persist_function("def triple(x: int) -> int:\n    return x * 3", "Triple a number")
+        obj.persist_function("def triple(x: int) -> int:\n    return x * 3", "Triple a number")
         session.materialize()
         await bot.send_context(session, None, None)
         tools_1 = bot.captured_tools_at_step(1)
@@ -244,7 +244,7 @@ class TestFullLifecycle:
     def test_persist_then_call_via_toolmanager(self):
         """Persist a function and call it through the ToolManager."""
         obj = AdaptiveTestObj()
-        result = obj._persist_function(
+        result = obj.persist_function(
             "def multiply(a: int, b: int) -> int:\n    return a * b",
             "Multiply two numbers",
         )
@@ -255,5 +255,5 @@ class TestFullLifecycle:
         result = tool.execute(a=6, b=7)
         assert result == "42"
 
-        obj._remove_tool("multiply")
+        obj.remove_tool("multiply")
         assert obj._oap_tool_manager.get_tool("multiply") is None

@@ -50,20 +50,20 @@ class TestPersistFunctionTool:
     def test_persist_simple_function(self, obj):
         """Persisting a simple function returns OK with the function name."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        result = obj._persist_function(code, "Multiply by 2")
+        result = obj.persist_function(code, "Multiply by 2")
         assert result == "OK: registered as 'my_math'"
 
     def test_persisted_function_appears_in_tool_list(self, obj):
         """A persisted function is registered in the ToolManager's tool list."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        obj._persist_function(code, "Multiply by 2")
+        obj.persist_function(code, "Multiply by 2")
         tools = [t.name for t in obj._oap_tool_manager.get_tool_list()]
         assert "my_math" in tools
 
     def test_persisted_function_tracks_metadata(self, obj):
         """Persisted functions are tracked in _oap_persisted_tools."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        obj._persist_function(code, "Multiply by 2")
+        obj.persist_function(code, "Multiply by 2")
         assert "my_math" in obj._oap_persisted_tools
         meta = obj._oap_persisted_tools["my_math"]
         assert meta["code"] == code
@@ -73,7 +73,7 @@ class TestPersistFunctionTool:
     def test_persist_function_with_multiple_parameters(self, obj):
         """Persisting a function with multiple parameters extracts all of them."""
         code = "def combine(a: str, b: str) -> str:\n    return a + b"
-        result = obj._persist_function(code, "Concatenate two strings")
+        result = obj.persist_function(code, "Concatenate two strings")
         assert result == "OK: registered as 'combine'"
         meta = obj._oap_persisted_tools["combine"]
         assert "a" in meta["parameters"]
@@ -84,7 +84,7 @@ class TestPersistFunctionTool:
     def test_persist_function_with_defaults(self, obj):
         """Persisting a function with default values marks params as not required."""
         code = "def greet(name: str, greeting: str = 'Hello') -> str:\n    return f'{greeting}, {name}'"
-        result = obj._persist_function(code, "Create a greeting")
+        result = obj.persist_function(code, "Create a greeting")
         assert result == "OK: registered as 'greet'"
         meta = obj._oap_persisted_tools["greet"]
         assert meta["parameters"]["name"]["required"] is True
@@ -94,40 +94,40 @@ class TestPersistFunctionTool:
     def test_persist_function_syntax_error(self, obj):
         """Persisting code with a syntax error returns an error."""
         code = "def broken(:\n    return"
-        result = obj._persist_function(code, "Should fail")
+        result = obj.persist_function(code, "Should fail")
         assert result.startswith("Error:")
 
     def test_persist_function_no_function_defined(self, obj):
         """Persisting code with no function returns an error."""
         code = "x = 42"
-        result = obj._persist_function(code, "No function")
+        result = obj.persist_function(code, "No function")
         assert result.startswith("Error:")
         assert "exactly one function" in result
 
     def test_persist_function_multiple_functions(self, obj):
         """Persisting code with multiple functions returns an error."""
         code = "def a(): pass\ndef b(): pass"
-        result = obj._persist_function(code, "Too many")
+        result = obj.persist_function(code, "Too many")
         assert result.startswith("Error:")
         assert "exactly one function" in result
 
     def test_persist_function_name_collision(self, obj):
         """Persisting a function that collides with an existing tool returns an error."""
         code = "def add(x: int) -> int:\n    return x"
-        result = obj._persist_function(code, "Collides")
+        result = obj.persist_function(code, "Collides")
         assert result.startswith("Error:")
         assert "already exists" in result
 
     def test_persist_function_exec_error(self, obj):
         """Persisting code that raises during exec returns an error."""
         code = "import os\nx = 1"
-        result = obj._persist_function(code, "Exec error")
+        result = obj.persist_function(code, "Exec error")
         assert result.startswith("Error:")
 
     def test_persist_function_with_self_param(self, obj):
         """The 'self' parameter is excluded from the tool parameters schema."""
         code = "def process(self, data: int) -> int:\n    return data"
-        result = obj._persist_function(code, "Process data")
+        result = obj.persist_function(code, "Process data")
         assert result == "OK: registered as 'process'"
         meta = obj._oap_persisted_tools["process"]
         assert "self" not in meta["parameters"]
@@ -144,24 +144,24 @@ class TestRemoveToolTool:
     def test_remove_existing_persisted_tool(self, obj):
         """Removing a persisted tool succeeds and removes it from both registries."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        obj._persist_function(code, "Multiply by 2")
+        obj.persist_function(code, "Multiply by 2")
         assert "my_math" in obj._oap_persisted_tools
         assert obj._oap_tool_manager.get_tool("my_math") is not None
 
-        result = obj._remove_tool("my_math")
+        result = obj.remove_tool("my_math")
         assert result == "OK"
         assert "my_math" not in obj._oap_persisted_tools
         assert obj._oap_tool_manager.get_tool("my_math") is None
 
     def test_remove_nonexistent_tool(self, obj):
         """Removing a tool that was never persisted returns an error."""
-        result = obj._remove_tool("nonexistent")
+        result = obj.remove_tool("nonexistent")
         assert result.startswith("Error:")
         assert "not found or not persisted" in result
 
     def test_remove_does_not_affect_static_tools(self, obj):
         """Removing a name that matches a static tool returns an error."""
-        result = obj._remove_tool("add")
+        result = obj.remove_tool("add")
         assert result.startswith("Error:")
         assert obj._oap_tool_manager.get_tool("add") is not None
 
@@ -176,7 +176,7 @@ class TestPersistedFunctionSandboxIsolation:
     def test_persisted_function_can_be_called(self, obj):
         """Calling a persisted function through the ToolManager executes it."""
         code = "def double(x: int) -> int:\n    return x * 2"
-        obj._persist_function(code, "Double a number")
+        obj.persist_function(code, "Double a number")
         tool = obj._oap_tool_manager.get_tool("double")
         assert tool is not None
         result = tool.execute(x=21)
@@ -185,7 +185,7 @@ class TestPersistedFunctionSandboxIsolation:
     def test_persisted_function_with_string_output(self, obj):
         """Persisted functions that return strings work correctly."""
         code = "def upper(text: str) -> str:\n    return text.upper()"
-        obj._persist_function(code, "Uppercase a string")
+        obj.persist_function(code, "Uppercase a string")
         tool = obj._oap_tool_manager.get_tool("upper")
         result = tool.execute(text="hello")
         assert result == "HELLO"
@@ -193,7 +193,7 @@ class TestPersistedFunctionSandboxIsolation:
     def test_persisted_function_with_none_returns_ok(self, obj):
         """Persisted functions that return None return None (matching _python_exec)."""
         code = "def noop(x: int) -> None:\n    pass"
-        obj._persist_function(code, "No-op function")
+        obj.persist_function(code, "No-op function")
         tool = obj._oap_tool_manager.get_tool("noop")
         result = tool.execute(x=42)
         assert result is None

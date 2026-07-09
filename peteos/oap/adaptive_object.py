@@ -7,49 +7,24 @@ from typing import Any, Callable
 
 from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
 from peteos.engine import Runner
-from peteos.oap.decorators import agentic_object
+from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.sandbox import sandbox_compile
 from peteos.persona.toolmanager import Tool
 
 
 @agentic_object(persist_functions=True)
 class AdaptiveObject(AgenticObject):
-    """AgenticObject with runtime function persistence.
-
-    Subclasses inherit persist_functions automatically through MRO.
-    This object can write and register new Python functions as tools at
-    runtime via ``persist_function`` and remove them via ``remove_tool``.
+    """
+    You can define new Python functions at runtime and register them as callable tools.
+    Use `persist_function` to save a function definition.
+    It will immediately become available as a tool.
+    Use `remove_tool` to unregister functions you previously registered.
+    You cannot remove built-in/static tools.
     """
 
     def __init__(self) -> None:
         super().__init__()
         self._oap_persisted_tools: dict[str, Any] = {}
-        self._register_persisted_tools()
-
-    def _register_persisted_tools(self) -> None:
-        """Register persist_function and remove_tool tools."""
-        self._oap_tool_manager.register_tool(
-            Tool(
-                name="persist_function",
-                description=(
-                    "Persist a Python function as a tool callable by the agent. "
-                    "Pass the full function definition as a string (must be a valid `def`). "
-                    "The function name and parameters are auto-extracted from the signature. "
-                    "The description should explain what the function does and its parameter schema."
-                ),
-                func=self._persist_function,
-            )
-        )
-        self._oap_tool_manager.register_tool(
-            Tool(
-                name="remove_tool",
-                description=(
-                    "Remove a tool that was previously registered by this agent "
-                    "via the ``persist_function`` tool. Cannot remove static (class-defined) tools."
-                ),
-                func=self._remove_tool,
-            )
-        )
 
     def _extract_func_name_and_params(self, func_obj: Callable) -> tuple[str, dict]:
         """Extract function name and parameters schema from a callables.
@@ -113,12 +88,14 @@ class AdaptiveObject(AgenticObject):
 
         return proxy
 
-    def _persist_function(self, code: str, description: str) -> str:
+    @tool
+    def persist_function(self, code: str, description: str) -> str:
         """Persist a Python function definition as a new tool.
 
-        The function code is stored and will be executed in a sandbox with
-        SandboxSelf at call time, so the agent has no direct access to the
-        real AgenticObject instance.
+        Pass the full function definition as a string and
+        a description of what the function does, which arguments it needs and what it returns.
+
+        The tool becomes immediately callable.
 
         Args:
             code: Full Python function definition as a string (e.g. "def my_func(x: int) -> int:\\n    return x * 2").
@@ -152,12 +129,13 @@ class AdaptiveObject(AgenticObject):
         # Register a proxy as the Tool.func — it executes the code in a
         # sandbox with SandboxSelf at call time.
         proxy = self._build_persisted_tool_proxy(func_name)
-        tool = Tool(name=func_name, description=description, func=proxy, parameters=parameters)
-        self._oap_tool_manager.register_tool(tool)
+        persisted_tool = Tool(name=func_name, description=description, func=proxy, parameters=parameters)
+        self._oap_tool_manager.register_tool(persisted_tool)
 
         return f"OK: registered as '{func_name}'"
 
-    def _remove_tool(self, name: str) -> str:
+    @tool
+    def remove_tool(self, name: str) -> str:
         """Remove a persisted tool.
 
         Args:
