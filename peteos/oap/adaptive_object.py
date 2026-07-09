@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
 from peteos.oap.decorators import agentic_object
-from peteos.oap.sandbox import _compile_and_select, sandbox_compile
+from peteos.oap.sandbox import sandbox_compile
 from peteos.persona.toolmanager import Tool
 
 
@@ -66,19 +66,8 @@ class AdaptiveObject(AgenticObject):
             *args: Any,
             **kwargs: Any,
         ) -> str:
-            function_obj = _compile_and_select(config, stored["code"], *args, **kwargs)
-            if isinstance(function_obj, str):
-                return function_obj
-            sandbox_self = self._setup_sandbox_self(config, None)
-            try:
-                result = (
-                    function_obj(sandbox_self, *args, **kwargs)
-                    if function_obj.__code__.co_argcount == len(args) + len(kwargs) + 1
-                    else function_obj(*args, **kwargs)
-                )
-                return str(result) if result is not None else "OK"
-            except Exception as e:
-                return f"Error: {type(e).__name__}: {e}"
+            result = self._call_sandboxed(config, stored["code"], None, *args, **kwargs)
+            return str(result) if result is not None else "OK"
 
         return proxy
 

@@ -202,14 +202,7 @@ class AgenticObject:
     def _python_exec(self, function: str, runner: Runner | None = None) -> str:
         """Protected tool: executes sandboxed Python code."""
         config = _collect_oap_config(self.__class__)
-        function_obj = _compile_and_select(config, function)
-        if isinstance(function_obj, str):
-            return function_obj
-        sandbox_self = self._setup_sandbox_self(config, runner)
-        try:
-            return function_obj(sandbox_self)
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        return self._call_sandboxed(config, function, runner)
 
     def _setup_sandbox_self(
         self,
@@ -265,6 +258,31 @@ class AgenticObject:
 
         SandboxSelf.populate(sandbox_self, self)
         return sandbox_self
+
+    def _call_sandboxed(
+        self,
+        config: dict[str, Any],
+        code: str,
+        runner: "Runner | None" = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        """Compile, setup sandbox, and invoke a sandboxed function.
+
+        Returns the result as a string, or an error message.
+        """
+        function_obj = _compile_and_select(config, code, *args, **kwargs)
+        if isinstance(function_obj, str):
+            return function_obj
+        sandbox_self = self._setup_sandbox_self(config, runner)
+        try:
+            return (
+                function_obj(sandbox_self, *args, **kwargs)
+                if function_obj.__code__.co_argcount == len(args) + len(kwargs) + 1
+                else function_obj(*args, **kwargs)
+            )
+        except Exception as e:
+            return f"Error: {type(e).__name__}: {e}"
 
     @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
     def _produce_output(self, data: str, runner: "Runner | None" = None) -> str:
