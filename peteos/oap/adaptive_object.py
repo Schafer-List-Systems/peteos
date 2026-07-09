@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
 from peteos.oap.decorators import agentic_object
-from peteos.oap.sandbox import _exec_sandboxed, sandbox_compile
+from peteos.oap.sandbox import _compile_and_select, sandbox_compile
 from peteos.persona.toolmanager import Tool
 
 
@@ -53,11 +53,6 @@ class AdaptiveObject(AgenticObject):
     def _build_persisted_tool_proxy(self, func_name: str) -> Callable[..., str]:
         """Build a proxy callable that executes a persisted function in SandboxSelf.
 
-        The proxy delegates all sandbox logic to ``_exec_sandboxed``, which
-        provides the same environment as ``python_exec``: full globals,
-        closure-based produce_output/produce_error, conditional invoke,
-        and SandboxSelf.populate() for tool/sandbox method proxies.
-
         Args:
             func_name: The stored function name.
 
@@ -71,8 +66,19 @@ class AdaptiveObject(AgenticObject):
             *args: Any,
             **kwargs: Any,
         ) -> str:
-            result = _exec_sandboxed(config, stored["code"], self, None, *args, **kwargs)
-            return str(result) if result is not None else "OK"
+            function_obj = _compile_and_select(config, stored["code"], *args, **kwargs)
+            if isinstance(function_obj, str):
+                return function_obj
+            sandbox_self = self._setup_sandbox_self(config, None)
+            try:
+                result = (
+                    function_obj(sandbox_self, *args, **kwargs)
+                    if function_obj.__code__.co_argcount == len(args) + len(kwargs) + 1
+                    else function_obj(*args, **kwargs)
+                )
+                return str(result) if result is not None else "OK"
+            except Exception as e:
+                return f"Error: {type(e).__name__}: {e}"
 
         return proxy
 
@@ -90,37 +96,27 @@ class AdaptiveObject(AgenticObject):
         Returns:
             "OK: registered as '<name>'" on success, or an error message.
         """
-        # Validate the code by compiling it
+        # Validate syntax
         try:
             compile(code, "<persisted>", "exec")
         except SyntaxError as e:
             return f"Error: {type(e).__name__}: {e}"
 
-        # Build a sandbox namespace for exec
-        sandbox_globals: dict[str, Any] = {
-            "__builtins__": {"str": str, "int": int, "float": float, "bool": bool, "list": list,
-                             "dict": dict, "set": set, "tuple": tuple, "len": len, "range": range,
-                             "enumerate": enumerate, "zip": zip, "map": map, "filter": filter,
-                             "sorted": sorted, "reversed": reversed, "abs": abs, "min": min,
-                             "max": max, "sum": sum, "round": round, "divmod": divmod,
-                             "any": any, "all": all, "print": print, "isinstance": isinstance,
-                             "type": type},
-        }
+        config = _collect_oap_config(self.__class__)
+        result = sandbox_compile(config, code)
+        if isinstance(result, str):
+            return result
+        sandbox_globals, new_callables = result
+
+        if len(new_callables) != 1:
+            names = [c.__name__ for c in new_callables] if new_callables else ["none"]
+            return f"Error: expected exactly one function in code. Found: {names}."
+
+        func_obj = new_callables[0]
+        func_name = func_obj.__name__
+
         try:
-            exec(code, sandbox_globals)
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
-
-        # Find the newly defined function
-        new_names = [k for k in sandbox_globals if k != "__builtins__" and callable(sandbox_globals[k])]
-        if len(new_names) != 1:
-            return f"Error: expected exactly one function in code. Found: {new_names or 'none'}."
-
-        func_name = new_names[0]
-
-        # Validate signature
-        try:
-            sig = inspect.signature(sandbox_globals[func_name])
+            sig = inspect.signature(func_obj)
         except (ValueError, TypeError) as e:
             return f"Error: could not introspect function signature: {e}"
 
