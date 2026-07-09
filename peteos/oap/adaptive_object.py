@@ -6,6 +6,7 @@ import inspect
 from typing import Any, Callable
 
 from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
+from peteos.engine import Runner
 from peteos.oap.decorators import agentic_object
 from peteos.oap.sandbox import sandbox_compile
 from peteos.persona.toolmanager import Tool
@@ -50,68 +51,25 @@ class AdaptiveObject(AgenticObject):
             )
         )
 
-    def _build_persisted_tool_proxy(self, func_name: str) -> Callable[..., str]:
-        """Build a proxy callable that executes a persisted function in SandboxSelf.
+    def _extract_func_name_and_params(self, func_obj: Callable) -> tuple[str, dict]:
+        """Extract function name and parameters schema from a callables.
 
         Args:
-            func_name: The stored function name.
+            func_obj: A Python callable to introspect.
 
         Returns:
-            A proxy that forwards *args/**kwargs to the stored function.
+            A tuple of (func_name, parameters_schema) on success, or ("Error: ...", {}) on failure.
         """
-        config = _collect_oap_config(self.__class__)
-        stored = self._oap_persisted_tools[func_name]
-
-        def proxy(
-            *args: Any,
-            **kwargs: Any,
-        ) -> str:
-            result = self._call_sandboxed(config, stored["code"], None, *args, **kwargs)
-            return str(result) if result is not None else "OK"
-
-        return proxy
-
-    def _persist_function(self, code: str, description: str) -> str:
-        """Persist a Python function definition as a new tool.
-
-        The function code is stored and will be executed in a sandbox with
-        SandboxSelf at call time, so the agent has no direct access to the
-        real AgenticObject instance.
-
-        Args:
-            code: Full Python function definition as a string (e.g. "def my_func(x: int) -> int:\\n    return x * 2").
-            description: Description of the tool including parameter explanation.
-
-        Returns:
-            "OK: registered as '<name>'" on success, or an error message.
-        """
-        # Validate syntax
-        try:
-            compile(code, "<persisted>", "exec")
-        except SyntaxError as e:
-            return f"Error: {type(e).__name__}: {e}"
-
-        config = _collect_oap_config(self.__class__)
-        result = sandbox_compile(config, code)
-        if isinstance(result, str):
-            return result
-        sandbox_globals, new_callables = result
-
-        if len(new_callables) != 1:
-            names = [c.__name__ for c in new_callables] if new_callables else ["none"]
-            return f"Error: expected exactly one function in code. Found: {names}."
-
-        func_obj = new_callables[0]
         func_name = func_obj.__name__
 
         try:
             sig = inspect.signature(func_obj)
         except (ValueError, TypeError) as e:
-            return f"Error: could not introspect function signature: {e}"
+            return f"Error: could not introspect function signature: {e}", {}
 
         # Check for name collision with static tools
         if self._oap_tool_manager.get_tool(func_name):
-            return f"Error: tool '{func_name}' already exists (collision with static tool)."
+            return f"Error: tool '{func_name}' already exists (collision with static tool)", {}
 
         # Build parameters schema from signature
         parameters = {}
@@ -130,6 +88,58 @@ class AdaptiveObject(AgenticObject):
                 param_info["required"] = False
                 param_info["default"] = param.default
             parameters[param_name] = param_info
+
+        return func_name, parameters
+
+    def _build_persisted_tool_proxy(self, func_name: str) -> Callable[..., str]:
+        """Build a proxy callable that executes a persisted function in SandboxSelf.
+
+        Args:
+            func_name: The stored function name.
+
+        Returns:
+            A proxy that forwards *args/**kwargs to the stored function.
+        """
+        config = _collect_oap_config(self.__class__)
+        stored = self._oap_persisted_tools[func_name]
+
+        def proxy(
+            *args: Any,
+            runner: Runner | None = None,
+            **kwargs: Any,
+        ) -> str:
+            result = self._call_sandboxed(config, stored["code"], runner, *args, **kwargs)
+            return str(result) if result is not None else None
+
+        return proxy
+
+    def _persist_function(self, code: str, description: str) -> str:
+        """Persist a Python function definition as a new tool.
+
+        The function code is stored and will be executed in a sandbox with
+        SandboxSelf at call time, so the agent has no direct access to the
+        real AgenticObject instance.
+
+        Args:
+            code: Full Python function definition as a string (e.g. "def my_func(x: int) -> int:\\n    return x * 2").
+            description: Description of the tool including parameter explanation.
+
+        Returns:
+            "OK: registered as '<name>'" on success, or an error message.
+        """
+        config = _collect_oap_config(self.__class__)
+        result = sandbox_compile(config, code)
+        if isinstance(result, str):
+            return result
+        sandbox_globals, new_callables = result
+
+        if len(new_callables) != 1:
+            names = [c.__name__ for c in new_callables] if new_callables else ["none"]
+            return f"Error: expected exactly one function in code. Found: {names}."
+
+        func_name, parameters = self._extract_func_name_and_params(new_callables[0])
+        if isinstance(func_name, str) and func_name.startswith("Error:"):
+            return func_name
 
         # Store the code string; the actual function will be exec'd at call time
         # inside SandboxSelf, ensuring isolation from the real AgenticObject.

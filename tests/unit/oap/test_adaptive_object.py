@@ -191,12 +191,12 @@ class TestPersistedFunctionSandboxIsolation:
         assert result == "HELLO"
 
     def test_persisted_function_with_none_returns_ok(self, obj):
-        """Persisted functions that return None return 'OK'."""
+        """Persisted functions that return None return None (matching _python_exec)."""
         code = "def noop(x: int) -> None:\n    pass"
         obj._persist_function(code, "No-op function")
         tool = obj._oap_tool_manager.get_tool("noop")
         result = tool.execute(x=42)
-        assert result == "OK"
+        assert result is None
 
 
 class TestPersistFunctionConfigGating:

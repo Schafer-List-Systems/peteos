@@ -167,6 +167,12 @@ def sandbox_compile(
     Returns:
         A (globals, new_callables) tuple on success, or an error string.
     """
+    # Validate syntax up front before sandboxing.
+    try:
+        compile(code, "<persisted>", "exec")
+    except SyntaxError as e:
+        return f"Error: {type(e).__name__}: {e}"
+
     sandbox_globals = create_sandbox_globals(config)
     original_keys = set(sandbox_globals.keys())
 
