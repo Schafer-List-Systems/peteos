@@ -415,6 +415,7 @@ def _partial(func: Callable, *args: Any) -> Callable:
     """Return a callable that prepends *args* when invoked."""
     def wrapper(*extra: Any, **kwargs: Any) -> Any:
         return func(*args, *extra, **kwargs)
+    wrapper.func = func
     return wrapper
 
 
