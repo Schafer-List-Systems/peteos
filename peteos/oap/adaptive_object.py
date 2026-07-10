@@ -16,9 +16,11 @@ from peteos.oap.agentic_registry import AgenticObjectRegistry
 @agentic_object(define_functions=True)
 class AdaptiveObject(AgenticObject):
     """
-    Define reusable Python functions for recurring computations using `define_function`!
-    Address its description at yourself and include the arguments and return type.
-    It will immediately become available as tool after being defined.
+    Create and write reusable Python functions for recurring computations using `define_function`!
+    Address its description at yourself.
+    Describe the parameters and return values including their types in the docstring!
+    It will immediately become available for you as tool after being defined.
+    Use these functions as tool directly or from within python functions.
     Use `remove_function` to unregister functions you previously registered.
     You cannot remove built-in/static tools.
     """

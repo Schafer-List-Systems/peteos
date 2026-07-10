@@ -28,7 +28,7 @@ class BackendConfig:
     chat_endpoint: Optional[str] = None
     models_endpoint: Optional[str] = None
     streaming: bool = False
-    max_tokens: int = 4096
+    max_tokens: int = 1024
     retry_delays: Optional[list[float]] = None
     api_key: Optional[str] = None
     model_priorities: Optional[Dict[str, int]] = None
