@@ -41,18 +41,20 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     diamond hierarchy so that a class D(B, C) where both B and C define
     @agentic_object with different imports gets all of them combined.
     """
+    from peteos.oap.agentic_registry import _is_oap_object
+
     imports: set[object] = set()
     import_aliases: dict[str, str] = {}
     allow_code_execution = False
     allow_media_access = False
     invoke_sub_agents = False
     persist_functions = False
-    for parent in cls.__mro__:
-        if parent in (AgenticObject, object):
+    for c in cls.__mro__:
+        if c in (AgenticObject, object):
             continue
-        if AgenticObject not in parent.__bases__:
+        if not _is_oap_object(c):
             continue
-        cfg = getattr(parent, "_oap_config", None)
+        cfg = getattr(c, "_oap_config", None)
         if cfg:
             allow_code_execution |= cfg.get("allow_code_execution", False)
             allow_media_access |= cfg.get("allow_media_access", False)

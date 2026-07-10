@@ -11,6 +11,7 @@ from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.sandbox import sandbox_compile
 from peteos.persona.toolmanager import Tool
 
+from peteos.oap.agentic_registry import AgenticObjectRegistry
 
 @agentic_object(persist_functions=True)
 class AdaptiveObject(AgenticObject):
@@ -21,6 +22,10 @@ class AdaptiveObject(AgenticObject):
     Use `remove_tool` to unregister functions you previously registered.
     You cannot remove built-in/static tools.
     """
+
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        AgenticObjectRegistry.register(cls)
 
     def __init__(self) -> None:
         super().__init__()
