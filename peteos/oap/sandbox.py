@@ -252,7 +252,9 @@ def _compile_and_select(
 
     matching = filter_callables_by_args(new_callables, *args, **kwargs)
     if len(matching) != 1:
-        return f"Error: expected exactly one new function. Found: {[m.__name__ for m in matching]}."
+        raise ValueError(
+            f"expected exactly one new function. Found: {[m.__name__ for m in matching]}."
+        )
 
     return matching[0]
 

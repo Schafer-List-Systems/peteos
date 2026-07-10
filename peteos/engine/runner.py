@@ -364,6 +364,7 @@ class Runner(ActiveClass):
                 break
             if not success:
                 await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, result_str, False)
+                foreground.deny_all_remaining(f"Tool '{tool_name}' execution failed")
                 _logger.debug("[runner] Tool %s failed", tool_name)
                 break
             await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
