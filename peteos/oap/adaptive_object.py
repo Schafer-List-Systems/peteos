@@ -88,8 +88,7 @@ class AdaptiveObject(AgenticObject):
             runner: Runner | None = None,
             **kwargs: Any,
         ) -> str:
-            result = self._call_sandboxed(config, stored["code"], runner, *args, **kwargs)
-            return str(result) if result is not None else None
+            return self._call_sandboxed(config, stored["code"], runner, *args, **kwargs)
 
         return proxy
 
@@ -101,11 +100,7 @@ class AdaptiveObject(AgenticObject):
 
         Args:
             code: Full Python function definition as a string (e.g. "def my_func(x: int) -> int:\\n    return x * 2").
-            docstring: The Python docstring of the function.
-            runner: Optional runner injected by the framework.
-
-        Returns:
-            "OK: registered as '<name>'" on success, or an error message.
+            docstring: The Python docstring of the function with parameter description.
         """
         config = _collect_oap_config(self.__class__)
         result = sandbox_compile(config, code)
@@ -132,6 +127,8 @@ class AdaptiveObject(AgenticObject):
         # Register a proxy as the Tool.func — it executes the code in a
         # sandbox with SandboxSelf at call time.
         proxy = self._build_defined_tool_proxy(func_name)
+        proxy._tool_name = func_name
+        self.__dict__[func_name] = proxy
         defined_tool = Tool(name=func_name, description=docstring, func=proxy, parameters=parameters)
         self._oap_tool_manager.register_tool(defined_tool)
         if runner is not None:
@@ -146,15 +143,13 @@ class AdaptiveObject(AgenticObject):
         Args:
             name: The tool name to remove.
             runner: Optional runner injected by the framework.
-
-        Returns:
-            "OK" on success, or an error message.
         """
         if name not in self._oap_define_functions:
             return f"Error: tool '{name}' not found or not defined by this agent."
 
         del self._oap_define_functions[name]
         self._oap_tool_manager._tools.pop(name, None)
+        self.__dict__.pop(name, None)
         if runner is not None:
             runner._execution_environment.auto_approve_tools.remove(name)
         return "OK"

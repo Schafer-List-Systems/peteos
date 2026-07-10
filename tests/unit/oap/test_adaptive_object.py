@@ -180,7 +180,7 @@ class TestPersistedFunctionSandboxIsolation:
         tool = obj._oap_tool_manager.get_tool("double")
         assert tool is not None
         result = tool.execute(x=21)
-        assert result == "42"
+        assert result == 42
 
     def test_defined_function_with_string_output(self, obj):
         """Defined functions that return strings work correctly."""

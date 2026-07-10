@@ -70,21 +70,24 @@ class SandboxSelf:
             real_self: The AgenticObject instance whose methods to proxy.
         """
         registered: set[str] = set()
+
+        def _register(name: str, method: Callable) -> None:
+            """Register a tool/sandbox method if not already registered."""
+            if name in registered:
+                return
+            sandbox_name = getattr(method, "_tool_name", None) or getattr(method, "_sandbox_name", None)
+            if sandbox_name is None:
+                return
+            registered.add(name)
+            setattr(sandbox_self, sandbox_name, getattr(real_self, name))
+
         for cls in real_self.__class__.__mro__:
             for method_name, method in cls.__dict__.items():
-                if not callable(method):
-                    continue
-                if method_name in registered:
-                    continue
-                if hasattr(method, "_tool_name"):
-                    sandbox_name = method._tool_name
-                elif hasattr(method, "_sandbox_name"):
-                    sandbox_name = method._sandbox_name
-                else:
-                    continue
-                registered.add(method_name)
-                proxy_fn = getattr(real_self, method_name)
-                setattr(sandbox_self, sandbox_name, proxy_fn)
+                if callable(method):
+                    _register(method_name, method)
+        for method_name, method in real_self.__dict__.items():
+            if callable(method):
+                _register(method_name, method)
 
 
 def build_sandbox_description(imports: list[object] | None = None) -> str:

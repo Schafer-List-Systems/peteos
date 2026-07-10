@@ -253,7 +253,7 @@ class TestFullLifecycle:
         tool = obj._oap_tool_manager.get_tool("multiply")
         assert tool is not None
         result = tool.execute(a=6, b=7)
-        assert result == "42"
+        assert result == 42
 
         obj.remove_function("multiply")
         assert obj._oap_tool_manager.get_tool("multiply") is None
