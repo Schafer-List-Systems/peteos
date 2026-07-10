@@ -89,7 +89,7 @@ class AdaptiveObject(AgenticObject):
         return proxy
 
     @tool
-    def persist_function(self, code: str, description: str) -> str:
+    def persist_function(self, code: str, description: str, runner: "Runner | None" = None) -> str:
         """Persist a Python function definition as a new tool.
 
         Pass the full function definition as a string and
@@ -100,6 +100,7 @@ class AdaptiveObject(AgenticObject):
         Args:
             code: Full Python function definition as a string (e.g. "def my_func(x: int) -> int:\\n    return x * 2").
             description: Description of the tool including parameter explanation.
+            runner: Optional runner injected by the framework.
 
         Returns:
             "OK: registered as '<name>'" on success, or an error message.
@@ -131,15 +132,18 @@ class AdaptiveObject(AgenticObject):
         proxy = self._build_persisted_tool_proxy(func_name)
         persisted_tool = Tool(name=func_name, description=description, func=proxy, parameters=parameters)
         self._oap_tool_manager.register_tool(persisted_tool)
+        if runner is not None:
+            runner._execution_environment.auto_approve_tools.append(func_name)
 
         return f"OK: registered as '{func_name}'"
 
     @tool
-    def remove_tool(self, name: str) -> str:
+    def remove_tool(self, name: str, runner: "Runner | None" = None) -> str:
         """Remove a persisted tool.
 
         Args:
             name: The tool name to remove.
+            runner: Optional runner injected by the framework.
 
         Returns:
             "OK" on success, or an error message.
@@ -149,4 +153,6 @@ class AdaptiveObject(AgenticObject):
 
         del self._oap_persisted_tools[name]
         self._oap_tool_manager._tools.pop(name, None)
+        if runner is not None:
+            runner._execution_environment.auto_approve_tools.remove(name)
         return "OK"

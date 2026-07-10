@@ -373,6 +373,18 @@ class Runner(ActiveClass):
             self._execution_environment.close_foreground_group()
             return await self._append_result_message(foreground)
 
+        # No reviewed calls — log the first un-reviewed tool call for debugging
+        if foreground.records:
+            first = foreground.records[0]
+            args_preview = first.tool_call.arguments[:200] if first.tool_call.arguments else ""
+            _logger.debug(
+                "[runner] _handle_tool_group: "
+                "approval_status=%s execution_status=%s tool=%s call_id=%s args=%s",
+                first.approval_status,
+                first.execution_status,
+                first.tool_call.name, first.tool_call_id, args_preview,
+            )
+
         return False
 
     # ------------------------------------------------------------------ #
