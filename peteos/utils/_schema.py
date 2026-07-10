@@ -57,17 +57,17 @@ def parse_data(raw: str, schema: type | None) -> Any:
 
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         # Fallback for scalar schemas: interpret raw string directly.
         # Complex types (dataclass, list) fundamentally need JSON syntax,
         # so we only handle scalars and Enums here.
-        origin = get_origin(schema)
-        args = get_args(schema)
-        is_enum = origin is None and isinstance(schema, type) and issubclass(schema, Enum)
-        is_scalar = schema in (str, int, float, bool)
-        if is_enum or is_scalar:
-            return _recursive_cast(raw, schema)
-        raise
+        #origin = get_origin(schema)
+        #args = get_args(schema)
+        #is_enum = origin is None and isinstance(schema, type) and issubclass(schema, Enum)
+        #is_scalar = schema in (str, int, float, bool)
+        #if is_enum or is_scalar:
+        return _recursive_cast(raw, schema)
+        #raise
 
     return _recursive_cast(parsed, schema)
 

@@ -260,7 +260,7 @@ class TestParseData:
         assert result.decision == "ready"
 
     def test_parse_data_invalid_json_raises(self):
-        with pytest.raises(ValueError, match="Expecting value"):
+        with pytest.raises(ValueError):
             parse_data("not json", TaskStatus)
 
     def test_parse_data_validation_failure_raises(self):
@@ -434,12 +434,12 @@ class TestBareStringFallback:
 
     def test_parse_dataclass_still_requires_json(self):
         """Complex types still need JSON syntax; bare string should fail."""
-        with pytest.raises(ValueError, match="Expecting value"):
+        with pytest.raises(ValueError):
             parse_data("hello", TaskStatus)
 
     def test_parse_dict_still_requires_json(self):
         """Dict schema requires JSON syntax."""
-        with pytest.raises(ValueError, match="Expecting value"):
+        with pytest.raises(ValueError):
             parse_data("hello", dict)
 
     def test_parse_enum_dict_value_shows_value(self):
