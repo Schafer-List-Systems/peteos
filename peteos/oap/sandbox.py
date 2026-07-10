@@ -169,7 +169,7 @@ def sandbox_compile(
     """
     # Validate syntax up front before sandboxing.
     try:
-        compile(code, "<persisted>", "exec")
+        compile(code, "<defined>", "exec")
     except SyntaxError as e:
         return f"Error: {type(e).__name__}: {e}"
 

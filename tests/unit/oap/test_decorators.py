@@ -53,7 +53,7 @@ class TestAgenticObjectDecorator:
             "import_aliases": {},
             "invoke_sub_agents": False,
             "allow_code_execution": False,
-            "persist_functions": False,
+            "define_functions": False,
             "role": None,
         }
 
@@ -71,7 +71,7 @@ class TestAgenticObjectDecorator:
             "import_aliases": {},
             "invoke_sub_agents": True,
             "allow_code_execution": True,
-            "persist_functions": False,
+            "define_functions": False,
             "role": None,
         }
 
@@ -85,7 +85,7 @@ class TestAgenticObjectDecorator:
             "import_aliases": {},
             "invoke_sub_agents": False,
             "allow_code_execution": False,
-            "persist_functions": False,
+            "define_functions": False,
             "role": "custom_role",
         }
 

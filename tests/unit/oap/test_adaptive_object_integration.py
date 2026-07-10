@@ -1,6 +1,6 @@
 """Tests for AdaptiveObject tool definitions in materialized messages.
 
-Verifies that persisted functions appear correctly in the ToolDefinitionsMessage
+Verifies that defined functions appear correctly in the ToolDefinitionsMessage
 that the chatbot receives after session.materialize().
 """
 
@@ -120,7 +120,7 @@ class TestToolDefsAfterMaterialize:
     """Verify tool definitions are correct after session.materialize()."""
 
     def test_initial_tools_visible_after_materialize(self):
-        """First materialize should include persist_function, remove_tool, and static add."""
+        """First materialize should include define_function, remove_function, and static add."""
         obj = AdaptiveTestObj()
         session, _, _ = _make_session_with_agent(obj)
 
@@ -128,14 +128,14 @@ class TestToolDefsAfterMaterialize:
         content = session.active_context.tool_definitions_message.content
         tool_names = [t.name for t in content if t.type == "tool"]
 
-        assert "persist_function" in tool_names
-        assert "remove_tool" in tool_names
+        assert "define_function" in tool_names
+        assert "remove_function" in tool_names
         assert "add" in tool_names
 
-    def test_persisted_function_visible_after_materialize(self):
-        """After persist_function, the new tool should appear in tool defs."""
+    def test_defined_function_visible_after_materialize(self):
+        """After define_function, the new tool should appear in tool defs."""
         obj = AdaptiveTestObj()
-        obj.persist_function(
+        obj.define_function(
             "def square(x: int) -> int:\n    return x * x",
             "Square a number",
         )
@@ -146,17 +146,17 @@ class TestToolDefsAfterMaterialize:
         tool_names = [t.name for t in content if t.type == "tool"]
 
         assert "square" in tool_names
-        assert "persist_function" in tool_names
+        assert "define_function" in tool_names
         assert "add" in tool_names
 
     def test_removed_tool_disappears_after_materialize(self):
-        """After remove_tool, the removed tool should be gone from tool defs."""
+        """After remove_function, the removed tool should be gone from tool defs."""
         obj = AdaptiveTestObj()
-        obj.persist_function(
+        obj.define_function(
             "def triple(x: int) -> int:\n    return x * 3",
             "Triple a number",
         )
-        obj.remove_tool("triple")
+        obj.remove_function("triple")
         session, _, _ = _make_session_with_agent(obj)
 
         session.materialize()
@@ -164,13 +164,13 @@ class TestToolDefsAfterMaterialize:
         tool_names = [t.name for t in content if t.type == "tool"]
 
         assert "triple" not in tool_names
-        assert "persist_function" in tool_names
+        assert "define_function" in tool_names
         assert "add" in tool_names
 
-    def test_persist_then_remove_and_verify(self):
-        """Persist, materialize (visible), remove, materialize (gone)."""
+    def test_define_then_remove_and_verify(self):
+        """Define, materialize (visible), remove, materialize (gone)."""
         obj = AdaptiveTestObj()
-        obj.persist_function(
+        obj.define_function(
             "def double(x: int) -> int:\n    return x * 2",
             "Double a number",
         )
@@ -181,13 +181,13 @@ class TestToolDefsAfterMaterialize:
         tool_names_before = [t.name for t in content if t.type == "tool"]
         assert "double" in tool_names_before
 
-        obj.remove_tool("double")
+        obj.remove_function("double")
         session.materialize()
         content = session.active_context.tool_definitions_message.content
         tool_names_after = [t.name for t in content if t.type == "tool"]
 
         assert "double" not in tool_names_after
-        assert "persist_function" in tool_names_after
+        assert "define_function" in tool_names_after
 
 
 class TestMockChatBotCapturesToolDefs:
@@ -207,12 +207,12 @@ class TestMockChatBotCapturesToolDefs:
         await bot.send_context(session, None, None)
         tools = bot.captured_tools_at_step(0)
 
-        assert "persist_function" in tools
-        assert "remove_tool" in tools
+        assert "define_function" in tools
+        assert "remove_function" in tools
         assert "add" in tools
 
     async def test_mock_captures_updated_tool_defs_after_persist(self):
-        """After persist_function, second send_context should capture the new tool."""
+        """After define_function, second send_context should capture the new tool."""
         obj = AdaptiveTestObj()
         bot = AdaptiveMockChatBot([
             _make_message("assistant", [ContentPart.create_text("Step 1")]),
@@ -225,16 +225,16 @@ class TestMockChatBotCapturesToolDefs:
         session.materialize()
         await bot.send_context(session, None, None)
         tools_0 = bot.captured_tools_at_step(0)
-        assert "persist_function" in tools_0
+        assert "define_function" in tools_0
 
         # Step 2: persist and re-materialize
-        obj.persist_function("def triple(x: int) -> int:\n    return x * 3", "Triple a number")
+        obj.define_function("def triple(x: int) -> int:\n    return x * 3", "Triple a number")
         session.materialize()
         await bot.send_context(session, None, None)
         tools_1 = bot.captured_tools_at_step(1)
 
         assert "triple" in tools_1
-        assert "persist_function" in tools_1
+        assert "define_function" in tools_1
         assert "add" in tools_1
 
 
@@ -244,7 +244,7 @@ class TestFullLifecycle:
     def test_persist_then_call_via_toolmanager(self):
         """Persist a function and call it through the ToolManager."""
         obj = AdaptiveTestObj()
-        result = obj.persist_function(
+        result = obj.define_function(
             "def multiply(a: int, b: int) -> int:\n    return a * b",
             "Multiply two numbers",
         )
@@ -255,5 +255,5 @@ class TestFullLifecycle:
         result = tool.execute(a=6, b=7)
         assert result == "42"
 
-        obj.remove_tool("multiply")
+        obj.remove_function("multiply")
         assert obj._oap_tool_manager.get_tool("multiply") is None

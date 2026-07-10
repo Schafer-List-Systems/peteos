@@ -48,7 +48,7 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     allow_code_execution = False
     allow_media_access = False
     invoke_sub_agents = False
-    persist_functions = False
+    define_functions = False
     for c in cls.__mro__:
         if c in (AgenticObject, object):
             continue
@@ -59,14 +59,14 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
             allow_code_execution |= cfg.get("allow_code_execution", False)
             allow_media_access |= cfg.get("allow_media_access", False)
             invoke_sub_agents |= cfg.get("invoke_sub_agents", False)
-            persist_functions |= cfg.get("persist_functions", False)
+            define_functions |= cfg.get("define_functions", False)
             imports.update(cfg.get("imports", []))
             import_aliases.update(cfg.get("import_aliases", {}))
     return {
         "allow_code_execution": allow_code_execution,
         "allow_media_access": allow_media_access,
         "invoke_sub_agents": invoke_sub_agents,
-        "persist_functions": persist_functions,
+        "define_functions": define_functions,
         "imports": list(imports),
         "import_aliases": import_aliases,
     }
