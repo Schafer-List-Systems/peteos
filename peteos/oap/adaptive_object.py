@@ -19,7 +19,7 @@ class AdaptiveObject(AgenticObject):
     Create and write reusable Python functions for recurring computations using `define_function`!
     Address its description at yourself.
     Describe the parameters and return values including their types in the docstring!
-    It will immediately become available for you as tool after being defined.
+    It will immediately become available for you as tool and as a member function of the `self` object after being defined.
     Use these functions as tool directly or from within python functions.
     Use `remove_function` to unregister functions you previously registered.
     You cannot remove built-in/static tools.

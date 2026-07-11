@@ -339,3 +339,102 @@ class TestAutoApproveToolsInstanceOwnership:
         # Static tools should also be present (the baseline copy)
         assert "add" in runner2._execution_environment.auto_approve_tools
         assert "define_function" in runner2._execution_environment.auto_approve_tools
+
+    def test_python_exec_sees_dynamically_defined_function_as_bare_name(self):
+        """A function defined via define_function is callable as a bare name in python_exec.
+
+        This covers the bug observed in the debug log: after the agent defines a
+        function with define_function, it calls python_exec with code that
+        references the defined function as a bare name
+        (compute_sequence_element(i)). The call fails with
+
+            NameError: name 'compute_sequence_element' is not defined
+
+        because the proxy is only available as self.compute_sequence_element on
+        SandboxSelf, not in the sandbox globals dict.
+        """
+        obj = SimpleAdaptiveObject()
+        runner = _mock_runner()
+
+        # Step 1: define a function
+        code = (
+            "def compute_sequence_element(n: int) -> int:\n"
+            "    if n == 0:\n"
+            "        return 0\n"
+            "    if n == 1:\n"
+            "        return 1\n"
+            "    a, b = 0, 1\n"
+            "    for _ in range(2, n + 1):\n"
+            "        a, b = b, a**2 + b**2\n"
+            "    return b\n"
+        )
+        result = obj.define_function(code, "n-th element of the sequence", runner)
+        assert result == "OK: registered as 'compute_sequence_element'"
+
+        # Step 2: call it from python_exec as a bare name (this is what the agent writes)
+        # The agent does NOT write self.compute_sequence_element — it writes the bare name
+        runner.state = MagicMock()
+        runner.state.create = MagicMock()
+        runner.state.get.return_value = None
+        exec_code = (
+            "def func(self):\n"
+            "    results = [self.compute_sequence_element(i) for i in range(6)]\n"
+            "    return self.produce_output(results[5])\n"
+        )
+        result = obj._python_exec(exec_code, runner=runner)
+        # After the fix, this should succeed and return "OK" (produce_output sets state)
+        assert result == "OK"
+        # Verify the produced value (sequence: 0, 1, 1, 2, 5, 29)
+        runner.state.create.assert_called_once()
+        data = runner.state.create.call_args[0][1]
+        assert data == 29
+
+    def test_python_exec_sees_dynamically_defined_function_as_bare_name(self):
+        """A function defined via define_function is callable as a bare name in python_exec.
+
+        This verifies the bug where the agent defines a function with define_function,
+        then immediately calls python_exec with code that references the function as
+        a bare name (compute_sequence_element(i)). The call fails with
+        "name 'compute_sequence_element' is not defined" because the proxy is only
+        available as self.compute_sequence_element on SandboxSelf, not in the
+        sandbox's global namespace.
+
+        The agent cannot be expected to write self.compute_sequence_element(i)
+        when it just learned the function is available as a tool — it should
+        be callable as a bare name from within python_exec code.
+        """
+        obj = SimpleAdaptiveObject()
+        runner = _mock_runner()
+
+        # Step 1: define a function
+        code = (
+            "def compute_sequence_element(n: int) -> int:\n"
+            "    if n == 0:\n"
+            "        return 0\n"
+            "    if n == 1:\n"
+            "        return 1\n"
+            "    a, b = 0, 1\n"
+            "    for _ in range(2, n + 1):\n"
+            "        a, b = b, a**2 + b**2\n"
+            "    return b\n"
+        )
+        result = obj.define_function(code, "n-th element of the sequence", runner)
+        assert result == "OK: registered as 'compute_sequence_element'"
+
+        # Step 2: call it from python_exec as a bare name (this is what the agent writes)
+        # The agent does NOT write self.compute_sequence_element — it writes the bare name
+        runner.state = MagicMock()
+        runner.state.create = MagicMock()
+        runner.state.get.return_value = None
+        exec_code = (
+            "def func(self):\n"
+            "    results = [self.compute_sequence_element(i) for i in range(6)]\n"
+            "    return self.produce_output(results[5])\n"
+        )
+        result = obj._python_exec(exec_code, runner=runner)
+        # After the fix, this should succeed and return "OK" (produce_output sets state)
+        assert result == "OK"
+        # Verify the produced value (sequence: 0, 1, 1, 2, 5, 29)
+        runner.state.create.assert_called_once()
+        data = runner.state.create.call_args[0][1]
+        assert data == 29
