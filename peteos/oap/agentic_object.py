@@ -95,6 +95,7 @@ class AgenticObject:
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
         self._oap_thread_store: dict[str, str] = {}
+        self._oap_auto_approve_tools: list[str] = []
         self._register_tools()
         self._register_output_schema_hook()
         self._register_sandbox_hook()
@@ -108,7 +109,7 @@ class AgenticObject:
         """Create an Agent wired to this object's role and tool_manager."""
         # Auto-approve all registered tools so they pass Runner.add_tool_call()
         for t in self._oap_tool_manager.get_tool_list():
-            self._oap_role.auto_approve_tools.append(t.name)
+            self._oap_auto_approve_tools.append(t.name)
         return Agent(
             self._oap_role,
             self._oap_tool_manager,
@@ -464,6 +465,7 @@ class AgenticObject:
 
     async def _start_session(self, session: Session) -> Runner:
         runner = Runner(self._oap_agent, session.uuid)
+        runner._execution_environment.auto_approve_tools = list(self._oap_auto_approve_tools)
         await runner.start()
         session.is_active = True
         return runner

@@ -83,7 +83,7 @@ class TestPythonExecWithDynamicFunction:
             "        a, b = b, b**2 + a**2\n"
             "    return b\n"
         )
-        result = obj.define_function(code, "n-th element of the sequence")
+        result = obj.define_function(code, "n-th element of the sequence", mock_runner)
         assert result == "OK: registered as 'compute_sequence_element'"
         assert "compute_sequence_element" in obj._oap_define_functions
 
@@ -104,8 +104,8 @@ class TestPythonExecWithDynamicFunction:
         """Remove a function and verify it is no longer callable from python_exec."""
         obj = AdaptiveCodeExec()
 
-        obj.define_function("def double(x: int) -> int:\n    return x * 2", "Double a number")
-        obj.remove_function("double")
+        obj.define_function("def double(x: int) -> int:\n    return x * 2", "Double a number", mock_runner)
+        obj.remove_function("double", mock_runner)
 
         exec_code = (
             "def func(self):\n"

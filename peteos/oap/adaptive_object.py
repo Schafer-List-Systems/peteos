@@ -95,7 +95,7 @@ class AdaptiveObject(AgenticObject):
         return proxy
 
     @tool
-    def define_function(self, code: str, docstring: str, runner: "Runner | None" = None) -> str:
+    def define_function(self, code: str, docstring: str, runner: "Runner | None") -> str:
         """Define a Python function as a new tool.
 
         Pass the full function definition as a string and a docstring of what the function does including its arguments and return type.
@@ -130,16 +130,19 @@ class AdaptiveObject(AgenticObject):
         # sandbox with SandboxSelf at call time.
         proxy = self._build_defined_tool_proxy(func_name)
         proxy._tool_name = func_name
-        self.__dict__[func_name] = proxy
         defined_tool = Tool(name=func_name, description=docstring, func=proxy, parameters=parameters)
+
+        self.__dict__[func_name] = proxy
         self._oap_tool_manager.register_tool(defined_tool)
-        if runner is not None:
-            runner._execution_environment.auto_approve_tools.append(func_name)
+
+        # Auto-approve tool for this AND for future sessions 
+        self._oap_auto_approve_tools.append(func_name)
+        runner._execution_environment.auto_approve_tools.append(func_name)
 
         return f"OK: registered as '{func_name}'"
 
     @tool
-    def remove_function(self, name: str, runner: "Runner | None" = None) -> str:
+    def remove_function(self, name: str, runner: "Runner | None") -> str:
         """Remove a defined tool.
 
         Args:
@@ -152,6 +155,8 @@ class AdaptiveObject(AgenticObject):
         del self._oap_define_functions[name]
         self._oap_tool_manager._tools.pop(name, None)
         self.__dict__.pop(name, None)
-        if runner is not None:
-            runner._execution_environment.auto_approve_tools.remove(name)
+
+        self._oap_auto_approve_tools.remove(name)
+        runner._execution_environment.auto_approve_tools.remove(name)
+
         return "OK"

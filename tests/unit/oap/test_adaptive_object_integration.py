@@ -7,6 +7,7 @@ that the chatbot receives after session.materialize().
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,6 +17,13 @@ from peteos.conversation.session import Session
 from peteos.persona.agent import Agent
 from peteos.persona.role import Role
 from peteos.oap import AdaptiveObject, agentic_object, tool
+
+
+def _mock_runner():
+    runner = MagicMock()
+    runner._execution_environment = MagicMock()
+    runner._execution_environment.auto_approve_tools = []
+    return runner
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +146,7 @@ class TestToolDefsAfterMaterialize:
         obj.define_function(
             "def square(x: int) -> int:\n    return x * x",
             "Square a number",
+            _mock_runner(),
         )
         session, _, _ = _make_session_with_agent(obj)
 
@@ -152,11 +161,13 @@ class TestToolDefsAfterMaterialize:
     def test_removed_tool_disappears_after_materialize(self):
         """After remove_function, the removed tool should be gone from tool defs."""
         obj = AdaptiveTestObj()
+        runner = _mock_runner()
         obj.define_function(
             "def triple(x: int) -> int:\n    return x * 3",
             "Triple a number",
+            runner,
         )
-        obj.remove_function("triple")
+        obj.remove_function("triple", runner)
         session, _, _ = _make_session_with_agent(obj)
 
         session.materialize()
@@ -170,9 +181,11 @@ class TestToolDefsAfterMaterialize:
     def test_define_then_remove_and_verify(self):
         """Define, materialize (visible), remove, materialize (gone)."""
         obj = AdaptiveTestObj()
+        runner = _mock_runner()
         obj.define_function(
             "def double(x: int) -> int:\n    return x * 2",
             "Double a number",
+            runner,
         )
 
         session, _, _ = _make_session_with_agent(obj)
@@ -181,7 +194,7 @@ class TestToolDefsAfterMaterialize:
         tool_names_before = [t.name for t in content if t.type == "tool"]
         assert "double" in tool_names_before
 
-        obj.remove_function("double")
+        obj.remove_function("double", runner)
         session.materialize()
         content = session.active_context.tool_definitions_message.content
         tool_names_after = [t.name for t in content if t.type == "tool"]
@@ -228,7 +241,11 @@ class TestMockChatBotCapturesToolDefs:
         assert "define_function" in tools_0
 
         # Step 2: persist and re-materialize
-        obj.define_function("def triple(x: int) -> int:\n    return x * 3", "Triple a number")
+        obj.define_function(
+            "def triple(x: int) -> int:\n    return x * 3",
+            "Triple a number",
+            _mock_runner(),
+        )
         session.materialize()
         await bot.send_context(session, None, None)
         tools_1 = bot.captured_tools_at_step(1)
@@ -244,9 +261,11 @@ class TestFullLifecycle:
     def test_persist_then_call_via_toolmanager(self):
         """Persist a function and call it through the ToolManager."""
         obj = AdaptiveTestObj()
+        runner = _mock_runner()
         result = obj.define_function(
             "def multiply(a: int, b: int) -> int:\n    return a * b",
             "Multiply two numbers",
+            runner,
         )
         assert result == "OK: registered as 'multiply'"
 
@@ -255,5 +274,5 @@ class TestFullLifecycle:
         result = tool.execute(a=6, b=7)
         assert result == 42
 
-        obj.remove_function("multiply")
+        obj.remove_function("multiply", runner)
         assert obj._oap_tool_manager.get_tool("multiply") is None
