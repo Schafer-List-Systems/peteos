@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from typing import Any, Callable
 
 # Safe builtins: pure functions for data manipulation and output.
@@ -178,6 +179,10 @@ def sandbox_compile(
     Raises:
         ValueError: On syntax error or exec failure.
     """
+    # Remove common leading whitespace so agent-provided code works
+    # regardless of indentation level.
+    code = textwrap.dedent(code)
+
     # Validate syntax up front before sandboxing.
     try:
         compile(code, "<defined>", "exec")
