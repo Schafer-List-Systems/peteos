@@ -2,7 +2,7 @@
 
 import pytest
 
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 from peteos.oap.error import Error
 from peteos.persona.toolmanager import ToolManager
@@ -223,10 +223,10 @@ class TestDiamondConfigCollection:
 
     def test_python_exec_sandbox_has_combined_imports(self):
         d = DiamondChild()
-        result = d._python_exec("def func(self):\n    x = numpy.array([1, 2, 3]); cv2.__name__\n    return len(x)")
+        result = d._python_exec("def func(self):\n    x = numpy.array([1, 2, 3]); cv2.__name__\n    return len(x)", runner=None)
         assert result == 3
 
     def test_python_exec_sandbox_has_import_alias(self):
         d = DiamondChild()
-        result = d._python_exec("def func(self):\n    x = np.array([1, 2, 3])\n    return len(x)")
+        result = d._python_exec("def func(self):\n    x = np.array([1, 2, 3])\n    return len(x)", runner=None)
         assert result == 3

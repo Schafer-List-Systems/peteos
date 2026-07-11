@@ -8,26 +8,33 @@ from typing import Type
 from peteos.persona.role import Role
 
 
+def _is_oap_object(cls: type) -> bool:
+    """Check whether a class directly inherits from AgenticObject or AdaptiveObject.
+
+    Returns True for any class whose direct bases include AgenticObject or AdaptiveObject.
+    These are the classes in the MRO whose docstrings and config should be collected.
+    """
+    from peteos.oap.agentic_object import AgenticObject
+    from peteos.oap.adaptive_object import AdaptiveObject
+    return AgenticObject in cls.__bases__ or AdaptiveObject in cls.__bases__
+
+
 def _build_system_prompt(cls: type) -> str:
     """Build the system prompt for a concrete agentic object class.
 
-    Collects docstrings from classes in the MRO that directly inherit
-    from AgenticObject (concrete agentic objects), ordered from
-    most-derived to base. Prepends standard behaviour directives.
+    Collects docstrings from classes in the MRO that have _oap_config
+    (set by @agentic_object decorator), ordered from most-derived to base.
+    Prepends standard behaviour directives.
     """
-    from peteos.oap.base import AgenticObject
-
     class_name = cls.__name__
 
     doc_parts: list[str] = []
-    for parent in cls.__mro__:
-        if parent in (AgenticObject, object):
+    for c in cls.__mro__:
+        if not _is_oap_object(c):
             continue
-        if AgenticObject not in parent.__bases__:
-            continue
-        parent_doc = (parent.__doc__ or "").strip()
-        if parent_doc:
-            doc_parts.append(parent_doc)
+        c_doc = (c.__doc__ or "").strip()
+        if c_doc:
+            doc_parts.append(c_doc)
 
     if doc_parts:
         return "\n\n".join(doc_parts)

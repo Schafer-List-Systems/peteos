@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import textwrap
+from typing import Any, Callable
 
 # Safe builtins: pure functions for data manipulation and output.
 # No file I/O, no network, no type() metaclass tricks, no exec/eval.
@@ -70,21 +71,24 @@ class SandboxSelf:
             real_self: The AgenticObject instance whose methods to proxy.
         """
         registered: set[str] = set()
+
+        def _register(name: str, method: Callable) -> None:
+            """Register a tool/sandbox method if not already registered."""
+            if name in registered:
+                return
+            sandbox_name = getattr(method, "_tool_name", None) or getattr(method, "_sandbox_name", None)
+            if sandbox_name is None:
+                return
+            registered.add(name)
+            setattr(sandbox_self, sandbox_name, getattr(real_self, name))
+
         for cls in real_self.__class__.__mro__:
             for method_name, method in cls.__dict__.items():
-                if not callable(method):
-                    continue
-                if method_name in registered:
-                    continue
-                if hasattr(method, "_tool_name"):
-                    sandbox_name = method._tool_name
-                elif hasattr(method, "_sandbox_name"):
-                    sandbox_name = method._sandbox_name
-                else:
-                    continue
-                registered.add(method_name)
-                proxy_fn = getattr(real_self, method_name)
-                setattr(sandbox_self, sandbox_name, proxy_fn)
+                if callable(method):
+                    _register(method_name, method)
+        for method_name, method in real_self.__dict__.items():
+            if callable(method):
+                _register(method_name, method)
 
 
 def build_sandbox_description(imports: list[object] | None = None) -> str:
@@ -148,3 +152,127 @@ def _restricted_import(name: str, registry: dict[str, Any]) -> Any:
     if resolved is None:
         raise ImportError(f"No module named {name!r}")
     return resolved
+
+
+def sandbox_compile(
+    config: dict[str, Any],
+    code: str,
+    sandbox_globals: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[Any]]:
+    """Exec *code* in a sandbox and return the globals plus newly defined callables.
+
+    This is a pure compilation step — it does not filter by signature or
+    invoke the function. Callers decide which of the returned callables to
+    use and how to invoke them.
+
+    Args:
+        config: MRO-merged OAP config dict.
+        code: Python code to exec.
+        sandbox_globals: Optional pre-existing globals dict to compile into.
+            If provided, the code executes in this namespace (e.g. to share
+            definitions across multiple compiles). If omitted, a fresh
+            sandbox globals dict is created.
+
+    Returns:
+        A (globals, new_callables) tuple on success.
+
+    Raises:
+        ValueError: On syntax error or exec failure.
+    """
+    # Remove common leading whitespace so agent-provided code works
+    # regardless of indentation level.
+    code = textwrap.dedent(code)
+
+    # Validate syntax up front before sandboxing.
+    try:
+        compile(code, "<defined>", "exec")
+    except SyntaxError as e:
+        raise ValueError(f"SyntaxError: {e}")
+
+    if sandbox_globals is None:
+        sandbox_globals = create_sandbox_globals(config)
+    original_keys = set(sandbox_globals.keys())
+
+    try:
+        exec(code, sandbox_globals)
+    except Exception as e:
+        raise ValueError(f"{type(e).__name__}: {e}")
+
+    new_callables: list[Any] = []
+    for k in set(sandbox_globals.keys()) - original_keys:
+        obj = sandbox_globals[k]
+        if callable(obj) and hasattr(obj, "__code__"):
+            new_callables.append(obj)
+
+    return sandbox_globals, new_callables
+
+
+def filter_callables_by_args(
+    callables: list[Callable],
+    *args: Any,
+    **kwargs: Any,
+) -> list[Callable]:
+    """Filter *callables* to those compatible with the given arguments.
+
+    Returns functions with ``argcount == n`` (where *n* is the total number
+    of positional + keyword arguments), plus functions with ``argcount == n``
+    ``+ 1`` where the sole extra parameter is named ``"self"`` (matched for
+    SandboxSelf dispatch).
+
+    Args:
+        callables: Callables from ``sandbox_compile``.
+        *args: Positional arguments that will be passed to the function.
+        **kwargs: Keyword arguments that will be passed to the function.
+
+    Returns:
+        Matching callables.
+    """
+    n = len(args) + len(kwargs)
+    matching: list[Callable] = []
+    for func in callables:
+        try:
+            argcount = func.__code__.co_argcount
+        except AttributeError:
+            continue
+        if argcount == n:
+            matching.append(func)
+        elif argcount == n + 1 and func.__code__.co_varnames[0] == "self":
+            matching.append(func)
+    return matching
+
+
+def _compile_and_select(
+    config: dict[str, Any],
+    code: str,
+    *args: Any,
+    **kwargs: Any,
+) -> "Callable | str":
+    """Compile *code* in a sandbox, filter by *args/kwargs, and return the matching function.
+
+    This is the common pipeline of sandbox_compile → filter_callables_by_args →
+    single-match validation.  Returns the single matching function object, or
+    an error string.
+
+    Args:
+        config: MRO-merged OAP config dict.
+        code: Python code to exec.
+        *args: Positional arguments used to filter matching functions.
+        **kwargs: Keyword arguments used to filter matching functions.
+
+    Returns:
+        The matching function object on success, or an error string.
+    """
+    result = sandbox_compile(config, code)
+    if isinstance(result, str):
+        return result
+    sandbox_globals, new_callables = result
+
+    matching = filter_callables_by_args(new_callables, *args, **kwargs)
+    if len(matching) != 1:
+        raise ValueError(
+            f"expected exactly one new function. Found: {[m.__name__ for m in matching]}."
+        )
+
+    return matching[0]
+
+

@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import tool
 from peteos.utils import get_logger
 

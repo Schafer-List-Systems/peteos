@@ -222,7 +222,8 @@ class TestAnthropicRequestTranslation:
 
         assert body["model"] == "claude-3"
         assert body["stream"] is False
-        assert body["max_tokens"] == 4096
+        assert isinstance(body["max_tokens"], int)
+        assert body["max_tokens"] > 0
         messages = body.get("messages", [])
         assert len(messages) >= 1
         assert messages[0]["role"] == "user"

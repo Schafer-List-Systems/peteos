@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 from peteos.utils import get_logger
 

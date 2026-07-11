@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from peteos.chatbot.manager import ChatBotManager
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import agentic_object, tool
 
 
@@ -76,9 +76,6 @@ class HealthReport:
 async def main():
     #from peteos.utils.logger import setup_logging
     #setup_logging(level="DEBUG", debug=True)
-    args = sys.argv[1:] + [None] * 3
-    url, api_type, api_key = args[:3]
-    await ChatBotManager.add_backend("local", url, api_type=api_type, api_key=api_key)
 
     monitor = SystemHealthMonitor()
 

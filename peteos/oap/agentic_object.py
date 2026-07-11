@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import inspect
 import json
 import os
 import threading
 import time
-from dataclasses import dataclass, is_dataclass
+from dataclasses import is_dataclass
 from typing import Any, Callable
 
 from peteos.conversation import ContentPart, Message
@@ -18,7 +19,11 @@ from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.utils import get_logger
 from peteos.oap.error import Error
-from peteos.oap.sandbox import SandboxSelf, build_sandbox_description, create_sandbox_globals
+from peteos.oap.sandbox import (
+    SandboxSelf,
+    _compile_and_select,
+    build_sandbox_description,
+)
 
 from peteos.oap.decorators import tool
 from peteos.oap.agentic_registry import AgenticObjectRegistry
@@ -36,27 +41,32 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     diamond hierarchy so that a class D(B, C) where both B and C define
     @agentic_object with different imports gets all of them combined.
     """
+    from peteos.oap.agentic_registry import _is_oap_object
+
     imports: set[object] = set()
     import_aliases: dict[str, str] = {}
     allow_code_execution = False
     allow_media_access = False
     invoke_sub_agents = False
-    for parent in cls.__mro__:
-        if parent in (AgenticObject, object):
+    define_functions = False
+    for c in cls.__mro__:
+        if c in (AgenticObject, object):
             continue
-        if AgenticObject not in parent.__bases__:
+        if not _is_oap_object(c):
             continue
-        cfg = getattr(parent, "_oap_config", None)
+        cfg = getattr(c, "_oap_config", None)
         if cfg:
             allow_code_execution |= cfg.get("allow_code_execution", False)
             allow_media_access |= cfg.get("allow_media_access", False)
             invoke_sub_agents |= cfg.get("invoke_sub_agents", False)
+            define_functions |= cfg.get("define_functions", False)
             imports.update(cfg.get("imports", []))
             import_aliases.update(cfg.get("import_aliases", {}))
     return {
         "allow_code_execution": allow_code_execution,
         "allow_media_access": allow_media_access,
         "invoke_sub_agents": invoke_sub_agents,
+        "define_functions": define_functions,
         "imports": list(imports),
         "import_aliases": import_aliases,
     }
@@ -85,6 +95,7 @@ class AgenticObject:
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
         self._oap_thread_store: dict[str, str] = {}
+        self._oap_auto_approve_tools: list[str] = []
         self._register_tools()
         self._register_output_schema_hook()
         self._register_sandbox_hook()
@@ -98,7 +109,7 @@ class AgenticObject:
         """Create an Agent wired to this object's role and tool_manager."""
         # Auto-approve all registered tools so they pass Runner.add_tool_call()
         for t in self._oap_tool_manager.get_tool_list():
-            self._oap_role.auto_approve_tools.append(t.name)
+            self._oap_auto_approve_tools.append(t.name)
         return Agent(
             self._oap_role,
             self._oap_tool_manager,
@@ -191,97 +202,90 @@ class AgenticObject:
             )
         )
 
-    def _python_exec(self, function: str, runner: Runner | None = None) -> str:
+    def _python_exec(self, function: str, runner: Runner | None) -> str:
         """Protected tool: executes sandboxed Python code."""
         config = _collect_oap_config(self.__class__)
-        sandbox_globals = create_sandbox_globals(config)
-        original_keys = set(sandbox_globals.keys())
+        return self._call_sandboxed(config, function, runner=runner)
 
-        try:
-            # exec the code to let it define symbols in the sandbox namespace
-            exec(function, sandbox_globals)
-
-            # search for the newly defined function (must be exactly one)
-            new_keys = set(sandbox_globals.keys()) - original_keys
-            new_funcs: list[str] = []
-            for k in new_keys:
-                obj = sandbox_globals[k]
-                if not callable(obj) or not hasattr(obj, "__code__"):
-                    continue
-                try:
-                    argcount = obj.__code__.co_argcount
-                except AttributeError:
-                    continue
-                if argcount in (0, 1):
-                    if argcount == 1 and obj.__code__.co_varnames[0] != "self":
-                        continue
-                    new_funcs.append(k)
-            if len(new_funcs) != 1:
-                return (
-                    "Error: expected exactly one new function. "
-                    f"Found: {new_funcs}."
-                )
-            name = new_funcs[0]
-            function_obj = sandbox_globals[name]
-
-            # Create an empty SandboxSelf and populate it with closure-based
-            # proxies.  Each lambda captures real_self and runner in its scope,
-            # so sandboxed code has no way to reach them via introspection.
-            real_self = self
+    def _setup_sandbox_self(
+        self,
+        config: dict[str, Any],
+        runner: "Runner | None",
+        sandbox_self: SandboxSelf | None = None,
+    ) -> SandboxSelf:
+        """Create or populate a SandboxSelf with closures, invoke, and tool proxies."""
+        if sandbox_self is None:
             sandbox_self = SandboxSelf()
 
-            def _produce_output(data: Any) -> str:
-                return real_self._produce_output(data, runner=runner)
+        SandboxSelf.populate(sandbox_self, self)
 
-            def _produce_error(message: str) -> str:
-                return real_self._produce_error(message, runner=runner)
+        # Overwrite tool-proxied produce_output/produce_error with closures
+        # that capture the runner, so they actually get called with the right
+        # runner arg instead of the bound method that defaults to None.
+        def _produce_output(data: Any) -> str:
+            _logger.debug("_setup_sandbox_self: _produce_output wrapper called, runner=%s", runner)
+            return self._produce_output(data, runner=runner)  # type: ignore[arg-type]
 
-            setattr(sandbox_self, "produce_output", _produce_output)
-            setattr(sandbox_self, "produce_error", _produce_error)
+        def _produce_error(message: str) -> str:
+            return self._produce_error(message, runner=runner)  # type: ignore[arg-type]
 
-            # Conditionally attach invoke when sub-agent invocation is enabled
-            if config.get("invoke_sub_agents", False):
-                parent_ptid = runner.state.get("_persistent_thread_id") if runner else None
+        setattr(sandbox_self, "produce_output", _produce_output)
+        setattr(sandbox_self, "produce_error", _produce_error)
 
-                def _invoke(
-                    target,
-                    prompt,
-                    output_schema=None,
-                    persistent=False,
-                    timeout=None,
-                ):
-                    ptid = parent_ptid if persistent else None
-                    parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
+        if config.get("invoke_sub_agents", False):
+            parent_ptid = runner.state.get("_persistent_thread_id") if runner else None
 
-                    def _run():
-                        _loop = asyncio.new_event_loop()
-                        try:
-                            return _loop.run_until_complete(
-                                target.invoke_agent(
-                                    prompt=prompt,
-                                    output_schema=output_schema,
-                                    timeout=timeout,
-                                    persistent_thread_id=ptid,
-                                    hooks=parent_hooks,
-                                )
+            def _invoke(
+                target,
+                prompt,
+                output_schema=None,
+                persistent=False,
+                timeout=None,
+            ):
+                ptid = parent_ptid if persistent else None
+                parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
+
+                def _run():
+                    _loop = asyncio.new_event_loop()
+                    try:
+                        return _loop.run_until_complete(
+                            target.invoke_agent(
+                                prompt=prompt,
+                                output_schema=output_schema,
+                                timeout=timeout,
+                                persistent_thread_id=ptid,
+                                hooks=parent_hooks,
                             )
-                        finally:
-                            _loop.close()
+                        )
+                    finally:
+                        _loop.close()
 
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        return executor.submit(_run).result()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    return executor.submit(_run).result()
 
-                setattr(sandbox_self, "invoke", _invoke)
+            setattr(sandbox_self, "invoke", _invoke)
 
-            # now populate the all tool-decorated and sandbox-decorated member functions
-            SandboxSelf.populate(sandbox_self, real_self)
+        return sandbox_self
 
-            try:
-                return function_obj(sandbox_self) if function_obj.__code__.co_argcount == 1 else function_obj()
-            finally:
-                pass
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+    def _call_sandboxed(
+        self,
+        config: dict[str, Any],
+        code: str,
+        runner: "Runner | None",
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        """Compile, setup sandbox, and invoke a sandboxed function.
+
+        Returns the result as a string, or an error message.
+        """
+        function_obj = _compile_and_select(config, code, *args, **kwargs)
+        sandbox_self = self._setup_sandbox_self(config, runner)
+        return (
+            function_obj(sandbox_self, *args, **kwargs)
+            if function_obj.__code__.co_argcount == len(args) + len(kwargs) + 1
+            else function_obj(*args, **kwargs)
+        )
 
     @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
     def _produce_output(self, data: str, runner: "Runner | None" = None) -> str:
@@ -461,6 +465,7 @@ class AgenticObject:
 
     async def _start_session(self, session: Session) -> Runner:
         runner = Runner(self._oap_agent, session.uuid)
+        runner._execution_environment.auto_approve_tools = list(self._oap_auto_approve_tools)
         await runner.start()
         session.is_active = True
         return runner
@@ -698,3 +703,4 @@ class AgenticObject:
                 except Exception:
                     pass
             self.release()
+

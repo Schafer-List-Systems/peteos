@@ -49,6 +49,7 @@ def agentic_object(
     import_aliases: dict[str, str] | None = None,
     invoke_sub_agents: bool = False,
     allow_code_execution: bool = False,
+    define_functions: bool = False,
     role: str | None = None,
 ) -> Callable[[type], type]:
     """Configure agent capabilities per AgenticObject subclass."""
@@ -59,6 +60,7 @@ def agentic_object(
             "import_aliases": import_aliases or {},
             "invoke_sub_agents": invoke_sub_agents,
             "allow_code_execution": allow_code_execution,
+            "define_functions": define_functions,
             "role": role,
         }
         return cls

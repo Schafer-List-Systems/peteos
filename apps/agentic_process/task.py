@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from peteos.oap import Error
 from peteos.utils.logger import get_logger
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import tool
 from .edge import Edge
 

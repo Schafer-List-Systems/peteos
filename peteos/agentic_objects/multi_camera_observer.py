@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import cv2
 
 from peteos.agentic_objects.camera_driver import CameraDriver
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import tool
 
 if TYPE_CHECKING:

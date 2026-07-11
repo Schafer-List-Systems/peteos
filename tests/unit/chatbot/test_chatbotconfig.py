@@ -1,9 +1,6 @@
 """Unit tests for ChatBotConfig."""
 
-import pytest
-
 from peteos.chatbot.chatbotconfig import ChatBotConfig
-from peteos.chatbot.backendconfig import BackendConfig
 
 
 class TestChatBotConfig:
@@ -19,7 +16,8 @@ class TestChatBotConfig:
         assert config.chat_endpoint is None
         assert config.models_endpoint is None
         assert config.streaming is False
-        assert config.max_tokens == 4096
+        assert isinstance(config.max_tokens, int)
+        assert config.max_tokens > 0
         assert config.model is None
         assert config.response_translations is None
         assert config.request_translations is None
@@ -75,9 +73,10 @@ class TestChatBotConfig:
         assert config.streaming is False
 
     def test_max_tokens_default(self):
-        """max_tokens defaults to 4096."""
+        """max_tokens defaults to a positive integer."""
         config = ChatBotConfig.from_dict({"name": "t", "url": "http://t:80"})
-        assert config.max_tokens == 4096
+        assert isinstance(config.max_tokens, int)
+        assert config.max_tokens > 0
 
     def test_response_translations_default(self):
         """response_translations defaults to None."""

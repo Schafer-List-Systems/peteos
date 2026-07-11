@@ -364,6 +364,7 @@ class Runner(ActiveClass):
                 break
             if not success:
                 await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, result_str, False)
+                foreground.deny_all_remaining(f"Tool '{tool_name}' execution failed")
                 _logger.debug("[runner] Tool %s failed", tool_name)
                 break
             await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
@@ -372,6 +373,18 @@ class Runner(ActiveClass):
         if foreground.is_done():
             self._execution_environment.close_foreground_group()
             return await self._append_result_message(foreground)
+
+        # No reviewed calls — log the first un-reviewed tool call for debugging
+        if foreground.records:
+            first = foreground.records[0]
+            args_preview = first.tool_call.arguments[:200] if first.tool_call.arguments else ""
+            _logger.debug(
+                "[runner] _handle_tool_group: "
+                "approval_status=%s execution_status=%s tool=%s call_id=%s args=%s",
+                first.approval_status,
+                first.execution_status,
+                first.tool_call.name, first.tool_call_id, args_preview,
+            )
 
         return False
 

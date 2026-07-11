@@ -12,7 +12,7 @@ import logging
 import uuid as uuid_mod
 
 from apps.agentic_process.process import Process
-from peteos.oap.base import AgenticObject
+from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import tool
 
 from apps.agentic_process._types import TaskState, ProcessState
