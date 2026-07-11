@@ -6,12 +6,17 @@ that the chatbot receives after session.materialize().
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
 
-from peteos.chatbot import ChatBotManager, SimpleMockChatBot
+from peteos.chatbot import (
+    ChatBotManager,
+    SimpleMockBackendProvider,
+    SimpleMockChatBot,
+)
 from peteos.conversation.message import ContentPart, Message
 from peteos.conversation.session import Session
 from peteos.persona.agent import Agent
@@ -89,7 +94,7 @@ class AdaptiveMockChatBot(SimpleMockChatBot):
 # ---------------------------------------------------------------------------
 
 
-@agentic_object()
+@agentic_object(allow_code_execution=True)
 class AdaptiveTestObj(AdaptiveObject):
     """AdaptiveObject with a static tool for collision testing."""
 
@@ -253,6 +258,47 @@ class TestMockChatBotCapturesToolDefs:
         assert "triple" in tools_1
         assert "define_function" in tools_1
         assert "add" in tools_1
+
+
+class TestSingleStepDefineAndExec:
+    """Unit test: one mock message with define_function + python_exec in the same step."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_manager(self):
+        ChatBotManager.reset()
+        to_remove = [k for k in ChatBotManager._providers if k.startswith("simple-mock")]
+        for api_type in to_remove:
+            ChatBotManager.unregister_provider(api_type)
+
+    @pytest.mark.asyncio
+    async def test_define_and_call_in_same_message(self):
+        """invoke_agent processes define_function then python_exec from one mock response."""
+        messages = [
+            Message.create(
+                "assistant",
+                [
+                    ContentPart.create_tool_use(
+                        "call_1", "define_function",
+                        json.dumps({
+                            "code": "def double_it(x: int) -> int:\n    return x * 2",
+                            "docstring": "Double a number"
+                        }),
+                    ),
+                    ContentPart.create_tool_use(
+                        "call_2", "python_exec",
+                        json.dumps({
+                            "function": "def func(self):\n    return self.produce_output(self.double_it(21))\n",
+                        }),
+                    ),
+                ],
+            ),
+        ]
+        ChatBotManager.register_provider("simple-mock", SimpleMockBackendProvider(messages))
+        await ChatBotManager.add_backend("simple-mock", api_type="simple-mock")
+
+        obj = AdaptiveTestObj()
+        result = await obj.invoke_agent("do it")
+        assert result == 42
 
 
 class TestFullLifecycle:
