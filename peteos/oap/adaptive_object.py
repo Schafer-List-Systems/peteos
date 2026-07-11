@@ -95,7 +95,7 @@ class AdaptiveObject(AgenticObject):
         return proxy
 
     @tool
-    def define_function(self, code: str, docstring: str, runner: "Runner | None") -> str:
+    def define_function(self, code: str, docstring: str, runner: Runner) -> str:
         """Define a Python function as a new tool.
 
         Pass the full function definition as a string and a docstring of what the function does including its arguments and return type.
@@ -142,7 +142,7 @@ class AdaptiveObject(AgenticObject):
         return f"OK: registered as '{func_name}'"
 
     @tool
-    def remove_function(self, name: str, runner: "Runner | None") -> str:
+    def remove_function(self, name: str, runner: Runner) -> str:
         """Remove a defined tool.
 
         Args:
