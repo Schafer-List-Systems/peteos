@@ -19,6 +19,7 @@ class AdaptiveObject(AgenticObject):
     Create and write reusable Python functions for recurring computations using `define_function`.
     - Prefer already existing functions if applicable!
     - Use detailed and self-descriptive function names! Generic function names yield later conflicts.
+    - Build the signature including Python type hints.
     - Address `description` string at yourself.
     - Describe the parameters and return values including their types in the docstring!
     - Formulate the optional `tests` as a member function of this object.
