@@ -156,7 +156,8 @@ def _restricted_import(name: str, registry: dict[str, Any]) -> Any:
 def sandbox_compile(
     config: dict[str, Any],
     code: str,
-) -> "tuple[dict[str, Any], list[Any]] | str":
+    sandbox_globals: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[Any]]:
     """Exec *code* in a sandbox and return the globals plus newly defined callables.
 
     This is a pure compilation step — it does not filter by signature or
@@ -166,23 +167,31 @@ def sandbox_compile(
     Args:
         config: MRO-merged OAP config dict.
         code: Python code to exec.
+        sandbox_globals: Optional pre-existing globals dict to compile into.
+            If provided, the code executes in this namespace (e.g. to share
+            definitions across multiple compiles). If omitted, a fresh
+            sandbox globals dict is created.
 
     Returns:
-        A (globals, new_callables) tuple on success, or an error string.
+        A (globals, new_callables) tuple on success.
+
+    Raises:
+        ValueError: On syntax error or exec failure.
     """
     # Validate syntax up front before sandboxing.
     try:
         compile(code, "<defined>", "exec")
     except SyntaxError as e:
-        return f"Error: {type(e).__name__}: {e}"
+        raise ValueError(f"SyntaxError: {e}")
 
-    sandbox_globals = create_sandbox_globals(config)
+    if sandbox_globals is None:
+        sandbox_globals = create_sandbox_globals(config)
     original_keys = set(sandbox_globals.keys())
 
     try:
         exec(code, sandbox_globals)
     except Exception as e:
-        return f"Error: {type(e).__name__}: {e}"
+        raise ValueError(f"{type(e).__name__}: {e}")
 
     new_callables: list[Any] = []
     for k in set(sandbox_globals.keys()) - original_keys:

@@ -8,7 +8,7 @@ from typing import Any, Callable
 from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
 from peteos.engine import Runner
 from peteos.oap.decorators import agentic_object, tool
-from peteos.oap.sandbox import sandbox_compile
+from peteos.oap.sandbox import SandboxSelf, create_sandbox_globals, sandbox_compile
 from peteos.persona.toolmanager import Tool
 
 from peteos.oap.agentic_registry import AgenticObjectRegistry
@@ -34,24 +34,25 @@ class AdaptiveObject(AgenticObject):
         self._oap_define_functions: dict[str, Any] = {}
 
     def _extract_func_name_and_params(self, func_obj: Callable) -> tuple[str, dict]:
-        """Extract function name and parameters schema from a callables.
+        """Extract function name and parameters schema from a callable.
 
         Args:
             func_obj: A Python callable to introspect.
 
         Returns:
-            A tuple of (func_name, parameters_schema) on success, or ("Error: ...", {}) on failure.
+            A tuple of (func_name, parameters_schema) on success.
+
+        Raises:
+            ValueError: If the signature cannot be introspected.
         """
         func_name = func_obj.__name__
 
         try:
             sig = inspect.signature(func_obj)
         except (ValueError, TypeError) as e:
-            return f"Error: could not introspect function signature: {e}", {}
-
-        # Check for name collision with static tools
-        if self._oap_tool_manager.get_tool(func_name):
-            return f"Error: tool '{func_name}' already exists (collision with static tool)", {}
+            raise ValueError(
+                f"could not introspect function signature: {e}"
+            ) from e
 
         # Build parameters schema from signature
         parameters = {}
@@ -105,18 +106,15 @@ class AdaptiveObject(AgenticObject):
             docstring: The Python docstring of the function with parameter description.
         """
         config = _collect_oap_config(self.__class__)
-        result = sandbox_compile(config, code)
-        if isinstance(result, str):
-            return result
-        sandbox_globals, new_callables = result
 
+        sandbox_globals, new_callables = sandbox_compile(config, code)
         if len(new_callables) != 1:
             names = [c.__name__ for c in new_callables] if new_callables else ["none"]
-            return f"Error: expected exactly one function in code. Found: {names}."
+            raise ValueError(f"expected exactly one function in code. Found: {names}.")
 
         func_name, parameters = self._extract_func_name_and_params(new_callables[0])
-        if isinstance(func_name, str) and func_name.startswith("Error:"):
-            return func_name
+        if self._oap_tool_manager.get_tool(func_name):
+            raise ValueError(f"tool '{func_name}' already exists (collision with static tool)")
 
         # Store the code string; the actual function will be exec'd at call time
         # inside SandboxSelf, ensuring isolation from the real AgenticObject.
@@ -160,3 +158,122 @@ class AdaptiveObject(AgenticObject):
         runner._execution_environment.auto_approve_tools.remove(name)
 
         return "OK"
+
+    def _test_function_in_sandbox(
+        self,
+        code: str,
+        mocked_functions: dict[str, str],
+        tests: list[str],
+    ) -> None:
+        """Compile and test a function in an isolated sandbox.
+
+        Creates a shared globals namespace, compiles mocks and the main
+        function into it, builds a fresh SandboxSelf with all callables
+        bound as methods, then runs each test snippet. Stops on the first
+        failed assertion. Raises ValueError on any failure.
+
+        Args:
+            code: Full Python function definition to test.
+            mocked_functions: Dict mapping method name → code for mock methods.
+            tests: List of Python function snippets (accepting self) with assertions.
+
+        Raises:
+            ValueError: On compilation failure, validation error, or test failure.
+        """
+        config = _collect_oap_config(self.__class__)
+
+        def _make_test_proxy(func):
+            """Proxy that passes sandbox_self to functions expecting self."""
+            sig = inspect.signature(func)
+            params = list(sig.parameters.keys())
+            expects_self = params[0] == "self"
+            def wrapper(*a, **kw):
+                if expects_self:
+                    return func(sandbox_self, *a, **kw)
+                return func(*a, **kw)
+            return wrapper
+
+        # 1. Shared sandbox globals
+        shared_globals = create_sandbox_globals(config)
+
+        # 2. Compile mocks into shared globals
+        all_callables: list[tuple[str, Callable]] = []
+        for mock_name, mock_code in mocked_functions.items():
+            _, callables = sandbox_compile(config, mock_code, sandbox_globals=shared_globals)
+            if len(callables) != 1:
+                names = [c.__name__ for c in callables] if callables else ["none"]
+                raise ValueError(f"mock '{mock_name}' should define exactly one function. Found: {names}.")
+            all_callables.append((mock_name, callables[0]))
+
+        # 3. Compile main function into shared globals
+        _, callables = sandbox_compile(config, code, sandbox_globals=shared_globals)
+        if len(callables) != 1:
+            names = [c.__name__ for c in callables] if callables else ["none"]
+            raise ValueError(f"expected exactly one function in code. Found: {names}.")
+
+        # 4. Validate main function
+        main_func_name, _ = self._extract_func_name_and_params(callables[0])
+        if self._oap_tool_manager.get_tool(main_func_name):
+            raise ValueError(
+                f"tool '{main_func_name}' already exists (collision with static tool)"
+            )
+        all_callables.append((main_func_name, callables[0]))
+
+        # 5. Build test sandbox — attach callables via proxy, produce helpers
+        sandbox_self = SandboxSelf()
+        for name, func in all_callables:
+            setattr(sandbox_self, name, _make_test_proxy(func))
+        setattr(sandbox_self, "produce_output",
+            lambda data: f"produce_output({data!r})")
+        setattr(sandbox_self, "produce_error",
+            lambda msg: f"produce_error({msg!r})")
+
+        # 6. Run each test
+        for i, test_code in enumerate(tests):
+            try:
+                _, test_callables = sandbox_compile(config, test_code)
+            except ValueError as e:
+                raise ValueError(f"failed to compile test {i}: {e}") from e
+            if len(test_callables) != 1:
+                names = [c.__name__ for c in test_callables] if test_callables else ["none"]
+                raise ValueError(f"test {i} should define exactly one function. Found: {names}.")
+            test_func = test_callables[0]
+            sandbox_self._test = _make_test_proxy(test_func)
+            try:
+                sandbox_self._test()
+            except Exception as e:
+                raise ValueError(f"test {i} failed: {e}")
+
+    @tool
+    def define_function_with_unit_tests(
+        self,
+        code: str,
+        docstring: str,
+        runner: Runner,
+        mocked_functions: dict[str, str] | None = None,
+        tests: list[str] | None = None,
+    ) -> str:
+        """Define a Python function with optional unit tests.
+
+        Pass the full function definition as a string and a docstring.
+        Optionally provide mocked_functions (name→code) and tests (list of
+        test function snippets). Tests run in an isolated sandbox before
+        registration. On failure, a ValueError is raised and the function is
+        NOT registered.
+
+        Args:
+            code: Full Python function definition.
+            docstring: The Python docstring of the function.
+            runner: Runner injected by the framework.
+            mocked_functions: Dict of name→code for mock methods on SandboxSelf.
+            tests: List of test function snippets with assertions.
+
+        Raises:
+            ValueError: On compilation failure, validation error, or test failure.
+        """
+        if mocked_functions is not None or tests is not None:
+            self._test_function_in_sandbox(
+                code, mocked_functions or {}, tests or [],
+            )
+
+        return self.define_function(code, docstring, runner)
