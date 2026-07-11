@@ -19,6 +19,7 @@ class AdaptiveObject(AgenticObject):
     Create and write reusable Python functions for recurring computations using `define_function`!
     Address its description at yourself.
     Describe the parameters and return values including their types in the docstring!
+    Formulate the optional `tests` as a member function of this object.
     It will immediately become available for you as tool and as a member function of the `self` object after being defined.
     Use these functions as tool directly or from within python functions.
     Use `remove_function` to unregister functions you previously registered.
@@ -95,8 +96,7 @@ class AdaptiveObject(AgenticObject):
 
         return proxy
 
-    @tool
-    def define_function(self, code: str, docstring: str, runner: Runner) -> str:
+    def _define_function(self, code: str, docstring: str, runner: Runner) -> str:
         """Define a Python function as a new tool.
 
         Pass the full function definition as a string and a docstring of what the function does including its arguments and return type.
@@ -114,7 +114,7 @@ class AdaptiveObject(AgenticObject):
 
         func_name, parameters = self._extract_func_name_and_params(new_callables[0])
         if self._oap_tool_manager.get_tool(func_name):
-            raise ValueError(f"tool '{func_name}' already exists (collision with static tool)")
+            raise ValueError(f"tool '{func_name}' already exists")
 
         # Store the code string; the actual function will be exec'd at call time
         # inside SandboxSelf, ensuring isolation from the real AgenticObject.
@@ -163,19 +163,21 @@ class AdaptiveObject(AgenticObject):
         self,
         code: str,
         mocked_functions: dict[str, str],
-        tests: list[str],
+        tests: str,
     ) -> None:
         """Compile and test a function in an isolated sandbox.
 
         Creates a shared globals namespace, compiles mocks and the main
         function into it, builds a fresh SandboxSelf with all callables
-        bound as methods, then runs each test snippet. Stops on the first
-        failed assertion. Raises ValueError on any failure.
+        bound as methods, then runs each test function from the single
+        test code string. Stops on the first failure. Raises ValueError on
+        any failure.
 
         Args:
             code: Full Python function definition to test.
             mocked_functions: Dict mapping method name → code for mock methods.
-            tests: List of Python function snippets (accepting self) with assertions.
+            tests: Python code containing multiple test functions (each
+                accepting self) with assertions.
 
         Raises:
             ValueError: On compilation failure, validation error, or test failure.
@@ -228,52 +230,49 @@ class AdaptiveObject(AgenticObject):
         setattr(sandbox_self, "produce_error",
             lambda msg: f"produce_error({msg!r})")
 
-        # 6. Run each test
-        for i, test_code in enumerate(tests):
-            try:
-                _, test_callables = sandbox_compile(config, test_code)
-            except ValueError as e:
-                raise ValueError(f"failed to compile test {i}: {e}") from e
-            if len(test_callables) != 1:
-                names = [c.__name__ for c in test_callables] if test_callables else ["none"]
-                raise ValueError(f"test {i} should define exactly one function. Found: {names}.")
-            test_func = test_callables[0]
+        # 6. Compile test code and run each callable as a test
+        try:
+            _, test_callables = sandbox_compile(config, tests)
+        except ValueError as e:
+            raise ValueError(f"failed to compile tests: {e}") from e
+        for i, test_func in enumerate(test_callables):
             sandbox_self._test = _make_test_proxy(test_func)
             try:
                 sandbox_self._test()
             except Exception as e:
-                raise ValueError(f"test {i} failed: {e}")
+                raise ValueError(f"test {i} ({test_func.__name__}) failed: {e}")
 
     @tool
-    def define_function_with_unit_tests(
+    def define_function(
         self,
         code: str,
         docstring: str,
         runner: Runner,
         mocked_functions: dict[str, str] | None = None,
-        tests: list[str] | None = None,
+        tests: str | None = None,
     ) -> str:
-        """Define a Python function with optional unit tests.
+        """Define a Python member function with optional unit tests.
 
-        Pass the full function definition as a string and a docstring.
-        Optionally provide mocked_functions (name→code) and tests (list of
-        test function snippets). Tests run in an isolated sandbox before
-        registration. On failure, a ValueError is raised and the function is
-        NOT registered.
+        Pass the full member function definition as a string and a docstring.
+        Optionally provide mocked_functions (name→code) and a tests string
+        containing multiple test functions. Tests run in an isolated sandbox
+        before registration. On failure, a ValueError is raised and the
+        function is NOT registered.
 
         Args:
-            code: Full Python function definition.
+            code: Full Python member function definition.
             docstring: The Python docstring of the function.
             runner: Runner injected by the framework.
             mocked_functions: Dict of name→code for mock methods on SandboxSelf.
-            tests: List of test function snippets with assertions.
+            tests: Python code containing multiple test functions (each
+                accepting self) with assertions.
 
         Raises:
             ValueError: On compilation failure, validation error, or test failure.
         """
         if mocked_functions is not None or tests is not None:
             self._test_function_in_sandbox(
-                code, mocked_functions or {}, tests or [],
+                code, mocked_functions or {}, tests or ""
             )
 
-        return self.define_function(code, docstring, runner)
+        return self._define_function(code, docstring, runner)

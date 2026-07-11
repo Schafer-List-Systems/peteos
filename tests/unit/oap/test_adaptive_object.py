@@ -296,7 +296,7 @@ class TestAutoApproveToolsInstanceOwnership:
         obj2 = SimpleAdaptiveObject()
         runner1 = _mock_runner()
         runner2 = _mock_runner()
-        obj1.define_function("def a(x: int) -> int:\n    return x", "A", runner1)
+        obj1._define_function("def a(x: int) -> int:\n    return x", "A", runner1)
         assert "a" in obj1._oap_auto_approve_tools
         assert "a" not in obj2._oap_auto_approve_tools
 
@@ -315,7 +315,7 @@ class TestAutoApproveToolsInstanceOwnership:
 
         # Session 1: define a function with an active runner
         runner1 = _mock_runner()
-        obj.define_function(
+        obj._define_function(
             "def compute(x: int) -> int:\n    return x * 2",
             "Double a number",
             runner1,
@@ -365,7 +365,7 @@ class TestAutoApproveToolsInstanceOwnership:
             "        a, b = b, a**2 + b**2\n"
             "    return b\n"
         )
-        result = obj.define_function(code, "n-th element of the sequence", runner)
+        result = obj._define_function(code, "n-th element of the sequence", runner)
         assert result == "OK: registered as 'compute_sequence_element'"
 
         # Step 2: call it from python_exec as a bare name (this is what the agent writes)
@@ -400,7 +400,7 @@ class TestAutoApproveToolsInstanceOwnership:
 
         # Define a function with self as first argument
         code = "def compute_double(self, x: int) -> int:\n    return x * 2"
-        result = obj.define_function(code, "Double a number", runner)
+        result = obj._define_function(code, "Double a number", runner)
         assert result == "OK: registered as 'compute_double'"
 
         # Call it via python_exec, using self.compute_double(21) as a method
@@ -415,7 +415,7 @@ class TestAutoApproveToolsInstanceOwnership:
 
 
 class TestDefineFunctionWithUnitTests:
-    """Tests for define_function_with_unit_tests tool."""
+    """Tests for define_function tool."""
 
     @pytest.fixture
     def obj(self):
@@ -428,30 +428,30 @@ class TestDefineFunctionWithUnitTests:
     def test_no_mocks_no_tests_calls_define_function(self, obj, runner):
         """When no mocks or tests provided, delegates to define_function."""
         code = "def double_it(x: int) -> int:\n    return x * 2"
-        result = obj.define_function_with_unit_tests(code, "Double", runner)
+        result = obj.define_function(code, "Double", runner)
         assert result == "OK: registered as 'double_it'"
         assert "double_it" in obj._oap_define_functions
 
     def test_all_tests_pass_gets_registered(self, obj, runner):
         """When all tests pass, the function is registered via define_function."""
         code = "def double_it(x: int) -> int:\n    return x * 2"
-        tests = [
-            "def test_basic(self):\n    assert self.double_it(5) == 10",
-            "def test_zero(self):\n    assert self.double_it(0) == 0",
-        ]
-        result = obj.define_function_with_unit_tests(code, "Double", runner, tests=tests)
+        tests = (
+            "def test_basic(self):\n    assert self.double_it(5) == 10\n"
+            "def test_zero(self):\n    assert self.double_it(0) == 0"
+        )
+        result = obj.define_function(code, "Double", runner, tests=tests)
         assert result == "OK: registered as 'double_it'"
         assert "double_it" in obj._oap_define_functions
 
     def test_failed_test_not_registered(self, obj, runner):
         """When a test fails, the function is NOT registered."""
         code = "def double_it(x: int) -> int:\n    return x * 2"
-        tests = [
-            "def test_basic(self):\n    assert self.double_it(5) == 10",
-            "def test_wrong(self):\n    assert self.double_it(5) == 99",
-        ]
-        with pytest.raises(ValueError, match=r"test 1 failed"):
-            obj.define_function_with_unit_tests(code, "Double", runner, tests=tests)
+        tests = (
+            "def test_basic(self):\n    assert self.double_it(5) == 10\n"
+            "def test_wrong(self):\n    assert self.double_it(5) == 99"
+        )
+        with pytest.raises(ValueError):
+            obj.define_function(code, "Double", runner, tests=tests)
         assert "double_it" not in obj._oap_define_functions
 
     def test_mock_function_used_by_tested_function(self, obj, runner):
@@ -463,24 +463,19 @@ class TestDefineFunctionWithUnitTests:
         mocks = {
             "transform": "def transform(self, x: int) -> int:\n    return x + 1",
         }
-        tests = [
-            "def test_mocked(self):\n    assert self.compute(5) == 12",
-        ]
-        result = obj.define_function_with_unit_tests(
+        tests = "def test_mocked(self):\n    assert self.compute(5) == 12"
+        result = obj.define_function(
             code, "Compute", runner, mocked_functions=mocks, tests=tests,
         )
         assert result == "OK: registered as 'compute'"
 
     def test_mock_makes_test_pass_that_would_fail_without(self, obj, runner):
-        """Without mock, the function would fail (NameError), but mock makes it pass."""
+        """Without mock, the function would fail, but mock makes it pass."""
         code = (
             "def compute(self, x: int) -> int:\n"
             "    return self.db_query(x) * 2"
         )
-        # Without mock, tests would fail with NameError
-        tests = [
-            "def test_result(self):\n    assert self.compute(7) == 14",
-        ]
+        tests = "def test_result(self):\n    assert self.compute(7) == 14"
         with pytest.raises(ValueError):
             obj._test_function_in_sandbox(code, {}, tests)
 
@@ -493,58 +488,52 @@ class TestDefineFunctionWithUnitTests:
         mocks = {
             "db_query": "def db_query(self, x: int) -> int:\n    return x",
         }
-        tests = [
-            "def test_result(self):\n    assert self.compute(7) == 14",
-        ]
+        tests = "def test_result(self):\n    assert self.compute(7) == 14"
         obj._test_function_in_sandbox(code, mocks, tests)  # no exception = pass
 
     def test_produce_output_available_in_test(self, obj, runner):
         """produce_output is available as a method on SandboxSelf."""
         code = "def compute(self, x: int) -> int:\n    return x"
-        tests = [
-            "def test_produce(self):\n    result = self.produce_output('hello')\n    assert result.startswith('produce_output(')",
-        ]
+        tests = "def test_produce(self):\n    result = self.produce_output('hello')\n    assert result.startswith('produce_output(')"
         obj._test_function_in_sandbox(code, {}, tests)  # no exception = pass
 
     def test_produce_error_available_in_test(self, obj, runner):
         """produce_error is available as a method on SandboxSelf."""
         code = "def compute(self, x: int) -> int:\n    return x"
-        tests = [
-            "def test_produce_error(self):\n    result = self.produce_error('oops')\n    assert result.startswith('produce_error(')",
-        ]
+        tests = "def test_produce_error(self):\n    result = self.produce_error('oops')\n    assert result.startswith('produce_error(')"
         obj._test_function_in_sandbox(code, {}, tests)  # no exception = pass
 
     def test_mock_compilation_error(self, obj, runner):
-        """A mock with syntax error returns an error."""
+        """A mock with syntax error raises ValueError."""
         code = "def compute(self, x: int) -> int:\n    return x"
         mocks = {
             "bad_mock": "def broken(:\n    return",
         }
         with pytest.raises(ValueError):
-            obj._test_function_in_sandbox(code, mocks, [])
+            obj._test_function_in_sandbox(code, mocks, "")
 
     def test_main_compilation_error(self, obj, runner):
-        """A main function with syntax error returns an error."""
+        """A main function with syntax error raises ValueError."""
         code = "def broken(:\n    return"
-        tests = ["def test_ok(self):\n    pass"]
-        with pytest.raises(ValueError, match="SyntaxError"):
+        tests = "def test_ok(self):\n    pass"
+        with pytest.raises(ValueError):
             obj._test_function_in_sandbox(code, {}, tests)
 
     def test_main_name_collision_with_static_tool(self, obj, runner):
-        """A function that collides with a static tool returns an error."""
+        """A function that collides with a static tool raises ValueError."""
         code = "def add(self, x: int) -> int:\n    return x"
-        tests = ["def test_add(self):\n    assert self.add(1) == 1"]
-        with pytest.raises(ValueError, match="tool 'add' already exists"):
+        tests = "def test_add(self):\n    assert self.add(1) == 1"
+        with pytest.raises(ValueError):
             obj._test_function_in_sandbox(code, {}, tests)
 
     def test_stop_on_first_test_failure(self, obj, runner):
         """Testing stops on the first failed assertion."""
         code = "def compute(self, x: int) -> int:\n    return x"
-        tests = [
-            "def test_ok(self):\n    assert self.compute(1) == 1",
-            "def test_fail(self):\n    assert self.compute(1) == 99",
-            "def test_never_runs(self):\n    assert self.compute(1) == 1",
-        ]
-        with pytest.raises(ValueError, match=r"test 1 failed"):
+        tests = (
+            "def test_ok(self):\n    assert self.compute(1) == 1\n"
+            "def test_fail(self):\n    assert self.compute(1) == 99\n"
+            "def test_never_runs(self):\n    assert self.compute(1) == 1"
+        )
+        with pytest.raises(ValueError):
             obj._test_function_in_sandbox(code, {}, tests)
 

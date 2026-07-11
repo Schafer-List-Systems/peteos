@@ -148,7 +148,7 @@ class TestToolDefsAfterMaterialize:
     def test_defined_function_visible_after_materialize(self):
         """After define_function, the new tool should appear in tool defs."""
         obj = AdaptiveTestObj()
-        obj.define_function(
+        obj._define_function(
             "def square(x: int) -> int:\n    return x * x",
             "Square a number",
             _mock_runner(),
@@ -167,7 +167,7 @@ class TestToolDefsAfterMaterialize:
         """After remove_function, the removed tool should be gone from tool defs."""
         obj = AdaptiveTestObj()
         runner = _mock_runner()
-        obj.define_function(
+        obj._define_function(
             "def triple(x: int) -> int:\n    return x * 3",
             "Triple a number",
             runner,
@@ -187,7 +187,7 @@ class TestToolDefsAfterMaterialize:
         """Define, materialize (visible), remove, materialize (gone)."""
         obj = AdaptiveTestObj()
         runner = _mock_runner()
-        obj.define_function(
+        obj._define_function(
             "def double(x: int) -> int:\n    return x * 2",
             "Double a number",
             runner,
@@ -246,7 +246,7 @@ class TestMockChatBotCapturesToolDefs:
         assert "define_function" in tools_0
 
         # Step 2: persist and re-materialize
-        obj.define_function(
+        obj._define_function(
             "def triple(x: int) -> int:\n    return x * 3",
             "Triple a number",
             _mock_runner(),
@@ -308,7 +308,7 @@ class TestFullLifecycle:
         """Persist a function and call it through the ToolManager."""
         obj = AdaptiveTestObj()
         runner = _mock_runner()
-        result = obj.define_function(
+        result = obj._define_function(
             "def multiply(a: int, b: int) -> int:\n    return a * b",
             "Multiply two numbers",
             runner,
