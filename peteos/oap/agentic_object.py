@@ -20,6 +20,7 @@ from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.utils import get_logger
 from peteos.oap.error import Error
 from peteos.oap.sandbox import (
+    Sandbox,
     SandboxSelf,
     _compile_and_select,
     build_sandbox_description,
@@ -207,33 +208,75 @@ class AgenticObject:
         config = _collect_oap_config(self.__class__)
         return self._call_sandboxed(config, function, runner=runner)
 
-    def _setup_sandbox_self(
+    def _gather_sandbox_members(self) -> dict[str, Callable]:
+        """Collect all @tool/@sandbox decorated member functions of this object.
+
+        Walks the MRO and the instance __dict__ to find methods decorated
+        with @tool or @sandbox, returning them as a dict mapping sandbox
+        name to bound method. Each returned callable is already bound —
+        self is stripped from the signature so the caller receives a
+        ready-to-call function taking only the remaining parameters.
+        The instance __dict__ takes precedence over class-level methods,
+        shadowing for that particular instance.
+        """
+        members: dict[str, Callable] = {}
+
+        def _register(name: str, method: Callable) -> None:
+            sandbox_name = getattr(method, "_sandbox_name", None) or getattr(method, "_tool_name", None)
+            if sandbox_name is None:
+                return
+            members[sandbox_name] = getattr(self, name)
+
+        for cls in self.__class__.__mro__:
+            for method_name, method in cls.__dict__.items():
+                if callable(method):
+                    _register(method_name, method)
+        for method_name, method in self.__dict__.items():
+            if callable(method):
+                _register(method_name, method)
+        return members
+
+    def build_session_sandbox(
         self,
         config: dict[str, Any],
         runner: "Runner | None",
-        sandbox_self: SandboxSelf | None = None,
-    ) -> SandboxSelf:
-        """Create or populate a SandboxSelf with closures, invoke, and tool proxies."""
-        if sandbox_self is None:
-            sandbox_self = SandboxSelf()
+        _sandbox: Any | None = None,
+    ) -> "Sandbox | None":
+        """Build a Sandbox with all callables that sandbox code may invoke.
 
-        SandboxSelf.populate(sandbox_self, self)
+        Collects @tool/@sandbox decorated members, creates per-invocation
+        closures for produce_output/produce_error, and optionally invoke,
+        then assembles them via the SandboxBuilder.
 
-        # Overwrite tool-proxied produce_output/produce_error with closures
-        # that capture the runner, so they actually get called with the right
-        # runner arg instead of the bound method that defaults to None.
+        Args:
+            config: MRO-merged OAP config dict.
+            runner: The runner (injected by the execution environment).
+            sandbox: Unused placeholder for future compatibility.
+
+        Returns:
+            A fully assembled Sandbox instance.
+        """
+        from peteos.oap.sandbox import SandboxBuilder
+        builder = SandboxBuilder()
+
+        # All @tool/@sandbox decorated member functions from MRO + instance __dict__.
+        members = self._gather_sandbox_members()
+        builder.add_proxies(members)
+
+        # add proxies for produce_output, produce_error and invoke tools but with runner registered already
         def _produce_output(data: Any) -> str:
-            _logger.debug("_setup_sandbox_self: _produce_output wrapper called, runner=%s", runner)
-            return self._produce_output(data, runner=runner)  # type: ignore[arg-type]
+            _logger.debug("build_session_sandbox: _produce_output wrapper called, runner=%s", runner)
+            return self._produce_output(data, runner=runner)
 
         def _produce_error(message: str) -> str:
             return self._produce_error(message, runner=runner)  # type: ignore[arg-type]
 
-        setattr(sandbox_self, "produce_output", _produce_output)
-        setattr(sandbox_self, "produce_error", _produce_error)
+        builder.add_proxy("produce_output", _produce_output)
+        builder.add_proxy("produce_error", _produce_error)
 
         if config.get("invoke_sub_agents", False):
             parent_ptid = runner.state.get("_persistent_thread_id") if runner else None
+            parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
 
             def _invoke(
                 target,
@@ -243,7 +286,6 @@ class AgenticObject:
                 timeout=None,
             ):
                 ptid = parent_ptid if persistent else None
-                parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
 
                 def _run():
                     _loop = asyncio.new_event_loop()
@@ -263,9 +305,9 @@ class AgenticObject:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     return executor.submit(_run).result()
 
-            setattr(sandbox_self, "invoke", _invoke)
+            builder.add_proxy("invoke", _invoke)
 
-        return sandbox_self
+        return builder.build()
 
     def _call_sandboxed(
         self,
@@ -280,9 +322,9 @@ class AgenticObject:
         Returns the result as a string, or an error message.
         """
         function_obj = _compile_and_select(config, code, *args, **kwargs)
-        sandbox_self = self._setup_sandbox_self(config, runner)
+        sandbox = self.build_session_sandbox(config, runner)
         return (
-            function_obj(sandbox_self, *args, **kwargs)
+            function_obj(sandbox, *args, **kwargs)
             if function_obj.__code__.co_argcount == len(args) + len(kwargs) + 1
             else function_obj(*args, **kwargs)
         )

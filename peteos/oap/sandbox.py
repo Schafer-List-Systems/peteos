@@ -174,6 +174,22 @@ class SandboxBuilder:
         """
         self._proxies.append((name, func, real_self))
 
+    def add_proxies(self, proxies: dict[str, Callable]) -> None:
+        """Batch-add callables to be proxied and attached to the Sandbox.
+
+        Raises ``ValueError`` if any name in *proxies* conflicts with an
+        already registered proxy name.
+
+        Args:
+            proxies: Mapping of sandbox attribute names to callables.
+        """
+        existing = {name for name, *_ in self._proxies}
+        collisions = set(proxies.keys()) & existing
+        if collisions:
+            raise ValueError(f"proxy name(s) {collisions!r} already registered")
+        for name, func in proxies.items():
+            self._proxies.append((name, func, None))
+
     def add_source_code(
         self,
         code: str,

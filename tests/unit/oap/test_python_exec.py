@@ -111,5 +111,5 @@ class TestPythonExecWithDynamicFunction:
             "def func(self):\n"
             "    return self.produce_output(self.double(5))\n"
         )
-        with pytest.raises(AttributeError, match="'SandboxSelf' object has no attribute 'double'"):
+        with pytest.raises(AttributeError, match="'Sandbox' object has no attribute 'double'"):
             obj._python_exec(exec_code, runner=mock_runner)
