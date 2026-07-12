@@ -46,8 +46,9 @@ class GeminiChatBot(ChatBot):
         secure_headers: Dict[str, str] = {}
         if api_key:
             secure_headers["x-goog-api-key"] = api_key
-        self._post_executor = self._build_post_executor(http_client, secure_headers)
-        self._stream_executor = self._build_stream_executor(http_client, secure_headers)
+        base_url = f"{self._config.url}{self._config.chat_endpoint}{self._config.model}"
+        self._post_executor = self._build_post_executor(http_client, secure_headers, f"{base_url}:generateContent")
+        self._stream_executor = self._build_stream_executor(http_client, secure_headers, f"{base_url}:streamGenerateContent")
         self._config.api_key = None  # type: ignore[assignment]
 
     def list_available_models(self) -> List[str]:
@@ -76,20 +77,11 @@ class GeminiChatBot(ChatBot):
                 key = json.dumps({k: part[k] for k in part if k != "thought_signature"}, ensure_ascii=False, default=str)
                 _logger.debug("Gemini request contents[%d] parts[%d] role=%s key=%s has_thought_signature=%s", ci, pi, c.get("role"), key[:120], has_ts)
 
-        # Build endpoint URL with model name
-        base_url = f"{self._config.url}{self._config.chat_endpoint}{self._config.model}"
         if streaming_mode:
-            url = f"{base_url}:streamGenerateContent"
-        else:
-            url = f"{base_url}:generateContent"
-
-        _logger.debug("Gemini endpoint: %s", url)
-
-        if streaming_mode:
-            stream = self._stream_executor(url, body, self.get_headers())
+            stream = self._stream_executor(body, self.get_headers())
             return GeminiChatBotResponse(stream, {})
         else:
-            response_data = await self._post_executor(url, body, self.get_headers())
+            response_data = await self._post_executor(body, self.get_headers())
             return GeminiChatBotResponse.from_json(response_data)
 
     @staticmethod
