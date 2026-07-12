@@ -162,8 +162,9 @@ class AnthropicChatBot(ChatBot):
         }
         if api_key:
             secure_headers["x-api-key"] = api_key
-        self._post_executor = self._build_post_executor(http_client, secure_headers)
-        self._stream_executor = self._build_stream_executor(http_client, secure_headers)
+        endpoint = f"{self._config.url}{self._config.chat_endpoint}"
+        self._post_executor = self._build_post_executor(http_client, secure_headers, endpoint)
+        self._stream_executor = self._build_stream_executor(http_client, secure_headers, endpoint)
         self._config.api_key = None  # type: ignore[assignment]
 
     def list_available_models(self) -> List[str]:
@@ -184,14 +185,13 @@ class AnthropicChatBot(ChatBot):
         body = self._build_body(context, generation_config, streaming)
         body.update(kwargs)
 
-        endpoint = f"{self._config.url}{self._config.chat_endpoint}"
         _logger.debug("Anthropic request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
 
         if streaming_mode:
-            stream = self._stream_executor(endpoint, body, self.get_headers())
+            stream = self._stream_executor(body, self.get_headers())
             return AnthropicChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._post_executor(endpoint, body, self.get_headers())
+            response_data = await self._post_executor(body, self.get_headers())
             return AnthropicChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(

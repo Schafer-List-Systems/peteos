@@ -124,8 +124,9 @@ class OpenAIChatBot(ChatBot):
         secure_headers: Dict[str, str] = {}
         if api_key:
             secure_headers["Authorization"] = f"Bearer {api_key}"
-        self._post_executor = self._build_post_executor(http_client, secure_headers)
-        self._stream_executor = self._build_stream_executor(http_client, secure_headers)
+        endpoint = f"{self._config.url}{self._config.chat_endpoint}"
+        self._post_executor = self._build_post_executor(http_client, secure_headers, endpoint)
+        self._stream_executor = self._build_stream_executor(http_client, secure_headers, endpoint)
         self._config.api_key = None  # type: ignore[assignment]
 
     def list_available_models(self) -> List[str]:
@@ -144,14 +145,13 @@ class OpenAIChatBot(ChatBot):
         streaming_mode = self._config.streaming if streaming is None else streaming
         body = self._build_body(context, generation_config, streaming)
 
-        endpoint = f"{self._config.url}{self._config.chat_endpoint}"
         _logger.debug("OpenAI request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
 
         if streaming_mode:
-            stream = self._stream_executor(endpoint, body, self.get_headers())
+            stream = self._stream_executor(body, self.get_headers())
             return OpenAIChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._post_executor(endpoint, body, self.get_headers())
+            response_data = await self._post_executor(body, self.get_headers())
             return OpenAIChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(self, context: Context, generation_config: Optional[Dict[str, Any]] = None, streaming: bool | None = None) -> Dict[str, Any]:

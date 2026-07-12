@@ -94,39 +94,46 @@ class ChatBot(ABC):
         self,
         http_client: HTTPClient,
         secure_headers: Dict[str, str],
+        endpoint: str,
     ) -> PostExecutor:
-        """Factory that builds a POST executor closure.
+        """Factory that builds a POST executor with compiled source.
 
-        The executor captures the supplied HTTP client and the secure
-        headers (which may include API keys) in its closure. Callers
-        never see the raw values — they are merged into a local dict and
-        passed only to the HTTP client.
+        The executor source code is compiled via exec() with secure_headers
+        and the endpoint embedded as hardcoded values in the generated string.
+        The returned callable has no closure cells containing secrets.
 
         Args:
             http_client: The HTTP client instance to use.
             secure_headers: Headers to merge on every call, including any
                 API keys or other secrets.
+            endpoint: The API endpoint URL (hardcoded into compiled source).
 
         Returns:
-            An async callable ``(url, body, caller_headers) -> response``.
+            An async callable ``(body, caller_headers) -> response``.
         """
-        async def executor(
-            url: str,
-            body: Dict[str, Any],
-            caller_headers: Optional[Dict[str, str]],
-        ) -> Any:
-            safe = dict(caller_headers or {})
-            safe.update(secure_headers)
-            return await http_client.post(url, body, headers=safe)
+        import json
 
-        return executor
+        headers_json = json.dumps(secure_headers)
+
+        _code = f"""
+async def executor(body, caller_headers):
+    if id(http_client) != {id(http_client)}:
+        raise ValueError("HTTP client was replaced at runtime")
+    safe = dict(caller_headers or {{}})
+    safe.update({headers_json})
+    return await http_client.post({endpoint!r}, body, headers=safe)
+"""
+        _globals: Dict[str, Any] = {"http_client": http_client}
+        exec(_code, _globals)
+        return _globals["executor"]
 
     def _build_stream_executor(
         self,
         http_client: HTTPClient,
         secure_headers: Dict[str, str],
+        endpoint: str,
     ) -> PostExecutor:
-        """Factory that builds a streaming POST executor closure.
+        """Factory that builds a streaming POST executor with compiled source.
 
         Same pattern as ``_build_post_executor`` but calls
         ``http_client.stream_post`` to return an async generator.
@@ -135,19 +142,25 @@ class ChatBot(ABC):
             http_client: The HTTP client instance to use.
             secure_headers: Headers to merge on every call, including any
                 API keys or other secrets.
+            endpoint: The API endpoint URL (hardcoded into compiled source).
 
         Returns:
-            An async callable ``(url, body, caller_headers) ->
+            An async callable ``(body, caller_headers) ->
             AsyncGenerator[str, None]``.
         """
-        async def executor(
-            url: str,
-            body: Dict[str, Any],
-            caller_headers: Optional[Dict[str, str]],
-        ) -> AsyncGenerator[str, None]:  # type: ignore[return]
-            safe = dict(caller_headers or {})
-            safe.update(secure_headers)
-            async for line in http_client.stream_post(url, body, headers=safe):
-                yield line
+        import json
 
-        return executor
+        headers_json = json.dumps(secure_headers)
+
+        _code = f"""
+async def executor(body, caller_headers):
+    if id(http_client) != {id(http_client)}:
+        raise ValueError("HTTP client was replaced at runtime")
+    safe = dict(caller_headers or {{}})
+    safe.update({headers_json})
+    async for line in http_client.stream_post({endpoint!r}, body, headers=safe):
+        yield line
+"""
+        _globals: Dict[str, Any] = {"http_client": http_client}
+        exec(_code, _globals)
+        return _globals["executor"]
