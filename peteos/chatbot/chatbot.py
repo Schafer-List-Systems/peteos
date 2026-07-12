@@ -102,6 +102,16 @@ class ChatBot(ABC):
         and the endpoint embedded as hardcoded values in the generated string.
         The returned callable has no closure cells containing secrets.
 
+        WARNING: The API keys and endpoint URL are embedded as string literals
+        in the compiled bytecode and are visible through ``executor.__code__.co_consts``.
+        An agent with access to the returned callable can extract these secrets
+        via introspection. This approach protects against closure-based leaks
+        (e.g., ``__closure__[0].__cell_contents``) but is NOT a secure mechanism
+        for storing secrets. If sandboxed code may access the executor, use an
+        intermediary proxy vault that holds real API keys — the executor should
+        only contain unprivileged proxy credentials (e.g. ``http://localhost``
+        proxy URL + proxy key) that are useless outside the local network.
+
         Args:
             http_client: The HTTP client instance to use.
             secure_headers: Headers to merge on every call, including any
@@ -137,6 +147,13 @@ async def executor(body, caller_headers):
 
         Same pattern as ``_build_post_executor`` but calls
         ``http_client.stream_post`` to return an async generator.
+
+        WARNING: The API keys and endpoint URL are embedded as string literals
+        in the compiled bytecode and are visible through ``executor.__code__.co_consts``.
+        An agent with access to the returned callable can extract these secrets
+        via introspection. This approach protects against closure-based leaks
+        but is NOT a secure mechanism for storing secrets. If sandboxed code may
+        access the executor, use an intermediary proxy vault holding real API keys.
 
         Args:
             http_client: The HTTP client instance to use.
