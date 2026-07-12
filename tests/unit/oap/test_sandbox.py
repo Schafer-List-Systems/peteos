@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from peteos.oap.decorators import sandbox, tool
-from peteos.oap.sandbox import SandboxSelf, create_sandbox_globals
+from peteos.oap.sandbox import SandboxBuilder, SandboxSelf, create_sandbox_globals
 
 
 class TestSandboxSelf:
@@ -238,3 +238,79 @@ class TestSandbox:
         sandbox = create_sandbox_globals({})
         with pytest.raises((NameError, ImportError)):
             exec("f = open('/etc/passwd')", sandbox)
+
+
+class TestSandboxBuilder:
+    def test_create_proxy_cross_object_router(self):
+        """create_proxy acts as a router: the proxy is placed on a different object
+        but when called, the target method on the original object runs.
+
+        Mirrors the manual test:
+            - define empty class A
+            - define class B with function f(self, *args, **kwargs)
+            - create instance a=A()
+            - create instance b=B()
+            - f_proxy = create_proxy(b.f, real_self=b)
+            - setattr(a, 'f_proxy', f_proxy)
+            - a.f_proxy(test='hello world')  # calls b.f internally
+        """
+        class A:
+            pass
+
+        class B:
+            def f(self, *args, **kwargs):
+                return (id(self), args, kwargs)
+
+        a = A()
+        b = B()
+
+        proxy = SandboxBuilder.create_proxy(b.f)
+        setattr(a, "f_proxy", proxy)
+
+        result = a.f_proxy(test="hello world")
+        assert result[0] == id(b)  # self is b, not a
+        assert result[1] == ()
+        assert result[2] == {"test": "hello world"}
+
+    def test_create_proxy_unbound_function_with_self(self):
+        """Unbound function with self: a plain function whose first parameter
+        is 'self', stored as an attribute on the real_self object.
+
+        The proxy binds real_self as the first argument via functools.partial.
+        """
+        class A:
+            pass
+
+        class B:
+            def f(self, x):
+                return (id(self), x)
+
+        a = A()
+        b = B()
+        b.func = B.f  # store the unbound function
+
+        proxy = SandboxBuilder.create_proxy(b.func, real_self=b)
+        setattr(a, "f_proxy", proxy)
+
+        result = a.f_proxy(42)
+        assert result[0] == id(b)
+        assert result[1] == 42
+
+    def test_create_proxy_no_self_callable(self):
+        """No-self callable: a function with no self argument.
+
+        The proxy uses the callable directly without binding.
+        """
+        class A:
+            pass
+
+        def standalone(x):
+            return x
+
+        proxy = SandboxBuilder.create_proxy(standalone)
+        a = A()
+        setattr(a, "f_proxy", proxy)
+
+        result = a.f_proxy(42)
+        assert result == 42
+
