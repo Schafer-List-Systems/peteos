@@ -184,7 +184,9 @@ class SandboxBuilder:
     def __init__(self) -> None:
         self._compilation_globals: dict[str, Any] = {}
         self._proxies: list[tuple[str, Callable, Any | None]] = []
-        self._source_code: list[tuple[str, bool, bool]] = []
+        self._source_code: dict[int, tuple[str, bool, bool]] = {}
+        self._name_to_entry: dict[str, int] = {}  # maps function name -> source code id
+        self._source_code_counter: int = 0
 
     def get_globals(self) -> dict[str, Any]:
         """Return a copy of the builder's compilation globals, suitable for use in :meth:`Sandbox.exec`."""
@@ -308,13 +310,13 @@ class SandboxBuilder:
         code: str,
         isolated: bool = True,
         static_functions: bool = True,
-    ) -> None:
-        """Store agent source code for compilation at :meth:`build` time.
+    ) -> list[str]:
+        """Store agent source code and compile to gather registered function names.
 
-        If *isolated* is ``True`` (the default), the code is compiled in a
-        shallow copy of the current globals so the original namespace is not
-        polluted — this is essential when the same builder produces multiple
-        sandboxes.
+        The source code is also recompiled at :meth:`build` time.
+
+        Compiles in a copy of globals to extract function names, registers each
+        name in the internal name-to-entry map, and returns the list of names.
 
         Args:
             code: Python source code defining sandboxed functions.
@@ -322,8 +324,50 @@ class SandboxBuilder:
             static_functions: If ``True``, global functions in the code
                 (no ``self`` parameter) will be added as static member
                 functions on the sandbox instance.
+
+        Returns:
+            List of function names that will be registered on the sandbox.
         """
-        self._source_code.append((code, isolated, static_functions))
+        key = self._source_code_counter
+        self._source_code[key] = (code, isolated, static_functions)
+        self._source_code_counter += 1
+
+        # Compile in a copy to gather names.
+        compile_ns = dict(self._compilation_globals) if isolated else self._compilation_globals
+        member_functions, global_functions = _compile_and_extract(code, compile_ns)
+        if static_functions:
+            member_functions.extend(global_functions)
+
+        names: list[str] = []
+        for mf in member_functions:
+            names.append(mf.__name__)
+            self._name_to_entry[mf.__name__] = key
+
+        return names
+
+    def remove_source_code(self, name: str) -> bool:
+        """Remove the source code entry that defines *name*.
+
+        Removes the entry from the source code dict and all associated
+        names from the name-to-entry map. Returns ``True`` if found,
+        ``False`` otherwise.
+
+        Args:
+            name: A function name that was registered by a source code entry.
+
+        Returns:
+            ``True`` if the source code entry was found and removed,
+            ``False`` if no entry defines that name.
+        """
+        key = self._name_to_entry.pop(name, None)
+        if key is None:
+            return False
+        del self._source_code[key]
+        # Clean up all names that pointed to this key.
+        self._name_to_entry = {
+            n: k for n, k in self._name_to_entry.items() if k != key
+        }
+        return True
 
     def add_global_var(self, name: str, value: Any, overwrite: bool = True) -> None:
         """Add a variable to the sandbox's global namespace.
@@ -420,7 +464,7 @@ class SandboxBuilder:
         # Snapshot so the builder's namespace stays intact for future builds.
         sandbox_globals = dict(self._compilation_globals)
 
-        for code, isolated, global_as_static in self._source_code:
+        for code, isolated, global_as_static in self._source_code.values():
             # Isolated=True gets a copy to avoid polluting the builder's globals.
             compile_ns = dict(sandbox_globals) if isolated else sandbox_globals
 
@@ -723,74 +767,3 @@ def sandbox_compile(
             new_callables.append(obj)
 
     return sandbox_globals, new_callables
-
-
-def filter_callables_by_args(
-    callables: list[Callable],
-    *args: Any,
-    **kwargs: Any,
-) -> list[Callable]:
-    """Filter *callables* to those compatible with the given arguments.
-
-    Returns functions with ``argcount == n`` (where *n* is the total number
-    of positional + keyword arguments), plus functions with ``argcount == n``
-    ``+ 1`` where the sole extra parameter is named ``"self"`` (matched for
-    SandboxSelf dispatch).
-
-    Args:
-        callables: Callables from ``sandbox_compile``.
-        *args: Positional arguments that will be passed to the function.
-        **kwargs: Keyword arguments that will be passed to the function.
-
-    Returns:
-        Matching callables.
-    """
-    n = len(args) + len(kwargs)
-    matching: list[Callable] = []
-    for func in callables:
-        try:
-            argcount = func.__code__.co_argcount
-        except AttributeError:
-            continue
-        if argcount == n:
-            matching.append(func)
-        elif argcount == n + 1 and func.__code__.co_varnames[0] == "self":
-            matching.append(func)
-    return matching
-
-
-def _compile_and_select(
-    config: dict[str, Any],
-    code: str,
-    *args: Any,
-    **kwargs: Any,
-) -> "Callable | str":
-    """Compile *code* in a sandbox, filter by *args/kwargs, and return the matching function.
-
-    This is the common pipeline of sandbox_compile → filter_callables_by_args →
-    single-match validation.  Returns the single matching function object, or
-    an error string.
-
-    Args:
-        config: MRO-merged OAP config dict.
-        code: Python code to exec.
-        *args: Positional arguments used to filter matching functions.
-        **kwargs: Keyword arguments used to filter matching functions.
-
-    Returns:
-        The matching function object on success, or an error string.
-    """
-    result = sandbox_compile(config, code)
-    if isinstance(result, str):
-        return result
-    sandbox_globals, new_callables = result
-
-    matching = filter_callables_by_args(new_callables, *args, **kwargs)
-    if len(matching) != 1:
-        raise ValueError(
-            f"expected exactly one new function. Found: {[m.__name__ for m in matching]}."
-        )
-
-    return matching[0]
-
-

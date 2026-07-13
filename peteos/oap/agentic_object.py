@@ -180,6 +180,8 @@ class AgenticObject:
         config = _collect_oap_config(self.__class__)
         if not config.get("allow_code_execution", False):
             return
+
+        # TODO: use the function from the SandboxBuilder instead!
         description = build_sandbox_description(config.get("imports"))
         self._oap_tool_manager.register_tool(
             Tool(
