@@ -310,13 +310,14 @@ class SandboxBuilder:
         code: str,
         isolated: bool = True,
         static_functions: bool = True,
-    ) -> list[str]:
-        """Store agent source code and compile to gather registered function names.
+    ) -> list[tuple[str, dict]]:
+        """Store agent source code and compile to gather registered function names and parameters.
 
         The source code is also recompiled at :meth:`build` time.
 
-        Compiles in a copy of globals to extract function names, registers each
-        name in the internal name-to-entry map, and returns the list of names.
+        Compiles in a copy of globals to extract function names and parameter schemas,
+        registers each name in the internal name-to-entry map, and returns the list of
+        (name, parameters) tuples.
 
         Args:
             code: Python source code defining sandboxed functions.
@@ -326,24 +327,26 @@ class SandboxBuilder:
                 functions on the sandbox instance.
 
         Returns:
-            List of function names that will be registered on the sandbox.
+            List of (func_name, parameters) tuples for each function that
+            will be registered on the sandbox.
         """
         key = self._source_code_counter
         self._source_code[key] = (code, isolated, static_functions)
         self._source_code_counter += 1
 
-        # Compile in a copy to gather names.
+        # Compile in a copy to gather names and parameters.
         compile_ns = dict(self._compilation_globals) if isolated else self._compilation_globals
         member_functions, global_functions = _compile_and_extract(code, compile_ns)
         if static_functions:
             member_functions.extend(global_functions)
 
-        names: list[str] = []
+        result: list[tuple[str, dict]] = []
         for mf in member_functions:
-            names.append(mf.__name__)
-            self._name_to_entry[mf.__name__] = key
+            func_name, params = _extract_func_name_and_params(mf)[:2]
+            result.append((func_name, params))
+            self._name_to_entry[func_name] = key
 
-        return names
+        return result
 
     def remove_source_code(self, name: str) -> bool:
         """Remove the source code entry that defines *name*.

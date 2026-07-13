@@ -19,7 +19,7 @@ from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.utils import get_logger
 from peteos.oap.error import Error
-from peteos.oap.sandbox import (
+from peteos.sandbox import (
     Sandbox,
     SandboxBuilder,
     build_sandbox_description,

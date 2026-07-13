@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from peteos.oap.decorators import sandbox, tool
-from peteos.oap.sandbox import SandboxBuilder, SandboxSelf, create_sandbox_globals
+from peteos.sandbox import SandboxBuilder, SandboxSelf, create_sandbox_globals
 
 
 class TestSandboxSelf:

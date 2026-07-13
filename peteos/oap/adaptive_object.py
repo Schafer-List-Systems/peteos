@@ -8,7 +8,7 @@ from typing import Any, Callable
 from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
 from peteos.engine import Runner
 from peteos.oap.decorators import agentic_object, tool
-from peteos.oap.sandbox import SandboxSelf, create_sandbox_globals, sandbox_compile
+from peteos.sandbox import SandboxBuilder, SandboxSelf, create_sandbox_globals, sandbox_compile
 from peteos.persona.toolmanager import Tool
 
 from peteos.oap.agentic_registry import AgenticObjectRegistry
@@ -36,6 +36,7 @@ class AdaptiveObject(AgenticObject):
     def __init__(self) -> None:
         super().__init__()
         self._oap_define_functions: dict[str, Any] = {}
+        self._sandbox_builder = SandboxBuilder()
 
     def _extract_func_name_and_params(self, func_obj: Callable) -> tuple[str, dict]:
         """Extract function name and parameters schema from a callable.
@@ -99,6 +100,72 @@ class AdaptiveObject(AgenticObject):
 
         return proxy
 
+    def _add_tool(
+        self,
+        docstring: str,
+        code: str,
+        runner: Runner,
+    ) -> None:
+        """Register a dynamically defined function as a tool and recreate the session sandbox.
+
+        This helper adds the source code to the sandbox builder, creates the
+        proxy Tool, registers it with the tool manager, auto-approves it, and
+        invalidates the session's sandbox cache so a fresh one is built.
+
+        Args:
+            docstring: Description of the tool.
+            code: Python source code defining the function.
+            runner: Runner injected by the framework.
+        """
+        func_and_params = self._sandbox_builder.add_source_code(code)
+        if len(func_and_params) != 1:
+            names = [f[0] for f in func_and_params] if func_and_params else ["none"]
+            raise ValueError(f"expected exactly one function in code. Found: {names}.")
+
+        func_name, parameters = func_and_params[0]
+
+        # Invalidate session sandbox so a fresh one is built with the new tool
+        runner.state.force_set("_oap_sandbox_valid", False)
+
+        # Store the code string; the actual function will be exec'd at call time
+        # inside SandboxSelf, ensuring isolation from the real AgenticObject.
+        self._oap_define_functions[func_name] = {
+            "code": code,
+            "docstring": docstring,
+            "parameters": parameters,
+        }
+
+        proxy = self._build_defined_tool_proxy(func_name)
+        proxy._tool_name = func_name
+        defined_tool = Tool(name=func_name, description=docstring, func=proxy, parameters=parameters)
+
+        self.__dict__[func_name] = proxy
+        self._oap_tool_manager.register_tool(defined_tool)
+
+        # Auto-approve tool for this AND for future sessions
+        self._oap_auto_approve_tools.append(func_name)
+        runner._execution_environment.auto_approve_tools.append(func_name)
+
+    def _delete_tool(self, func_name: str, runner: Runner) -> None:
+        """Remove a dynamically defined tool and recreate the session sandbox.
+
+        This helper removes the source code entry from the sandbox builder,
+        unregisters the tool, cleans up auto-approve lists, and invalidates
+        the session's sandbox cache.
+
+        Args:
+            func_name: The function name to remove.
+            runner: Runner injected by the framework.
+        """
+        self._sandbox_builder.remove_source_code(func_name)
+
+        del self._oap_define_functions[func_name]
+        self._oap_tool_manager._tools.pop(func_name, None)
+        self.__dict__.pop(func_name, None)
+
+        self._oap_auto_approve_tools.remove(func_name)
+        runner._execution_environment.auto_approve_tools.remove(func_name)
+
     def _define_function(self, code: str, docstring: str, runner: Runner) -> str:
         """Define a Python function as a new tool.
 
@@ -119,27 +186,7 @@ class AdaptiveObject(AgenticObject):
         if self._oap_tool_manager.get_tool(func_name):
             raise ValueError(f"tool '{func_name}' already exists")
 
-        # Store the code string; the actual function will be exec'd at call time
-        # inside SandboxSelf, ensuring isolation from the real AgenticObject.
-        self._oap_define_functions[func_name] = {
-            "code": code,
-            "docstring": docstring,
-            "parameters": parameters,
-        }
-
-        # Register a proxy as the Tool.func — it executes the code in a
-        # sandbox with SandboxSelf at call time.
-        proxy = self._build_defined_tool_proxy(func_name)
-        proxy._tool_name = func_name
-        defined_tool = Tool(name=func_name, description=docstring, func=proxy, parameters=parameters)
-
-        self.__dict__[func_name] = proxy
-        self._oap_tool_manager.register_tool(defined_tool)
-
-        # Auto-approve tool for this AND for future sessions 
-        self._oap_auto_approve_tools.append(func_name)
-        runner._execution_environment.auto_approve_tools.append(func_name)
-
+        self._add_tool(docstring, code, runner)
         return f"OK: registered as '{func_name}'"
 
     @tool
@@ -153,12 +200,7 @@ class AdaptiveObject(AgenticObject):
         if name not in self._oap_define_functions:
             return f"Error: tool '{name}' not found or not defined by this agent."
 
-        del self._oap_define_functions[name]
-        self._oap_tool_manager._tools.pop(name, None)
-        self.__dict__.pop(name, None)
-
-        self._oap_auto_approve_tools.remove(name)
-        runner._execution_environment.auto_approve_tools.remove(name)
+        self._delete_tool(name, runner)
 
         return "OK"
 

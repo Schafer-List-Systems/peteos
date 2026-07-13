@@ -3,7 +3,7 @@ import hashlib
 import json
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 
 class SessionState:
@@ -56,6 +56,10 @@ class SessionState:
         if name not in self._data:
             raise KeyError(f"Variable '{name}' does not exist")
         del self._data[name]
+
+    def force_set(self, name: str, value: Any) -> None:
+        """Set a variable, overwriting any existing value without checking."""
+        self._data[name] = value
 
     def list(self) -> list[str]:
         """Return a list of all variable names."""
