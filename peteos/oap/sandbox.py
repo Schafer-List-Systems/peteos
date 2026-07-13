@@ -6,6 +6,112 @@ import textwrap
 from typing import Any, Callable
 
 
+################################################################################
+# Source Code Compilation
+
+def _extract_func_name_and_params(func_obj: Callable) -> tuple[str, dict, bool]:
+    """Extract function name, parameters, and whether self is unbound.
+
+    Args:
+        func_obj: A Python callable to introspect.
+
+    Returns:
+        A tuple of (func_name, parameters_schema, has_unbound_self).
+        ``has_unbound_self`` is True only when the callable has a self
+        argument that has not yet been bound (i.e. it is not a bound method).
+
+    Raises:
+        ValueError: If the signature cannot be introspected.
+    """
+    import inspect
+
+    func_name = func_obj.__name__
+    try:
+        sig = inspect.signature(func_obj)
+    except (ValueError, TypeError) as e:
+        raise ValueError(
+            f"could not introspect function signature: {e}"
+        ) from e
+
+    # Determine whether self needs binding.
+    # Bound methods already have self consumed, so we only need to bind
+    # when the callable is not a bound method and its first parameter
+    # is named "self".
+    has_unbound_self = False
+    if not inspect.ismethod(func_obj):
+        params = list(sig.parameters.items())
+        has_unbound_self = params and params[0][0] == "self"
+
+    # Build parameter schema, skipping the self parameter.
+    parameters = {}
+    for param_name, param in sig.parameters.items():
+        if param_name == "self":
+            continue
+        param_info: dict = {}
+        if param.annotation != inspect.Parameter.empty:
+            name = param.annotation.__name__ if hasattr(param.annotation, "__name__") else str(param.annotation)
+            param_info["type"] = name
+        else:
+            param_info["type"] = "any"
+        if param.default == inspect.Parameter.empty:
+            param_info["required"] = True
+        else:
+            param_info["required"] = False
+            param_info["default"] = param.default
+        parameters[param_name] = param_info
+
+    return func_name, parameters, has_unbound_self
+
+
+def _compile_and_extract(
+    code: str, globals_dict: dict[str, Any]
+) -> tuple[list[Callable], list[Callable]]:
+    """Execute *code* in *globals_dict* and return member and global functions.
+
+    Args:
+        code: Python source code to compile.
+        globals_dict: The globals namespace to exec into.
+
+    Returns:
+        A tuple of (member_functions, global_functions) where member
+        functions have ``self`` as the first parameter and global
+        functions do not.
+    """
+    # Normalize indentation so agent-provided code works regardless of level.
+    code = textwrap.dedent(code)
+
+    # Validate syntax up front — avoid partial exec with broken code.
+    try:
+        compile(code, "<defined>", "exec")
+    except SyntaxError as e:
+        raise ValueError(f"SyntaxError: {e}")
+
+    # Record which keys existed before exec, so we only find NEW definitions.
+    original_keys = set(globals_dict.keys())
+
+    # Execute the code into the namespace. Any exception means the code failed.
+    try:
+        exec(code, globals_dict)
+    except Exception as e:
+        raise ValueError(f"{type(e).__name__}: {e}")
+
+    # Scan for new callables and classify them by whether they need self-binding.
+    member_functions: list[Callable] = []
+    global_functions: list[Callable] = []
+    for key in set(globals_dict.keys()) - original_keys:
+        obj = globals_dict[key]
+        if callable(obj) and hasattr(obj, "__code__"):
+            _, _, has_unbound_self = _extract_func_name_and_params(obj)
+            if has_unbound_self:
+                member_functions.append(obj)
+            else:
+                global_functions.append(obj)
+    return member_functions, global_functions
+
+
+################################################################################
+# Sandbox Global Namespace
+
 def _restricted_import(name: str, registry: dict[str, Any]) -> Any:
     """Resolve import from the per-call registry only."""
     resolved = registry.get(name)
@@ -53,9 +159,12 @@ _SAFE_BUILTINS: dict[str, Any] = {
 }
 
 
+################################################################################
+# Sandbox
+
 class Sandbox:
     """Built sandbox containing all compiled member functions and proxies."""
-
+    pass
 
 class SandboxBuilder:
     # Why the sandbox is safe regarding sibling functions with real_self:
@@ -75,7 +184,11 @@ class SandboxBuilder:
     def __init__(self) -> None:
         self._compilation_globals: dict[str, Any] = {}
         self._proxies: list[tuple[str, Callable, Any | None]] = []
-        self._source_code: list[tuple[str, bool]] = []
+        self._source_code: list[tuple[str, bool, bool]] = []
+
+    def get_globals(self) -> dict[str, Any]:
+        """Return a copy of the builder's compilation globals, suitable for use in :meth:`Sandbox.exec`."""
+        return dict(self._compilation_globals)
 
     def build_sandbox_description(self) -> str:
         """Build the description string for the python_exec tool.
@@ -194,6 +307,7 @@ class SandboxBuilder:
         self,
         code: str,
         isolated: bool = True,
+        static_functions: bool = True,
     ) -> None:
         """Store agent source code for compilation at :meth:`build` time.
 
@@ -205,8 +319,11 @@ class SandboxBuilder:
         Args:
             code: Python source code defining sandboxed functions.
             isolated: If ``True``, compile in an isolated globals namespace.
+            static_functions: If ``True``, global functions in the code
+                (no ``self`` parameter) will be added as static member
+                functions on the sandbox instance.
         """
-        self._source_code.append((code, isolated))
+        self._source_code.append((code, isolated, static_functions))
 
     def add_global_var(self, name: str, value: Any, overwrite: bool = True) -> None:
         """Add a variable to the sandbox's global namespace.
@@ -286,53 +403,7 @@ class SandboxBuilder:
             raise ValueError(f"name {name!r} already exists in the sandbox namespace")
         self._compilation_globals[name] = func
 
-    @staticmethod
-    def _compile_and_extract(
-        code: str, globals_dict: dict[str, Any]
-    ) -> tuple[list[Callable], list[Callable]]:
-        """Execute *code* in *globals_dict* and return member and global functions.
-
-        Args:
-            code: Python source code to compile.
-            globals_dict: The globals namespace to exec into.
-
-        Returns:
-            A tuple of (member_functions, global_functions) where member
-            functions have ``self`` as the first parameter and global
-            functions do not.
-        """
-        # Normalize indentation so agent-provided code works regardless of level.
-        code = textwrap.dedent(code)
-
-        # Validate syntax up front — avoid partial exec with broken code.
-        try:
-            compile(code, "<defined>", "exec")
-        except SyntaxError as e:
-            raise ValueError(f"SyntaxError: {e}")
-        
-        # Record which keys existed before exec, so we only find NEW definitions.
-        original_keys = set(globals_dict.keys())
-        
-        # Execute the code into the namespace. Any exception means the code failed.
-        try:
-            exec(code, globals_dict)
-        except Exception as e:
-            raise ValueError(f"{type(e).__name__}: {e}")
-        
-        # Scan for new callables and classify them by whether they need self-binding.
-        member_functions: list[Callable] = []
-        global_functions: list[Callable] = []
-        for key in set(globals_dict.keys()) - original_keys:
-            obj = globals_dict[key]
-            if callable(obj) and hasattr(obj, "__code__"):
-                _, _, has_unbound_self = SandboxBuilder._extract_func_name_and_params(obj)
-                if has_unbound_self:
-                    member_functions.append(obj)
-                else:
-                    global_functions.append(obj)
-        return member_functions, global_functions
-
-    def build(self) -> "Sandbox":
+    def build(self) -> Sandbox:
         """Compile and assemble all configured data into a new Sandbox.
 
         Creates a sandbox with the configured imports, proxies, and
@@ -349,11 +420,14 @@ class SandboxBuilder:
         # Snapshot so the builder's namespace stays intact for future builds.
         sandbox_globals = dict(self._compilation_globals)
 
-        for code, isolated in self._source_code:
+        for code, isolated, global_as_static in self._source_code:
             # Isolated=True gets a copy to avoid polluting the builder's globals.
             compile_ns = dict(sandbox_globals) if isolated else sandbox_globals
 
-            member_functions, _ = self._compile_and_extract(code, compile_ns)
+            member_functions, global_functions = _compile_and_extract(code, compile_ns)
+
+            if global_as_static:
+                member_functions.extend(global_functions)
 
             # Attach member functions as proxied sandbox methods.
             for mf in member_functions:
@@ -367,59 +441,69 @@ class SandboxBuilder:
 
         return sandbox
 
-    @staticmethod
-    def _extract_func_name_and_params(func_obj: Callable) -> tuple[str, dict, bool]:
-        """Extract function name, parameters, and whether self is unbound.
+    def compile(self, sandbox: Sandbox, code: str, globals_dict: dict[str, Any]) -> tuple[list[Callable], list[Callable]]:
+        """Compile *code* in *globals_dict* and attach found member functions to this Sandbox.
+
+        Returns the list of member functions (proxied and bound to the *sandbox*) and global functions found during compilation.
 
         Args:
-            func_obj: A Python callable to introspect.
+            sandbox: The Sandbox instance to attach proxies to.
+            code: Python source code to compile.
+            globals_dict: Globals namespace to exec into.
 
         Returns:
-            A tuple of (func_name, parameters_schema, has_unbound_self).
-            ``has_unbound_self`` is True only when the callable has a self
-            argument that has not yet been bound (i.e. it is not a bound method).
+            Tuple of (proxied member functions, global functions) defined in *code*.
+        """
+        member_functions, global_functions = _compile_and_extract(code, globals_dict)
+        proxied_member_functions: list[Callable] = []
+        for mf in member_functions:
+            proxy = self.create_proxy(mf, sandbox)
+            proxied_member_functions.append(proxy)
+            setattr(sandbox, mf.__name__, proxy)
+        return proxied_member_functions, global_functions
+
+    def call(self, sandbox: Sandbox, code: str, globals_dict: dict[str, Any], *args, **kwargs) -> Any:
+        """Compile *code*, find the matching member function, call it, and clean up.
+
+        Compiles *code* in *globals_dict*, filters the resulting member functions
+        by exact argument count (proxies already have *self* bound), invokes the
+        single matching function with *args* and *kwargs*, then detaches the
+        member functions for a clean state on the next call.
+
+        Args:
+            sandbox: The Sandbox instance to attach proxies to.
+            code: Python source code to compile.
+            globals_dict: Globals namespace to exec into.
+            *args: Positional arguments passed to the matched function.
+            **kwargs: Keyword arguments passed to the matched function.
+
+        Returns:
+            The return value of the matched function.
 
         Raises:
-            ValueError: If the signature cannot be introspected.
+            ValueError: If the number of matching functions is not exactly one.
         """
-        import inspect
+        # compile the code and attach member functions (those with self as first argument)
+        member_functions, global_functions = self.compile(sandbox, code, globals_dict)
 
-        func_name = func_obj.__name__
-        try:
-            sig = inspect.signature(func_obj)
-        except (ValueError, TypeError) as e:
-            raise ValueError(
-                f"could not introspect function signature: {e}"
-            ) from e
+        # find matching function by the number of arguments
+        # TODO: once create_proxy carries a proper __signature__ / __code__, match on
+        #       inspect.signature(proxy) instead of stored _effective_argcount.
+        n = len(args) + len(kwargs)
+        matching = [f for f in member_functions if getattr(f, "_effective_argcount", 0) == n]
+        if not matching:
+            matching = [f for f in global_functions if getattr(f.__code__, "co_argcount", 0) == n]
+        if len(matching) != 1:
+            raise ValueError(f"expected exactly one function, found {len(matching)}: {[f.__name__ for f in matching]}")
 
-        # Determine whether self needs binding.
-        # Bound methods already have self consumed, so we only need to bind
-        # when the callable is not a bound method and its first parameter
-        # is named "self".
-        has_unbound_self = False
-        if not inspect.ismethod(func_obj):
-            params = list(sig.parameters.items())
-            has_unbound_self = params and params[0][0] == "self"
+        # call matching function and get result
+        result = matching[0](*args, **kwargs)
 
-        # Build parameter schema, skipping the self parameter.
-        parameters = {}
-        for param_name, param in sig.parameters.items():
-            if param_name == "self":
-                continue
-            param_info: dict = {}
-            if param.annotation != inspect.Parameter.empty:
-                name = param.annotation.__name__ if hasattr(param.annotation, "__name__") else str(param.annotation)
-                param_info["type"] = name
-            else:
-                param_info["type"] = "any"
-            if param.default == inspect.Parameter.empty:
-                param_info["required"] = True
-            else:
-                param_info["required"] = False
-                param_info["default"] = param.default
-            parameters[param_name] = param_info
+        # detach member functions for clean state on next call
+        for mf in member_functions:
+            delattr(sandbox, getattr(mf, "_original_name", mf.__name__))
 
-        return func_name, parameters, has_unbound_self
+        return result
 
     @staticmethod
     def create_proxy(func: Callable, real_self: Any | None = None) -> Any:
@@ -440,12 +524,12 @@ class SandboxBuilder:
         """
 
         # gather function parameters
-        func_name, _parameters, has_unbound_self = SandboxBuilder._extract_func_name_and_params(func)
+        func_name, _parameters, has_unbound_self = _extract_func_name_and_params(func)
 
         if has_unbound_self:
             assert(real_self is not None)
             from functools import partial
-            _callable = partial(real_self.func, real_self)
+            _callable = partial(func, real_self)
             _real_self_id = id(real_self)
             proxy_globals: dict[str, Any] = {"_callable": _callable}
 
@@ -468,11 +552,22 @@ class SandboxBuilder:
                 f"    return _callable(*args, **kwargs)\n"
             )
         exec(_code, proxy_globals)
+        proxy = proxy_globals["_proxy"]
 
-        return proxy_globals["_proxy"]
+        # TODO: once the full signature is wired up, set __signature__ and build
+        #       the real __code__ from _parameters. For now just store
+        #       _effective_argcount as an attribute so call() can match
+        #       member functions correctly.
+        if has_unbound_self:
+            original_co_argcount = func.__code__.co_argcount
+            # self is bound, so effective count = original - 1
+            proxy._effective_argcount = max(original_co_argcount - 1, 0)
+            proxy._original_name = func.__name__
+        else:
+            proxy._effective_argcount = func.__code__.co_argcount
+            proxy._original_name = func.__name__
 
-    def compile_all(self, code: str) -> Any:
-        pass
+        return proxy
 
 
 class SandboxSelf:

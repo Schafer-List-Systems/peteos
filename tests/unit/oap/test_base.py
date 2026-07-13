@@ -199,7 +199,7 @@ import cv2
 import numpy
 
 
-@agentic_object(allow_code_execution=True, imports=[numpy], import_aliases={"numpy": "np"})
+@agentic_object(allow_code_execution=True, imports=[numpy], import_aliases={"np": "numpy"})
 class BBase(AgenticObject):
     """Branch B with numpy support."""
 

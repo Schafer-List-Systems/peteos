@@ -21,8 +21,7 @@ from peteos.utils import get_logger
 from peteos.oap.error import Error
 from peteos.oap.sandbox import (
     Sandbox,
-    SandboxSelf,
-    _compile_and_select,
+    SandboxBuilder,
     build_sandbox_description,
 )
 
@@ -236,28 +235,25 @@ class AgenticObject:
                 _register(method_name, method)
         return members
 
-    def build_session_sandbox(
+    def _create_sandbox_builder(
         self,
         config: dict[str, Any],
         runner: "Runner | None",
-        _sandbox: Any | None = None,
-    ) -> "Sandbox | None":
-        """Build a Sandbox with all callables that sandbox code may invoke.
-
-        Collects @tool/@sandbox decorated members, creates per-invocation
-        closures for produce_output/produce_error, and optionally invoke,
-        then assembles them via the SandboxBuilder.
+    ) -> SandboxBuilder:
+        """Create and configure a SandboxBuilder for session sandbox code.
 
         Args:
             config: MRO-merged OAP config dict.
             runner: The runner (injected by the execution environment).
-            sandbox: Unused placeholder for future compatibility.
 
         Returns:
-            A fully assembled Sandbox instance.
+            A configured SandboxBuilder ready for :meth:`build`.
         """
-        from peteos.oap.sandbox import SandboxBuilder
         builder = SandboxBuilder()
+        builder.add_safe_builtins()
+
+        # Imports from config (MRO-merged).
+        builder.populate_imports(config.get("imports", []), config.get("import_aliases"))
 
         # All @tool/@sandbox decorated member functions from MRO + instance __dict__.
         members = self._gather_sandbox_members()
@@ -307,7 +303,25 @@ class AgenticObject:
 
             builder.add_proxy("invoke", _invoke)
 
-        return builder.build()
+        return builder
+
+    def build_session_sandbox(
+        self,
+        config: dict[str, Any],
+        runner: "Runner | None",
+        _sandbox: Any | None = None,
+    ) -> "Sandbox | None":
+        """Build a Sandbox with all callables that sandbox code may invoke.
+
+        Args:
+            config: MRO-merged OAP config dict.
+            runner: The runner (injected by the execution environment).
+            sandbox: Unused placeholder for future compatibility.
+
+        Returns:
+            A fully assembled Sandbox instance.
+        """
+        return self._create_sandbox_builder(config, runner).build()
 
     def _call_sandboxed(
         self,
@@ -321,13 +335,10 @@ class AgenticObject:
 
         Returns the result as a string, or an error message.
         """
-        function_obj = _compile_and_select(config, code, *args, **kwargs)
-        sandbox = self.build_session_sandbox(config, runner)
-        return (
-            function_obj(sandbox, *args, **kwargs)
-            if function_obj.__code__.co_argcount == len(args) + len(kwargs) + 1
-            else function_obj(*args, **kwargs)
-        )
+        builder = self._create_sandbox_builder(config, runner)
+        sandbox = builder.build()
+        globals_dict = builder.get_globals()
+        return builder.call(sandbox, code, globals_dict, *args, **kwargs)
 
     @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
     def _produce_output(self, data: str, runner: "Runner | None" = None) -> str:
