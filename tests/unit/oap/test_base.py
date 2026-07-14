@@ -1,5 +1,7 @@
 """Tests for AgenticObject."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from peteos.oap.agentic_object import AgenticObject
@@ -223,10 +225,14 @@ class TestDiamondConfigCollection:
 
     def test_python_exec_sandbox_has_combined_imports(self):
         d = DiamondChild()
-        result = d._python_exec("def func(self):\n    x = numpy.array([1, 2, 3]); cv2.__name__\n    return len(x)", runner=None)
+        runner = MagicMock()
+        runner.sandbox_builder = d._oap_sandbox_builder
+        result = d._python_exec("def func(self):\n    x = numpy.array([1, 2, 3]); cv2.__name__\n    return len(x)", runner=runner)
         assert result == 3
 
     def test_python_exec_sandbox_has_import_alias(self):
         d = DiamondChild()
-        result = d._python_exec("def func(self):\n    x = np.array([1, 2, 3])\n    return len(x)", runner=None)
+        runner = MagicMock()
+        runner.sandbox_builder = d._oap_sandbox_builder
+        result = d._python_exec("def func(self):\n    x = np.array([1, 2, 3])\n    return len(x)", runner=runner)
         assert result == 3

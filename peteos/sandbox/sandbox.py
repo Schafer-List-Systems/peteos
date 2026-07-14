@@ -231,7 +231,7 @@ class SandboxBuilder:
         self._base: SandboxBuilder | None = base  # parent builder in the chain (inner → outer)
         self._attached_sandbox: Sandbox | None = None
         self._proxies: list[tuple[str, Callable, Any | None]] = []
-        self._source_code: dict[int, tuple[str, bool, bool]] = {}
+        self._source_code: dict[int, tuple[str, bool]] = {}
         self._name_to_entry: dict[str, int] = {}  # maps function name -> source code id
         self._source_code_counter: int = 0
 
@@ -397,8 +397,16 @@ class SandboxBuilder:
         self._compilation_globals[name] = func
 
     def get_globals(self) -> dict[str, Any]:
-        """Return a copy of the builder's compilation globals, suitable for use in :meth:`Sandbox.exec`."""
-        return dict(self._compilation_globals)
+        """Return a merged copy of compilation globals from the full builder chain.
+
+        Walks up to the parent builder and starts with its globals, then updates
+        with this builder's globals, so child namespaces override parents.
+        """
+        merged: dict[str, Any] = {}
+        if self._base is not None:
+            merged.update(self._base.get_globals())
+        merged.update(self._compilation_globals)
+        return merged
 
     def add_proxy(
         self,
@@ -458,19 +466,17 @@ class SandboxBuilder:
     def add_source_code(
         self,
         code: str,
-        isolated: bool = True,
         static_functions: bool = True,
     ) -> list[tuple[str, dict]]:
         """Store agent source code, compile immediately, and register functions in the sandbox namespace.
 
-        Compiles in a copy of globals to extract function names and parameter schemas,
-        registers each function immediately in :attr:`sandbox_namespace`, registers
-        each name in the internal name-to-entry map, and returns the list of
-        (name, parameters) tuples.
+        Compiles in a merged globals namespace (inherited from all parent builders)
+        to extract function names and parameter schemas, registers each function
+        immediately in :attr:`sandbox_namespace`, registers each name in the internal
+        name-to-entry map, and returns the list of (name, parameters) tuples.
 
         Args:
             code: Python source code defining sandboxed functions.
-            isolated: If ``True``, compile in an isolated globals namespace.
             static_functions: If ``True``, global functions in the code
                 (no ``self`` parameter) will be added as static member
                 functions on the sandbox instance.
@@ -480,12 +486,12 @@ class SandboxBuilder:
             is registered on the sandbox.
         """
         key = self._source_code_counter
-        self._source_code[key] = (code, isolated, static_functions)
+        self._source_code[key] = (code, static_functions)
         self._source_code_counter += 1
 
         # Compile in a copy to gather names and parameters.
-        compile_ns = dict(self._compilation_globals) if isolated else self._compilation_globals
-        member_functions, global_functions = _compile_and_extract(code, compile_ns)
+        globals_ns = self.get_globals()
+        member_functions, global_functions = _compile_and_extract(code, globals_ns)
         if static_functions:
             member_functions.extend(global_functions)
 
@@ -579,49 +585,6 @@ class SandboxBuilder:
 
         return Sandbox(prev)
 
-    def build(self) -> Sandbox:
-        """Compile and assemble all configured data into a new Sandbox.
-
-        Creates a sandbox with the configured imports, proxies, and
-        compiled source code. If a sandbox is already attached (from a
-        previous build), this method will error — call ``detach()`` first
-        to release it.
-
-        Returns:
-            A new Sandbox instance containing all compiled functions and
-            proxies.
-
-        Raises:
-            ValueError: If a sandbox is already attached.
-        """
-        if self._attached_sandbox is not None:
-            raise ValueError("sandbox already attached — call detach() first")
-        sandbox = Sandbox()
-
-        # Snapshot so the builder's namespace stays intact for future builds.
-        sandbox_globals = dict(self._compilation_globals)
-
-        for code, isolated, global_as_static in self._source_code.values():
-            # Isolated=True gets a copy to avoid polluting the builder's globals.
-            compile_ns = dict(sandbox_globals) if isolated else sandbox_globals
-
-            member_functions, global_functions = _compile_and_extract(code, compile_ns)
-
-            if global_as_static:
-                member_functions.extend(global_functions)
-
-            # Attach member functions as proxied sandbox methods.
-            for mf in member_functions:
-                proxy = self.create_proxy(mf)
-                setattr(sandbox, mf.__name__, proxy)
-
-        # Registered proxies attach by name with real_self binding.
-        for name, func, real_self in self._proxies:
-            proxy = self.create_proxy(func, real_self)
-            setattr(sandbox, name, proxy)
-
-        return sandbox
-
     def compile(self, sandbox: Sandbox, code: str, globals_dict: dict[str, Any]) -> tuple[list[Callable], list[Callable]]:
         """Compile *code* in *globals_dict* and attach found member functions to this Sandbox.
 
@@ -711,15 +674,6 @@ class SandboxBuilder:
             _callable = partial(func, real_self)
         else:
             _callable = func
-
-        # Legacy/_effective_argcount: used by obsolete SandboxBuilder.call() for
-        # matching compiled functions by argument count. Kept for backward compat
-        # but this entire path is obsolete under the new get_sandbox() design.
-        original_co_argcount = func.__code__.co_argcount
-        _callable._effective_argcount = (
-            max(original_co_argcount - 1, 0) if has_unbound_self else original_co_argcount
-        )
-        _callable._original_name = func.__name__
 
         return _callable
 

@@ -8,7 +8,7 @@ import uuid as _uuid
 from typing import TYPE_CHECKING
 
 from peteos.conversation.session import SessionState
-from peteos.sandbox import Sandbox
+from peteos.sandbox import Sandbox, SandboxBuilder
 from peteos.chatbot import ChatBot, ChatBotManager, Message
 
 from peteos.utils.activeclass import ActiveClass
@@ -80,6 +80,7 @@ class Runner(ActiveClass):
         )
         self._chatbot: ChatBot = chatbot or self._select_chatbot()
         self._sandbox: Sandbox | None = None
+        self._sandbox_builder: SandboxBuilder | None = None
 
     # ------------------------------------------------------------------ #
     # Properties
@@ -123,6 +124,15 @@ class Runner(ActiveClass):
     @sandbox.setter
     def sandbox(self, value: Sandbox | None) -> None:
         self._sandbox = value
+
+    @property
+    def sandbox_builder(self) -> SandboxBuilder | None:
+        """Return the sandbox builder cached on this runner, or None."""
+        return self._sandbox_builder
+
+    @sandbox_builder.setter
+    def sandbox_builder(self, value: SandboxBuilder | None) -> None:
+        self._sandbox_builder = value
 
     # ------------------------------------------------------------------ #
     # Chatbot selection

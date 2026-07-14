@@ -104,6 +104,7 @@ class AgenticObject:
         self._oap_agent: Agent = self._create_agent()
         tool_names = [t.name for t in self._oap_tool_manager.get_tool_list()]
         _logger.debug("Registered tools for %s: %s", self.__class__.__name__, tool_names)
+        self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
 
     def _create_agent(self) -> Agent:
         """Create an Agent wired to this object's role and tool_manager."""
@@ -204,10 +205,9 @@ class AgenticObject:
             )
         )
 
-    def _python_exec(self, function: str, runner: Runner | None) -> str:
+    def _python_exec(self, function: str, runner: Runner) -> str:
         """Protected tool: executes sandboxed Python code."""
-        config = _collect_oap_config(self.__class__)
-        return self._call_sandboxed(config, function, runner=runner)
+        return self._call_sandboxed(function, runner=runner)
 
     def _gather_sandbox_members(self) -> dict[str, Callable]:
         """Collect all @tool/@sandbox decorated member functions of this object.
@@ -237,6 +237,27 @@ class AgenticObject:
                 _register(method_name, method)
         return members
 
+    def _init_sandbox_builder(self, config: dict[str, Any]) -> SandboxBuilder:
+        """Create and initialize a SandboxBuilder with builtins and imports.
+
+        Args:
+            config: MRO-merged OAP config dict.
+
+        Returns:
+            A configured SandboxBuilder ready for further configuration.
+        """
+        builder = SandboxBuilder("instance")
+        builder.add_safe_builtins()
+
+        # Imports from config (MRO-merged).
+        builder.add_imports(config.get("imports", []), config.get("import_aliases"))
+
+        # All @tool/@sandbox decorated member functions from MRO + instance __dict__.
+        members = self._gather_sandbox_members()
+        builder.add_proxies(members)
+
+        return builder
+
     def _create_sandbox_builder(
         self,
         config: dict[str, Any],
@@ -251,15 +272,7 @@ class AgenticObject:
         Returns:
             A configured SandboxBuilder ready for :meth:`build`.
         """
-        builder = SandboxBuilder()
-        builder.add_safe_builtins()
-
-        # Imports from config (MRO-merged).
-        builder.populate_imports(config.get("imports", []), config.get("import_aliases"))
-
-        # All @tool/@sandbox decorated member functions from MRO + instance __dict__.
-        members = self._gather_sandbox_members()
-        builder.add_proxies(members)
+        builder = SandboxBuilder("session", base=self._oap_sandbox_builder)
 
         # add proxies for produce_output, produce_error and invoke tools but with runner registered already
         def _produce_output(data: Any) -> str:
@@ -307,40 +320,44 @@ class AgenticObject:
 
         return builder
 
-    def build_session_sandbox(
-        self,
-        config: dict[str, Any],
-        runner: "Runner | None",
-        _sandbox: Any | None = None,
-    ) -> "Sandbox | None":
-        """Build a Sandbox with all callables that sandbox code may invoke.
-
-        Args:
-            config: MRO-merged OAP config dict.
-            runner: The runner (injected by the execution environment).
-            sandbox: Unused placeholder for future compatibility.
-
-        Returns:
-            A fully assembled Sandbox instance.
-        """
-        return self._create_sandbox_builder(config, runner).build()
-
     def _call_sandboxed(
         self,
-        config: dict[str, Any],
         code: str,
-        runner: "Runner | None",
+        runner: Runner,
         *args: Any,
         **kwargs: Any,
     ) -> str:
-        """Compile, setup sandbox, and invoke a sandboxed function.
+        """Compile code in an exec-level sandbox and invoke the matching function.
 
-        Returns the result as a string, or an error message.
+        Creates a SandboxBuilder with the runner's session-level sandbox as base,
+        compiles the code, finds the matching member function by args/kwargs,
+        calls it, and returns the result.
         """
-        builder = self._create_sandbox_builder(config, runner)
-        sandbox = builder.build()
-        globals_dict = builder.get_globals()
-        return builder.call(sandbox, code, globals_dict, *args, **kwargs)
+        session_builder = runner.sandbox_builder
+        if session_builder is None:
+            raise ValueError(
+                f"Session sandbox builder not set on runner — "
+                "ensure _start_session was called before sandboxed execution"
+            )
+        builder = SandboxBuilder("exec", base=session_builder)
+        entries = builder.add_source_code(code)
+
+        # Find matching function by arg/kwargs count
+        n = len(args) + len(kwargs)
+        matching: list[str] = []
+        for name, params in entries:
+            param_count = len(params)
+            if param_count == n:
+                matching.append(name)
+
+        if len(matching) != 1:
+            raise ValueError(
+                f"expected exactly one function, found {len(matching)}: {matching}"
+            )
+
+        sandbox = builder.get_sandbox()
+        func = getattr(sandbox, matching[0])
+        return func(*args, **kwargs)
 
     @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
     def _produce_output(self, data: str, runner: "Runner | None" = None) -> str:
@@ -521,6 +538,9 @@ class AgenticObject:
     async def _start_session(self, session: Session) -> Runner:
         runner = Runner(self._oap_agent, session.uuid)
         runner._execution_environment.auto_approve_tools = list(self._oap_auto_approve_tools)
+        runner.sandbox_builder = self._create_sandbox_builder(
+            _collect_oap_config(self.__class__), runner
+        )
         await runner.start()
         session.is_active = True
         return runner
