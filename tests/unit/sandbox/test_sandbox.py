@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from peteos.sandbox import Sandbox, SandboxBuilder
-from peteos.sandbox.sandbox import Scope
+from peteos.sandbox.sandbox_builder import Scope
 
 
 class TestScope:
