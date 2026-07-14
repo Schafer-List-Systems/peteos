@@ -7,9 +7,6 @@ from peteos.sandbox.sandbox import (
     _compile_and_extract,
     _extract_func_name_and_params,
     _restricted_import,
-    build_sandbox_description,
-    create_sandbox_globals,
-    sandbox_compile,
 )
 
 __all__ = [
@@ -19,7 +16,4 @@ __all__ = [
     "_compile_and_extract",
     "_extract_func_name_and_params",
     "_restricted_import",
-    "build_sandbox_description",
-    "create_sandbox_globals",
-    "sandbox_compile",
 ]

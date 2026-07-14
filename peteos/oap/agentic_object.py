@@ -19,11 +19,7 @@ from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.utils import get_logger
 from peteos.oap.error import Error
-from peteos.sandbox import (
-    Sandbox,
-    SandboxBuilder,
-    build_sandbox_description,
-)
+from peteos.sandbox import SandboxBuilder
 
 from peteos.oap.decorators import tool
 from peteos.oap.agentic_registry import AgenticObjectRegistry
@@ -99,12 +95,12 @@ class AgenticObject:
         self._register_tools()
         self._register_output_schema_hook()
         self._register_sandbox_hook()
+        self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
         self._register_sandbox_tool()
         self._register_media_tool()
         self._oap_agent: Agent = self._create_agent()
         tool_names = [t.name for t in self._oap_tool_manager.get_tool_list()]
         _logger.debug("Registered tools for %s: %s", self.__class__.__name__, tool_names)
-        self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
 
     def _create_agent(self) -> Agent:
         """Create an Agent wired to this object's role and tool_manager."""
@@ -182,8 +178,7 @@ class AgenticObject:
         if not config.get("allow_code_execution", False):
             return
 
-        # TODO: use the function from the SandboxBuilder instead!
-        description = build_sandbox_description(config.get("imports"))
+        description = self._oap_sandbox_builder.build_sandbox_description()
         self._oap_tool_manager.register_tool(
             Tool(
                 name="python_exec",
