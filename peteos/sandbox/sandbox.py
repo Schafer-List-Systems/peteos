@@ -110,7 +110,7 @@ def _compile_and_extract(
 
 
 ################################################################################
-# Sandbox Global Namespace
+# Sandbox Global Scope
 
 def _restricted_import(name: str, registry: dict[str, Any]) -> Any:
     """Resolve import from the per-call registry only."""
@@ -162,9 +162,52 @@ _SAFE_BUILTINS: dict[str, Any] = {
 ################################################################################
 # Sandbox
 
+import contextvars
+
+
+class Scope:
+    """A hierarchical namespace with a parent reference."""
+
+    def __init__(self, name: str, parent: Scope | None = None) -> None:
+        self.name = name
+        self.parent = parent
+        self.entries: dict[str, object] = {}
+
+    def __getattr__(self, name: str) -> object:
+        if name in self.entries:
+            return self.entries[name]
+        if self.parent is not None:
+            return getattr(self.parent, name)
+        raise AttributeError(f"'{self.__class__.__name__}' has no attribute '{name}'")
+
+
 class Sandbox:
-    """Built sandbox containing all compiled member functions and proxies."""
-    pass
+    """A sandbox object where attribute resolution follows the caller's namespace."""
+
+    _calling_ns: contextvars.ContextVar[Scope | None] = contextvars.ContextVar(
+        "_calling_ns", default=None,
+    )
+
+    def __init__(self, scope: Scope) -> None:
+        self._scope = scope
+
+    def __getattr__(self, name: str) -> object:
+        """Resolve attribute via the caller's scope, then walk up the parent chain."""
+        caller_ns = Sandbox._calling_ns.get()
+        ns = caller_ns if caller_ns is not None else self._scope
+        obj = getattr(ns, name)
+        if callable(obj):
+            return lambda *args, **kwargs: obj(self, *args, **kwargs)
+        return obj
+
+    def __repr__(self) -> str:
+        names: list[str] = []
+        ns: Scope | None = self._scope
+        while ns is not None:
+            names.append(ns.name)
+            ns = ns.parent
+        return f"{self.__class__.__name__}(namespaces={names})"
+
 
 class SandboxBuilder:
     # Why the sandbox is safe regarding sibling functions with real_self:
@@ -181,16 +224,73 @@ class SandboxBuilder:
     #   5. Wrapper's __globals__ is clean before each call — the finally
     #      ensures no residual references persist across invocations.
 
-    def __init__(self) -> None:
+    def __init__(self, name: str, base: "SandboxBuilder | None" = None) -> None:
+        self._name: str = name
         self._compilation_globals: dict[str, Any] = {}
+        self._sandbox_namespace: dict[str, Callable] = {}  # sandbox_namespace: name → function for this level
+        self._base: SandboxBuilder | None = base  # parent builder in the chain (inner → outer)
+        self._attached_sandbox: Sandbox | None = None
         self._proxies: list[tuple[str, Callable, Any | None]] = []
         self._source_code: dict[int, tuple[str, bool, bool]] = {}
         self._name_to_entry: dict[str, int] = {}  # maps function name -> source code id
         self._source_code_counter: int = 0
 
-    def get_globals(self) -> dict[str, Any]:
-        """Return a copy of the builder's compilation globals, suitable for use in :meth:`Sandbox.exec`."""
-        return dict(self._compilation_globals)
+    @property
+    def sandbox_namespace(self) -> dict[str, Callable]:
+        """Sandbox namespace dict for this level: name → function."""
+        return self._sandbox_namespace
+
+    def add_safe_builtins(self, overwrite: bool = True) -> None:
+        """Add the safe builtins to the sandbox's global namespace.
+
+        See ``_SAFE_BUILTINS`` for the default safe set. Also injects a
+        restricted ``__import__`` that only resolves names from the
+        builder's configured imports.
+
+        Args:
+            overwrite: If ``False``, raise ``ValueError`` for any name
+                       collision with the safe builtin set. Defaults to
+                       ``True``.
+        """
+        for name, func in _SAFE_BUILTINS.items():
+            if not overwrite and name in self._compilation_globals:
+                raise ValueError(f"name {name!r} already exists in the sandbox namespace")
+        self._compilation_globals.update(_SAFE_BUILTINS)
+        if not overwrite and "__import__" in self._compilation_globals:
+            raise ValueError(f"name '__import__' already exists in the sandbox namespace")
+        self._compilation_globals["__import__"] = lambda name, *_a, **_kw: _restricted_import(
+            name, self._compilation_globals
+        )
+
+    def add_caller_builtins(self, overwrite: bool = True) -> None:
+        """Mirror the caller's builtins into the sandbox's global namespace.
+
+        Captures a snapshot of ``vars(builtins)`` at call time.
+
+        Args:
+            overwrite: If ``False``, raise ``ValueError`` for any name
+                       collision with the caller's builtins. Defaults to
+                       ``True``.
+        """
+        import builtins
+        if not overwrite:
+            for name in builtins.__dict__:
+                if name in self._compilation_globals:
+                    raise ValueError(f"name {name!r} already exists in the sandbox namespace")
+        self._compilation_globals.update(builtins.__dict__)
+
+    def add_builtin(self, name: str, func: Callable, overwrite: bool = True) -> None:
+        """Manually add a builtin to the sandbox's global namespace.
+
+        Args:
+            name: The name of the builtin.
+            func: The builtin callable.
+            overwrite: If ``False``, raise ``ValueError`` when a name
+                       collision exists. Defaults to ``True``.
+        """
+        if not overwrite and name in self._compilation_globals:
+            raise ValueError(f"name {name!r} already exists in the sandbox namespace")
+        self._compilation_globals[name] = func
 
     def build_sandbox_description(self) -> str:
         """Build the description string for the python_exec tool.
@@ -252,7 +352,7 @@ class SandboxBuilder:
         """
         return self._compilation_globals.get(name)
 
-    def populate_imports(
+    def add_imports(
         self,
         imports: list[object],
         aliases: dict[str, str] | None = None,
@@ -269,108 +369,6 @@ class SandboxBuilder:
             for alias, name in aliases.items():
                 mod = self.get_import(name)
                 self.add_import(mod, alias)
-
-    def add_proxy(
-        self,
-        name: str,
-        func: Callable,
-        real_self: Any | None = None,
-    ) -> None:
-        """Attach a callable proxy to the sandbox under *name*.
-
-        The proxy is created via :meth:`create_proxy`, binding *real_self*
-        if required. The resulting proxy will be set on the sandbox object
-        under *name* when :meth:`build` is called.
-
-        Args:
-            name: The attribute name for the proxy on the sandbox object.
-            func: The original callable to proxy.
-            real_self: The owning object (used to look up the actual method).
-        """
-        self._proxies.append((name, func, real_self))
-
-    def add_proxies(self, proxies: dict[str, Callable]) -> None:
-        """Batch-add callables to be proxied and attached to the Sandbox.
-
-        Raises ``ValueError`` if any name in *proxies* conflicts with an
-        already registered proxy name.
-
-        Args:
-            proxies: Mapping of sandbox attribute names to callables.
-        """
-        existing = {name for name, *_ in self._proxies}
-        collisions = set(proxies.keys()) & existing
-        if collisions:
-            raise ValueError(f"proxy name(s) {collisions!r} already registered")
-        for name, func in proxies.items():
-            self._proxies.append((name, func, None))
-
-    def add_source_code(
-        self,
-        code: str,
-        isolated: bool = True,
-        static_functions: bool = True,
-    ) -> list[tuple[str, dict]]:
-        """Store agent source code and compile to gather registered function names and parameters.
-
-        The source code is also recompiled at :meth:`build` time.
-
-        Compiles in a copy of globals to extract function names and parameter schemas,
-        registers each name in the internal name-to-entry map, and returns the list of
-        (name, parameters) tuples.
-
-        Args:
-            code: Python source code defining sandboxed functions.
-            isolated: If ``True``, compile in an isolated globals namespace.
-            static_functions: If ``True``, global functions in the code
-                (no ``self`` parameter) will be added as static member
-                functions on the sandbox instance.
-
-        Returns:
-            List of (func_name, parameters) tuples for each function that
-            will be registered on the sandbox.
-        """
-        key = self._source_code_counter
-        self._source_code[key] = (code, isolated, static_functions)
-        self._source_code_counter += 1
-
-        # Compile in a copy to gather names and parameters.
-        compile_ns = dict(self._compilation_globals) if isolated else self._compilation_globals
-        member_functions, global_functions = _compile_and_extract(code, compile_ns)
-        if static_functions:
-            member_functions.extend(global_functions)
-
-        result: list[tuple[str, dict]] = []
-        for mf in member_functions:
-            func_name, params = _extract_func_name_and_params(mf)[:2]
-            result.append((func_name, params))
-            self._name_to_entry[func_name] = key
-
-        return result
-
-    def remove_source_code(self, name: str) -> bool:
-        """Remove the source code entry that defines *name*.
-
-        Removes the entry from the source code dict and all associated
-        names from the name-to-entry map. Returns ``True`` if found,
-        ``False`` otherwise.
-
-        Args:
-            name: A function name that was registered by a source code entry.
-
-        Returns:
-            ``True`` if the source code entry was found and removed,
-            ``False`` if no entry defines that name.
-        """
-        key = self._name_to_entry.pop(name, None)
-        if key is None:
-            return False
-        del self._source_code[key]
-        # Clean up all names that pointed to this key.
-        self._name_to_entry = {
-            n: k for n, k in self._name_to_entry.items() if k != key
-        }
-        return True
 
     def add_global_var(self, name: str, value: Any, overwrite: bool = True) -> None:
         """Add a variable to the sandbox's global namespace.
@@ -398,70 +396,206 @@ class SandboxBuilder:
             raise ValueError(f"name {name!r} already exists in the sandbox namespace")
         self._compilation_globals[name] = func
 
-    def add_safe_builtins(self, overwrite: bool = True) -> None:
-        """Add the safe builtins to the sandbox's global namespace.
+    def get_globals(self) -> dict[str, Any]:
+        """Return a copy of the builder's compilation globals, suitable for use in :meth:`Sandbox.exec`."""
+        return dict(self._compilation_globals)
 
-        See ``_SAFE_BUILTINS`` for the default safe set. Also injects a
-        restricted ``__import__`` that only resolves names from the
-        builder's configured imports.
+    def add_proxy(
+        self,
+        name: str,
+        func: Callable,
+        real_self: Any | None = None,
+    ) -> None:
+        """Attach a callable proxy to the sandbox under *name*.
 
-        Args:
-            overwrite: If ``False``, raise ``ValueError`` for any name
-                       collision with the safe builtin set. Defaults to
-                       ``True``.
-        """
-        for name, func in _SAFE_BUILTINS.items():
-            if not overwrite and name in self._compilation_globals:
-                raise ValueError(f"name {name!r} already exists in the sandbox namespace")
-        self._compilation_globals.update(_SAFE_BUILTINS)
-        if not overwrite and "__import__" in self._compilation_globals:
-            raise ValueError(f"name '__import__' already exists in the sandbox namespace")
-        self._compilation_globals["__import__"] = lambda name, *_a, **_kw: _restricted_import(
-            name, self._compilation_globals
-        )
-
-    def add_caller_builtins(self, overwrite: bool = True) -> None:
-        """Mirror the caller's builtins into the sandbox's global namespace.
-
-        Captures a snapshot of ``vars(builtins)`` at call time.
+        Binds *real_self* as the first argument if the function has an
+        unbound self parameter, then registers the callable in the namespace.
 
         Args:
-            overwrite: If ``False``, raise ``ValueError`` for any name
-                       collision with the caller's builtins. Defaults to
-                       ``True``.
+            name: The attribute name for the proxy on the sandbox object.
+            func: The original callable to proxy.
+            real_self: The owning object (used to look up the actual method).
         """
-        import builtins
-        if not overwrite:
-            for name in builtins.__dict__:
-                if name in self._compilation_globals:
-                    raise ValueError(f"name {name!r} already exists in the sandbox namespace")
-        self._compilation_globals.update(builtins.__dict__)
+        _, _, has_unbound_self = _extract_func_name_and_params(func)
+        
+        def make_proxy():
+            def proxy(self: Sandbox, *args, **kwargs):
+                if has_unbound_self:
+                    assert real_self is not None
+                    return func(real_self, *args, **kwargs)
+                else:
+                    return func(*args, **kwargs)
 
-    def add_builtin(self, name: str, func: Callable, overwrite: bool = True) -> None:
-        """Manually add a builtin to the sandbox's global namespace.
+            return proxy
+
+        self._sandbox_namespace[name] = make_proxy()
+
+        # legacy code:
+        self._proxies.append((name, func, real_self))
+
+    def add_proxies(
+        self,
+        proxies: dict[str, Callable],
+        real_self: Any | None = None,
+    ) -> None:
+        """Batch-add callables to be proxied and attached to the Sandbox.
+
+        Raises ``ValueError`` if any name in *proxies* conflicts with an
+        already registered proxy name. Delegates to :meth:`add_proxy` for
+        each callable.
 
         Args:
-            name: The name of the builtin.
-            func: The builtin callable.
-            overwrite: If ``False``, raise ``ValueError`` when a name
-                       collision exists. Defaults to ``True``.
+            proxies: Mapping of sandbox attribute names to callables.
+            real_self: The owning object, passed to :meth:`add_proxy` for each.
         """
-        if not overwrite and name in self._compilation_globals:
-            raise ValueError(f"name {name!r} already exists in the sandbox namespace")
-        self._compilation_globals[name] = func
+        existing = {name for name, *_ in self._proxies}
+        collisions = set(proxies.keys()) & existing
+        if collisions:
+            raise ValueError(f"proxy name(s) {collisions!r} already registered")
+        for name, func in proxies.items():
+            self.add_proxy(name, func, real_self)
+
+    def add_source_code(
+        self,
+        code: str,
+        isolated: bool = True,
+        static_functions: bool = True,
+    ) -> list[tuple[str, dict]]:
+        """Store agent source code, compile immediately, and register functions in the sandbox namespace.
+
+        Compiles in a copy of globals to extract function names and parameter schemas,
+        registers each function immediately in :attr:`sandbox_namespace`, registers
+        each name in the internal name-to-entry map, and returns the list of
+        (name, parameters) tuples.
+
+        Args:
+            code: Python source code defining sandboxed functions.
+            isolated: If ``True``, compile in an isolated globals namespace.
+            static_functions: If ``True``, global functions in the code
+                (no ``self`` parameter) will be added as static member
+                functions on the sandbox instance.
+
+        Returns:
+            List of (func_name, parameters) tuples for each function that
+            is registered on the sandbox.
+        """
+        key = self._source_code_counter
+        self._source_code[key] = (code, isolated, static_functions)
+        self._source_code_counter += 1
+
+        # Compile in a copy to gather names and parameters.
+        compile_ns = dict(self._compilation_globals) if isolated else self._compilation_globals
+        member_functions, global_functions = _compile_and_extract(code, compile_ns)
+        if static_functions:
+            member_functions.extend(global_functions)
+
+        ns_name = self._name
+
+        def make_proxy(compiled_function, has_unbound_self: bool):
+            def proxy(self: Sandbox, *args, **kwargs):
+                # Find this builder's Scope in the chain and push it.
+                caller_scope: Scope = self._scope
+                while caller_scope is not None and caller_scope.name != ns_name:
+                    caller_scope = caller_scope.parent
+                if caller_scope is None:
+                    raise RuntimeError(
+                        f"Scope '{ns_name}' not found in sandbox chain — this should not happen"
+                    )
+                token = Sandbox._calling_ns.set(caller_scope)
+                try:
+                    return compiled_function(self, *args, **kwargs) if has_unbound_self else compiled_function(*args, **kwargs)
+                finally:
+                    Sandbox._calling_ns.reset(token)
+            return proxy
+
+        result: list[tuple[str, dict]] = []
+        for mf in member_functions:
+            func_name, params, has_unbound_self = _extract_func_name_and_params(mf)
+            result.append((func_name, params))
+            self._sandbox_namespace[func_name] = make_proxy(mf, has_unbound_self)
+            self._name_to_entry[func_name] = key
+
+        return result
+
+    def remove_source_code(self, name: str) -> bool:
+        """Remove the source code entry that defines *name*.
+
+        Removes the entry from the source code dict and all associated
+        names from the name-to-entry map. Returns ``True`` if found,
+        ``False`` otherwise.
+
+        Args:
+            name: A function name that was registered by a source code entry.
+
+        Returns:
+            ``True`` if the source code entry was found and removed,
+            ``False`` if no entry defines that name.
+        """
+        key = self._name_to_entry.pop(name, None)
+        if key is None:
+            return False
+        del self._source_code[key]
+        del self._sandbox_namespace[name]
+        # Clean up all names that pointed to this key.
+        to_remove = [n for n, k in self._name_to_entry.items() if k == key]
+        for n in to_remove:
+            del self._sandbox_namespace[n]
+            del self._name_to_entry[n]
+        return True
+
+    def get_sandbox(self, freeze_namespaces: bool = True) -> Sandbox:
+        """Return a sandbox snapshot from the builder chain.
+
+        Traverses the builder chain (from self to outermost base), builds
+        Scopes from each builder's :attr:`sandbox_namespace`, and returns
+        a :class:`Sandbox` whose innermost Scope points to the session-level
+        Scope and each Scope's :attr:`parent` points to the next outer one.
+
+        When ``freeze_namespaces`` is True, each builder's namespace is
+        shallow-copied into a fresh entries dict so the returned sandbox
+        is independent — changes to the builder chain after this call do
+        not affect the returned sandbox. When False, each Scope shares
+        the builder's live namespace dict.
+
+        Args:
+            freeze_namespaces: If True, copy namespaces for snapshot isolation.
+
+        Returns:
+            A sandbox snapshot.
+        """
+        builders: list[SandboxBuilder] = []
+        builder: SandboxBuilder | None = self
+        while builder is not None:
+            builders.append(builder)
+            builder = builder._base
+
+        # Build Scope chain: first builder = innermost, last = outermost root.
+        prev: Scope | None = None
+        for b in reversed(builders):
+            ns_dict = dict(b._sandbox_namespace) if freeze_namespaces else b._sandbox_namespace
+            scope = Scope(b._name, parent=prev)
+            scope.entries = ns_dict
+            prev = scope
+
+        return Sandbox(prev)
 
     def build(self) -> Sandbox:
         """Compile and assemble all configured data into a new Sandbox.
 
         Creates a sandbox with the configured imports, proxies, and
-        compiled source code. Calling this method multiple times yields
-        independent sandboxes with identical capabilities but distinct
-        instances.
+        compiled source code. If a sandbox is already attached (from a
+        previous build), this method will error — call ``detach()`` first
+        to release it.
 
         Returns:
             A new Sandbox instance containing all compiled functions and
             proxies.
+
+        Raises:
+            ValueError: If a sandbox is already attached.
         """
+        if self._attached_sandbox is not None:
+            raise ValueError("sandbox already attached — call detach() first")
         sandbox = Sandbox()
 
         # Snapshot so the builder's namespace stays intact for future builds.
@@ -569,52 +703,25 @@ class SandboxBuilder:
         Returns:
             A compiled proxy function ready for use in sandboxed code.
         """
-
-        # gather function parameters
         func_name, _parameters, has_unbound_self = _extract_func_name_and_params(func)
 
         if has_unbound_self:
-            assert(real_self is not None)
+            assert real_self is not None
             from functools import partial
             _callable = partial(func, real_self)
-            _real_self_id = id(real_self)
-            proxy_globals: dict[str, Any] = {"_callable": _callable}
-
-            _code = (
-                f"def _proxy(*args, **kwargs):  # type: ignore[override]\n"
-                f"    if id(_callable) != {id(_callable)}:\n"
-                f"        raise ValueError('{func.__name__} replaced in proxy at runtime')\n"
-                f"    if id(_callable.args[0]) != {id(real_self)}:\n"
-                f"        raise ValueError('{func.__name__} rebound in proxy at runtime')\n"
-                f"    return _callable(*args, **kwargs)\n"
-            )
         else:
             _callable = func
-            proxy_globals: dict[str, Any] = {"_callable": _callable}
 
-            _code = (
-                f"def _proxy(*args, **kwargs):  # type: ignore[override]\n"
-                f"    if id(_callable) != {id(_callable)}:\n"
-                f"        raise ValueError('{func.__name__} replaced in proxy at runtime')\n"
-                f"    return _callable(*args, **kwargs)\n"
-            )
-        exec(_code, proxy_globals)
-        proxy = proxy_globals["_proxy"]
+        # Legacy/_effective_argcount: used by obsolete SandboxBuilder.call() for
+        # matching compiled functions by argument count. Kept for backward compat
+        # but this entire path is obsolete under the new get_sandbox() design.
+        original_co_argcount = func.__code__.co_argcount
+        _callable._effective_argcount = (
+            max(original_co_argcount - 1, 0) if has_unbound_self else original_co_argcount
+        )
+        _callable._original_name = func.__name__
 
-        # TODO: once the full signature is wired up, set __signature__ and build
-        #       the real __code__ from _parameters. For now just store
-        #       _effective_argcount as an attribute so call() can match
-        #       member functions correctly.
-        if has_unbound_self:
-            original_co_argcount = func.__code__.co_argcount
-            # self is bound, so effective count = original - 1
-            proxy._effective_argcount = max(original_co_argcount - 1, 0)
-            proxy._original_name = func.__name__
-        else:
-            proxy._effective_argcount = func.__code__.co_argcount
-            proxy._original_name = func.__name__
-
-        return proxy
+        return _callable
 
 
 class SandboxSelf:
