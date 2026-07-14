@@ -424,8 +424,11 @@ class SandboxBuilder:
             func: The original callable to proxy.
             real_self: The owning object (used to look up the actual method).
         """
+        if name in self._sandbox_namespace:
+            raise ValueError(f"proxy name {name!r} already registered")
+
         _, _, has_unbound_self = _extract_func_name_and_params(func)
-        
+
         def make_proxy():
             def proxy(self: Sandbox, *args, **kwargs):
                 if has_unbound_self:
@@ -676,53 +679,6 @@ class SandboxBuilder:
             _callable = func
 
         return _callable
-
-
-class SandboxSelf:
-    """Per-invocation wrapper passed as `self` into sandbox code.
-
-    An empty object that gets populated with proxy methods per
-    invocation.  The proxy lambdas capture the real self and runner in
-    their closure scope, so the sandboxed code has no way to reach the
-    underlying AgenticObject or runner via introspection.
-
-    The ``invoke`` method is attached conditionally by ``_python_exec``
-    when sub-agent invocation is enabled on the parent AgenticObject.
-    """
-    pass
-
-    @staticmethod
-    def populate(sandbox_self: "SandboxSelf", real_self: object) -> None:
-        """Attach proxied @tool and @sandbox methods to an empty SandboxSelf.
-
-        Walks the MRO of *real_self*'s class, finds methods decorated
-        with ``@tool`` or ``@sandbox``, and attaches them as proxy
-        attributes using the ``_sandbox_name`` (falling back to the
-        Python method name).
-
-        Args:
-            sandbox_self: The empty SandboxSelf instance to populate.
-            real_self: The AgenticObject instance whose methods to proxy.
-        """
-        registered: set[str] = set()
-
-        def _register(name: str, method: Callable) -> None:
-            """Register a tool/sandbox method if not already registered."""
-            if name in registered:
-                return
-            sandbox_name = getattr(method, "_tool_name", None) or getattr(method, "_sandbox_name", None)
-            if sandbox_name is None:
-                return
-            registered.add(name)
-            setattr(sandbox_self, sandbox_name, getattr(real_self, name))
-
-        for cls in real_self.__class__.__mro__:
-            for method_name, method in cls.__dict__.items():
-                if callable(method):
-                    _register(method_name, method)
-        for method_name, method in real_self.__dict__.items():
-            if callable(method):
-                _register(method_name, method)
 
 
 def build_sandbox_description(imports: list[object] | None = None) -> str:

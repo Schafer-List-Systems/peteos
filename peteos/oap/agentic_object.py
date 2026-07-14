@@ -541,6 +541,7 @@ class AgenticObject:
         runner.sandbox_builder = self._create_sandbox_builder(
             _collect_oap_config(self.__class__), runner
         )
+        runner.sandbox = runner.sandbox_builder.get_sandbox(freeze_namespaces=False)
         await runner.start()
         session.is_active = True
         return runner

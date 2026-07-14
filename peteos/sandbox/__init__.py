@@ -3,7 +3,6 @@
 from peteos.sandbox.sandbox import (
     Sandbox,
     SandboxBuilder,
-    SandboxSelf,
     _SAFE_BUILTINS,
     _compile_and_extract,
     _extract_func_name_and_params,
@@ -16,7 +15,6 @@ from peteos.sandbox.sandbox import (
 __all__ = [
     "Sandbox",
     "SandboxBuilder",
-    "SandboxSelf",
     "_SAFE_BUILTINS",
     "_compile_and_extract",
     "_extract_func_name_and_params",
