@@ -36,7 +36,7 @@ def _wire_runner(obj, runner):
     config = {"invoke_sub_agents": False}
     sandbox_builder = obj._create_sandbox_builder(config, runner=runner)
     runner.sandbox_builder = sandbox_builder
-    runner.sandbox = sandbox_builder.get_sandbox()
+    runner.sandbox = sandbox_builder.get_sandbox(freeze_namespaces=False)
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +326,7 @@ class TestFullLifecycle:
 
         tool = obj._oap_tool_manager.get_tool("multiply")
         assert tool is not None
-        result = tool.execute(a=6, b=7)
+        result = tool.execute(a=6, b=7, runner=runner)
         assert result == 42
 
         obj.remove_function("multiply", runner)

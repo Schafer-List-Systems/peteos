@@ -19,7 +19,7 @@ def _wire_runner(obj, runner):
     config = {"invoke_sub_agents": False}
     sandbox_builder = obj._create_sandbox_builder(config, runner=runner)
     runner.sandbox_builder = sandbox_builder
-    runner.sandbox = sandbox_builder.get_sandbox()
+    runner.sandbox = sandbox_builder.get_sandbox(freeze_namespaces=False)
 
 
 @agentic_object()
@@ -206,7 +206,7 @@ class TestPersistedFunctionSandboxIsolation:
         obj.define_function(code, "Double a number", runner)
         tool = obj._oap_tool_manager.get_tool("double")
         assert tool is not None
-        result = tool.execute(x=21)
+        result = tool.execute(x=21, runner=runner)
         assert result == 42
 
     def test_defined_function_with_string_output(self, obj, runner):
@@ -215,7 +215,7 @@ class TestPersistedFunctionSandboxIsolation:
         code = "def upper(text: str) -> str:\n    return text.upper()"
         obj.define_function(code, "Uppercase a string", runner)
         tool = obj._oap_tool_manager.get_tool("upper")
-        result = tool.execute(text="hello")
+        result = tool.execute(text="hello", runner=runner)
         assert result == "HELLO"
 
     def test_defined_function_with_none_returns_ok(self, obj, runner):
@@ -224,7 +224,7 @@ class TestPersistedFunctionSandboxIsolation:
         code = "def noop(x: int) -> None:\n    pass"
         obj.define_function(code, "No-op function", runner)
         tool = obj._oap_tool_manager.get_tool("noop")
-        result = tool.execute(x=42)
+        result = tool.execute(x=42, runner=runner)
         assert result is None
 
 
