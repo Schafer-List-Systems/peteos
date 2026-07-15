@@ -475,6 +475,8 @@ class SandboxBuilder:
                     return compiled_function(self, *args, **kwargs) if has_unbound_self else compiled_function(*args, **kwargs)
                 finally:
                     Sandbox._calling_ns.reset(token)
+
+            # TODO: copy docstring of compiled function to the proxy
             return proxy
 
         result: list[tuple[str, dict]] = []
@@ -538,6 +540,8 @@ class SandboxBuilder:
         """
         if op in self._hooks:
             self._hooks[op].remove(handler)
+            if not self._hooks[op]:
+                del self._hooks[op]
         if self._base is not None:
             self._base.remove_hook(op, handler)
 
