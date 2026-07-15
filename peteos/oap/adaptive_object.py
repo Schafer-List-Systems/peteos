@@ -10,6 +10,7 @@ from peteos.engine import Runner
 from peteos.oap.decorators import agentic_object, tool
 from peteos.sandbox import SandboxBuilder
 from peteos.persona.toolmanager import Tool
+from peteos.conversation.session import Session
 
 from peteos.oap.agentic_registry import AgenticObjectRegistry
 
@@ -83,8 +84,7 @@ class AdaptiveObject(AgenticObject):
         func_name: str,
         docstring: str,
         code: str,
-        parameters: dict,
-        runner: Runner,
+        parameters: dict
     ) -> None:
         """Register a dynamically defined function as an agentic tool.
 
@@ -113,9 +113,8 @@ class AdaptiveObject(AgenticObject):
         self.__dict__[func_name] = proxy
         self._oap_tool_manager.register_tool(defined_tool)
 
-        # Auto-approve on instance and runner's execution environment.
+        # Auto-approve on instance level — propagated to each session via hook.
         self._oap_auto_approve_tools.append(func_name)
-        runner._execution_environment.auto_approve_tools.append(func_name)
 
     def _try_compile(self, code: str) -> tuple[str, dict]:
         """Compile code, validating exactly one function. Rolls back on failure.
@@ -138,7 +137,7 @@ class AdaptiveObject(AgenticObject):
 
         return func_name, parameters
 
-    def _define_function(self, code: str, docstring: str, runner: Runner) -> str:
+    def _define_function(self, code: str, docstring: str) -> str:
         """Define a Python function as a new tool.
 
         Pass the full function definition as a string and a docstring of what the function does including its arguments and return type.
@@ -148,25 +147,37 @@ class AdaptiveObject(AgenticObject):
             docstring: The Python docstring of the function with parameter description.
         """
         func_name, parameters = self._try_compile(code)
-        self._add_tool(func_name, docstring, code, parameters, runner)
+        self._add_tool(func_name, docstring, code, parameters)
         return f"OK: registered as '{func_name}'"
 
-    def _delete_tool(self, func_name: str, runner: Runner) -> None:
+    def _delete_tool(self, func_name: str) -> None:
         """Remove a dynamically defined tool.
 
         Args:
             func_name: The function name to remove.
             runner: Runner injected by the framework.
         """
-        self._oap_sandbox_builder.remove_source_code(func_name)
         del self._oap_define_functions[func_name]
         self._oap_tool_manager._tools.pop(func_name, None)
         self.__dict__.pop(func_name, None)
         self._oap_auto_approve_tools.remove(func_name)
-        runner._execution_environment.auto_approve_tools.remove(func_name)
+
+    async def _start_session(self, session: Session) -> Runner:
+        runner = await super()._start_session(session)
+
+        def _on_add_member(func_name: str, _params: dict) -> None:
+            runner._execution_environment.auto_approve_tools.append(func_name)
+
+        def _on_remove_member(func_name: str) -> None:
+            runner._execution_environment.auto_approve_tools.remove(func_name)
+
+        runner.sandbox_builder.add_hook("on_add_member", _on_add_member)
+        runner.sandbox_builder.add_hook("on_remove_member", _on_remove_member)
+
+        return runner
 
     @tool
-    def remove_function(self, name: str, runner: Runner) -> str:
+    def remove_function(self, name: str) -> str:
         """Remove a defined tool.
 
         Args:
@@ -176,7 +187,8 @@ class AdaptiveObject(AgenticObject):
         if name not in self._oap_define_functions:
             return f"Error: tool '{name}' not found or not defined by this agent."
 
-        self._delete_tool(name, runner)
+        self._oap_sandbox_builder.remove_source_code(name)
+        self._delete_tool(name)
 
         return "OK"
 
@@ -248,7 +260,6 @@ class AdaptiveObject(AgenticObject):
         self,
         code: str,
         docstring: str,
-        runner: Runner,
         mocked_functions: dict[str, str] | None = None,
         tests: str | None = None,
     ) -> str:
@@ -276,4 +287,4 @@ class AdaptiveObject(AgenticObject):
                 code, mocked_functions or {}, tests or ""
             )
 
-        return self._define_function(code, docstring, runner)
+        return self._define_function(code, docstring)
