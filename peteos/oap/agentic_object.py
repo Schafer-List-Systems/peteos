@@ -19,11 +19,7 @@ from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.utils import get_logger
 from peteos.oap.error import Error
-from peteos.oap.sandbox import (
-    SandboxSelf,
-    _compile_and_select,
-    build_sandbox_description,
-)
+from peteos.sandbox import SandboxBuilder
 
 from peteos.oap.decorators import tool
 from peteos.oap.agentic_registry import AgenticObjectRegistry
@@ -99,6 +95,7 @@ class AgenticObject:
         self._register_tools()
         self._register_output_schema_hook()
         self._register_sandbox_hook()
+        self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
         self._register_sandbox_tool()
         self._register_media_tool()
         self._oap_agent: Agent = self._create_agent()
@@ -180,7 +177,8 @@ class AgenticObject:
         config = _collect_oap_config(self.__class__)
         if not config.get("allow_code_execution", False):
             return
-        description = build_sandbox_description(config.get("imports"))
+
+        description = self._oap_sandbox_builder.build_sandbox_description()
         self._oap_tool_manager.register_tool(
             Tool(
                 name="python_exec",
@@ -202,38 +200,89 @@ class AgenticObject:
             )
         )
 
-    def _python_exec(self, function: str, runner: Runner | None) -> str:
+    def _python_exec(self, function: str, runner: Runner) -> str:
         """Protected tool: executes sandboxed Python code."""
-        config = _collect_oap_config(self.__class__)
-        return self._call_sandboxed(config, function, runner=runner)
+        return self._call_sandboxed(function, runner=runner)
 
-    def _setup_sandbox_self(
+    def _gather_sandbox_members(self) -> dict[str, Callable]:
+        """Collect all @tool/@sandbox decorated member functions of this object.
+
+        Walks the MRO and the instance __dict__ to find methods decorated
+        with @tool or @sandbox, returning them as a dict mapping sandbox
+        name to bound method. Each returned callable is already bound —
+        self is stripped from the signature so the caller receives a
+        ready-to-call function taking only the remaining parameters.
+        The instance __dict__ takes precedence over class-level methods,
+        shadowing for that particular instance.
+        """
+        members: dict[str, Callable] = {}
+
+        def _register(name: str, method: Callable) -> None:
+            sandbox_name = getattr(method, "_sandbox_name", None) or getattr(method, "_tool_name", None)
+            if sandbox_name is None:
+                return
+            members[sandbox_name] = getattr(self, name)
+
+        for cls in self.__class__.__mro__:
+            for method_name, method in cls.__dict__.items():
+                if callable(method):
+                    _register(method_name, method)
+        for method_name, method in self.__dict__.items():
+            if callable(method):
+                _register(method_name, method)
+        return members
+
+    def _init_sandbox_builder(self, config: dict[str, Any]) -> SandboxBuilder:
+        """Create and initialize a SandboxBuilder with builtins and imports.
+
+        Args:
+            config: MRO-merged OAP config dict.
+
+        Returns:
+            A configured SandboxBuilder ready for further configuration.
+        """
+        builder = SandboxBuilder("instance")
+        builder.add_safe_builtins()
+
+        # Imports from config (MRO-merged).
+        builder.add_imports(config.get("imports", []), config.get("import_aliases"))
+
+        # All @tool/@sandbox decorated member functions from MRO + instance __dict__.
+        members = self._gather_sandbox_members()
+        builder.add_proxies(members)
+
+        return builder
+
+    def _create_sandbox_builder(
         self,
         config: dict[str, Any],
         runner: "Runner | None",
-        sandbox_self: SandboxSelf | None = None,
-    ) -> SandboxSelf:
-        """Create or populate a SandboxSelf with closures, invoke, and tool proxies."""
-        if sandbox_self is None:
-            sandbox_self = SandboxSelf()
+    ) -> SandboxBuilder:
+        """Create and configure a SandboxBuilder for session sandbox code.
 
-        SandboxSelf.populate(sandbox_self, self)
+        Args:
+            config: MRO-merged OAP config dict.
+            runner: The runner (injected by the execution environment).
 
-        # Overwrite tool-proxied produce_output/produce_error with closures
-        # that capture the runner, so they actually get called with the right
-        # runner arg instead of the bound method that defaults to None.
+        Returns:
+            A configured SandboxBuilder ready for :meth:`build`.
+        """
+        builder = SandboxBuilder("session", base=self._oap_sandbox_builder)
+
+        # add proxies for produce_output, produce_error and invoke tools but with runner registered already
         def _produce_output(data: Any) -> str:
-            _logger.debug("_setup_sandbox_self: _produce_output wrapper called, runner=%s", runner)
-            return self._produce_output(data, runner=runner)  # type: ignore[arg-type]
+            _logger.debug("build_session_sandbox: _produce_output wrapper called, runner=%s", runner)
+            return self._produce_output(data, runner=runner)
 
         def _produce_error(message: str) -> str:
             return self._produce_error(message, runner=runner)  # type: ignore[arg-type]
 
-        setattr(sandbox_self, "produce_output", _produce_output)
-        setattr(sandbox_self, "produce_error", _produce_error)
+        builder.add_proxy("produce_output", _produce_output)
+        builder.add_proxy("produce_error", _produce_error)
 
         if config.get("invoke_sub_agents", False):
             parent_ptid = runner.state.get("_persistent_thread_id") if runner else None
+            parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
 
             def _invoke(
                 target,
@@ -243,7 +292,6 @@ class AgenticObject:
                 timeout=None,
             ):
                 ptid = parent_ptid if persistent else None
-                parent_hooks = runner.session.invocation_hooks if runner and runner.session else {}
 
                 def _run():
                     _loop = asyncio.new_event_loop()
@@ -263,29 +311,48 @@ class AgenticObject:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     return executor.submit(_run).result()
 
-            setattr(sandbox_self, "invoke", _invoke)
+            builder.add_proxy("invoke", _invoke)
 
-        return sandbox_self
+        return builder
 
     def _call_sandboxed(
         self,
-        config: dict[str, Any],
         code: str,
-        runner: "Runner | None",
+        runner: Runner,
         *args: Any,
         **kwargs: Any,
     ) -> str:
-        """Compile, setup sandbox, and invoke a sandboxed function.
+        """Compile code in an exec-level sandbox and invoke the matching function.
 
-        Returns the result as a string, or an error message.
+        Creates a SandboxBuilder with the runner's session-level sandbox as base,
+        compiles the code, finds the matching member function by args/kwargs,
+        calls it, and returns the result.
         """
-        function_obj = _compile_and_select(config, code, *args, **kwargs)
-        sandbox_self = self._setup_sandbox_self(config, runner)
-        return (
-            function_obj(sandbox_self, *args, **kwargs)
-            if function_obj.__code__.co_argcount == len(args) + len(kwargs) + 1
-            else function_obj(*args, **kwargs)
-        )
+        session_builder = runner.sandbox_builder
+        if session_builder is None:
+            raise ValueError(
+                f"Session sandbox builder not set on runner — "
+                "ensure _start_session was called before sandboxed execution"
+            )
+        builder = SandboxBuilder("exec", base=session_builder)
+        entries = builder.add_source_code(code)
+
+        # Find matching function by arg/kwargs count
+        n = len(args) + len(kwargs)
+        matching: list[str] = []
+        for name, params in entries:
+            param_count = len(params)
+            if param_count == n:
+                matching.append(name)
+
+        if len(matching) != 1:
+            raise ValueError(
+                f"expected exactly one function, found {len(matching)}: {matching}"
+            )
+
+        sandbox = builder.get_sandbox()
+        func = getattr(sandbox, matching[0])
+        return func(*args, **kwargs)
 
     @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
     def _produce_output(self, data: str, runner: "Runner | None" = None) -> str:
@@ -466,6 +533,10 @@ class AgenticObject:
     async def _start_session(self, session: Session) -> Runner:
         runner = Runner(self._oap_agent, session.uuid)
         runner._execution_environment.auto_approve_tools = list(self._oap_auto_approve_tools)
+        runner.sandbox_builder = self._create_sandbox_builder(
+            _collect_oap_config(self.__class__), runner
+        )
+        runner.sandbox = runner.sandbox_builder.get_sandbox(freeze_namespaces=False)
         await runner.start()
         session.is_active = True
         return runner

@@ -31,6 +31,14 @@ def _mock_runner():
     return runner
 
 
+def _wire_runner(obj, runner):
+    """Wire runner.sandbox_builder and runner.sandbox."""
+    config = {"invoke_sub_agents": False}
+    sandbox_builder = obj._create_sandbox_builder(config, runner=runner)
+    runner.sandbox_builder = sandbox_builder
+    runner.sandbox = sandbox_builder.get_sandbox()
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -308,6 +316,7 @@ class TestFullLifecycle:
         """Persist a function and call it through the ToolManager."""
         obj = AdaptiveTestObj()
         runner = _mock_runner()
+        _wire_runner(obj, runner)
         result = obj._define_function(
             "def multiply(a: int, b: int) -> int:\n    return a * b",
             "Multiply two numbers",

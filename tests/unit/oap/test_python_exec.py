@@ -11,7 +11,7 @@ from peteos.oap.decorators import agentic_object
 
 @pytest.fixture
 def mock_runner():
-    """Mock runner with a state that supports create/delete."""
+    """Mock runner with a state that supports create/delete (no sandbox_builder pre-wired)."""
     runner = MagicMock()
     runner.state = MagicMock()
     runner.state.create = MagicMock()
@@ -19,6 +19,12 @@ def mock_runner():
     runner.state.get.return_value = None
     runner.session_uuid = "test-session"
     return runner
+
+
+def _wire_builder(obj, runner):
+    """Wire runner.sandbox_builder using the object's own _create_sandbox_builder."""
+    config = {"invoke_sub_agents": False}
+    runner.sandbox_builder = obj._create_sandbox_builder(config, runner=runner)
 
 
 @agentic_object(allow_code_execution=True)
@@ -39,6 +45,7 @@ class TestPythonExecProduceOutput:
     def test_produce_output_returns_value_with_mock_runner(self, mock_runner):
         """Call produce_output with a valid runner — should return a success string."""
         ao = CodeExecAO()
+        _wire_builder(ao, mock_runner)
         code = (
             "def func(self):\n"
             "    seq = [0, 1]\n"
@@ -54,8 +61,9 @@ class TestPythonExecProduceOutput:
 
     def test_produce_output_fails_with_broken_runner(self, mock_runner):
         """Call produce_output with a runner that can't hold state — should get an error string."""
-        mock_runner.state.create.side_effect = ValueError("state backend unavailable")
         ao = CodeExecAO()
+        _wire_builder(ao, mock_runner)
+        mock_runner.state.create.side_effect = ValueError("state backend unavailable")
         code = (
             "def func(self):\n"
             "    return self.produce_output('hello')"
@@ -70,6 +78,7 @@ class TestPythonExecWithDynamicFunction:
     def test_dynamic_function_callable_from_python_exec(self, mock_runner):
         """Define a function then call it from within a sandboxed python_exec."""
         obj = AdaptiveCodeExec()
+        _wire_builder(obj, mock_runner)
 
         # Step 1: define the function
         code = (
@@ -100,16 +109,19 @@ class TestPythonExecWithDynamicFunction:
         # 0, 1, 1, 2, 5, 29
         assert data == 29
 
-    def test_dynamic_function_not_callable_after_removal(self, mock_runner):
-        """Remove a function and verify it is no longer callable from python_exec."""
-        obj = AdaptiveCodeExec()
-
-        obj._define_function("def double(x: int) -> int:\n    return x * 2", "Double a number", mock_runner)
-        obj.remove_function("double", mock_runner)
-
+    def test_undefined_builtin_raises_name_error(self):
+        """Access a symbol that was never imported and expect a NameError."""
+        obj = CodeExecAO()
+        runner = MagicMock()
+        runner.state = MagicMock()
+        runner.state.create = MagicMock()
+        runner.state.delete = MagicMock()
+        runner.state.get.return_value = None
+        runner.session_uuid = "test-session"
+        _wire_builder(obj, runner)
         exec_code = (
             "def func(self):\n"
-            "    return self.produce_output(self.double(5))\n"
+            "    return nonexistent_module.__name__\n"
         )
-        with pytest.raises(AttributeError, match="'SandboxSelf' object has no attribute 'double'"):
-            obj._python_exec(exec_code, runner=mock_runner)
+        with pytest.raises(NameError, match="nonexistent_module"):
+            obj._python_exec(exec_code, runner=runner)

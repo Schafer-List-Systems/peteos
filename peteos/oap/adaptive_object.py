@@ -5,10 +5,10 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable
 
-from peteos.oap.agentic_object import AgenticObject, _collect_oap_config
+from peteos.oap.agentic_object import AgenticObject
 from peteos.engine import Runner
 from peteos.oap.decorators import agentic_object, tool
-from peteos.oap.sandbox import SandboxSelf, create_sandbox_globals, sandbox_compile
+from peteos.sandbox import SandboxBuilder
 from peteos.persona.toolmanager import Tool
 
 from peteos.oap.agentic_registry import AgenticObjectRegistry
@@ -78,26 +78,65 @@ class AdaptiveObject(AgenticObject):
 
         return func_name, parameters
 
-    def _build_defined_tool_proxy(self, func_name: str) -> Callable[..., str]:
-        """Build a proxy callable that executes a defined function in SandboxSelf.
+    def _add_tool(
+        self,
+        func_name: str,
+        docstring: str,
+        code: str,
+        parameters: dict,
+        runner: Runner,
+    ) -> None:
+        """Register a dynamically defined function as an agentic tool.
+
+        Creates a proxy, registers it on the tool manager, stores metadata,
+        and auto-approves it.
 
         Args:
-            func_name: The stored function name.
-
-        Returns:
-            A proxy that forwards *args/**kwargs to the stored function.
+            func_name: The function name to register.
+            docstring: Description of the tool.
+            parameters: The function's parameter schema.
+            runner: Runner injected by the framework.
         """
-        config = _collect_oap_config(self.__class__)
-        stored = self._oap_define_functions[func_name]
+        # Store metadata.
+        self._oap_define_functions[func_name] = {
+            "docstring": docstring,
+            "parameters": parameters,
+            "code": code,
+        }
 
-        def proxy(
-            *args: Any,
-            runner: Runner | None = None,
-            **kwargs: Any,
-        ) -> str:
-            return self._call_sandboxed(config, stored["code"], runner, *args, **kwargs)
+        # Build a proxy that closes over runner, so self.func_name(...) works.
+        def proxy(*args: Any, runner: Runner, **kwargs: Any) -> str:
+            return getattr(runner.sandbox, func_name)(*args, **kwargs)
 
-        return proxy
+        proxy._tool_name = func_name
+        defined_tool = Tool(name=func_name, description=docstring, func=proxy, parameters=parameters)
+        self.__dict__[func_name] = proxy
+        self._oap_tool_manager.register_tool(defined_tool)
+
+        # Auto-approve on instance and runner's execution environment.
+        self._oap_auto_approve_tools.append(func_name)
+        runner._execution_environment.auto_approve_tools.append(func_name)
+
+    def _try_compile(self, code: str) -> tuple[str, dict]:
+        """Compile code, validating exactly one function. Rolls back on failure.
+
+        Returns (func_name, parameters) on success.
+        Raises ValueError if code doesn't compile to exactly one function.
+        """
+        func_and_params = self._oap_sandbox_builder.add_source_code(code)
+
+        if len(func_and_params) != 1:
+            if func_and_params:
+                self._oap_sandbox_builder.remove_source_code(func_and_params[0][0])
+            names = [f[0] for f in func_and_params] if func_and_params else ["none"]
+            raise ValueError(f"expected exactly one function in code. Found: {names}.")
+
+        func_name, parameters = func_and_params[0]
+        if self._oap_tool_manager.get_tool(func_name):
+            self._oap_sandbox_builder.remove_source_code(func_name)
+            raise ValueError(f"tool '{func_name}' already exists")
+
+        return func_name, parameters
 
     def _define_function(self, code: str, docstring: str, runner: Runner) -> str:
         """Define a Python function as a new tool.
@@ -108,39 +147,23 @@ class AdaptiveObject(AgenticObject):
             code: Full Python function definition as a string (e.g. "def my_func(x: int) -> int:\\n    return x * 2").
             docstring: The Python docstring of the function with parameter description.
         """
-        config = _collect_oap_config(self.__class__)
-
-        sandbox_globals, new_callables = sandbox_compile(config, code)
-        if len(new_callables) != 1:
-            names = [c.__name__ for c in new_callables] if new_callables else ["none"]
-            raise ValueError(f"expected exactly one function in code. Found: {names}.")
-
-        func_name, parameters = self._extract_func_name_and_params(new_callables[0])
-        if self._oap_tool_manager.get_tool(func_name):
-            raise ValueError(f"tool '{func_name}' already exists")
-
-        # Store the code string; the actual function will be exec'd at call time
-        # inside SandboxSelf, ensuring isolation from the real AgenticObject.
-        self._oap_define_functions[func_name] = {
-            "code": code,
-            "docstring": docstring,
-            "parameters": parameters,
-        }
-
-        # Register a proxy as the Tool.func — it executes the code in a
-        # sandbox with SandboxSelf at call time.
-        proxy = self._build_defined_tool_proxy(func_name)
-        proxy._tool_name = func_name
-        defined_tool = Tool(name=func_name, description=docstring, func=proxy, parameters=parameters)
-
-        self.__dict__[func_name] = proxy
-        self._oap_tool_manager.register_tool(defined_tool)
-
-        # Auto-approve tool for this AND for future sessions 
-        self._oap_auto_approve_tools.append(func_name)
-        runner._execution_environment.auto_approve_tools.append(func_name)
-
+        func_name, parameters = self._try_compile(code)
+        self._add_tool(func_name, docstring, code, parameters, runner)
         return f"OK: registered as '{func_name}'"
+
+    def _delete_tool(self, func_name: str, runner: Runner) -> None:
+        """Remove a dynamically defined tool.
+
+        Args:
+            func_name: The function name to remove.
+            runner: Runner injected by the framework.
+        """
+        self._oap_sandbox_builder.remove_source_code(func_name)
+        del self._oap_define_functions[func_name]
+        self._oap_tool_manager._tools.pop(func_name, None)
+        self.__dict__.pop(func_name, None)
+        self._oap_auto_approve_tools.remove(func_name)
+        runner._execution_environment.auto_approve_tools.remove(func_name)
 
     @tool
     def remove_function(self, name: str, runner: Runner) -> str:
@@ -153,12 +176,7 @@ class AdaptiveObject(AgenticObject):
         if name not in self._oap_define_functions:
             return f"Error: tool '{name}' not found or not defined by this agent."
 
-        del self._oap_define_functions[name]
-        self._oap_tool_manager._tools.pop(name, None)
-        self.__dict__.pop(name, None)
-
-        self._oap_auto_approve_tools.remove(name)
-        runner._execution_environment.auto_approve_tools.remove(name)
+        self._delete_tool(name, runner)
 
         return "OK"
 
@@ -168,12 +186,11 @@ class AdaptiveObject(AgenticObject):
         mocked_functions: dict[str, str],
         tests: str,
     ) -> None:
-        """Compile and test a function in an isolated sandbox.
+        """Compile and test a function in a fully isolated sandbox.
 
-        Creates a shared globals namespace, compiles mocks and the main
-        function into it, builds a fresh SandboxSelf with all callables
-        bound as methods, then runs each test function from the single
-        test code string. Stops on the first failure. Raises ValueError on
+        Creates a new SandboxBuilder with no parent, adds produce_output/
+        produce_error helpers, compiles mocks, the main function, and test
+        code into it, then runs each test function. Raises ValueError on
         any failure.
 
         Args:
@@ -185,65 +202,46 @@ class AdaptiveObject(AgenticObject):
         Raises:
             ValueError: On compilation failure, validation error, or test failure.
         """
-        config = _collect_oap_config(self.__class__)
+        test_builder = SandboxBuilder("tests")
+        test_builder.add_safe_builtins()
 
-        def _make_test_proxy(func):
-            """Proxy that passes sandbox_self to functions expecting self."""
-            sig = inspect.signature(func)
-            params = list(sig.parameters.keys())
-            expects_self = params[0] == "self"
-            def wrapper(*a, **kw):
-                if expects_self:
-                    return func(sandbox_self, *a, **kw)
-                return func(*a, **kw)
-            return wrapper
+        def _test_produce_output(data):
+            return f"produce_output({data!r})"
 
-        # 1. Shared sandbox globals
-        shared_globals = create_sandbox_globals(config)
+        def _test_produce_error(msg):
+            return f"produce_error({msg!r})"
 
-        # 2. Compile mocks into shared globals
-        all_callables: list[tuple[str, Callable]] = []
+        test_builder.add_proxy("produce_output", _test_produce_output)
+        test_builder.add_proxy("produce_error", _test_produce_error)
+
+        test_builder.add_global_func("assert_equal", lambda expected, actual: None if expected == actual else (_ for _ in ()).throw(AssertionError(f"expected {expected!r}, got {actual!r}")))
+        test_builder.add_global_func("assert_not_equal", lambda expected, actual: None if expected != actual else (_ for _ in ()).throw(AssertionError(f"expected {expected!r} != {actual!r}")))
+
         for mock_name, mock_code in mocked_functions.items():
-            _, callables = sandbox_compile(config, mock_code, sandbox_globals=shared_globals)
-            if len(callables) != 1:
-                names = [c.__name__ for c in callables] if callables else ["none"]
+            funcs = test_builder.add_source_code(mock_code)
+            if len(funcs) != 1:
+                names = [f[0] for f in funcs] if funcs else ["none"]
                 raise ValueError(f"mock '{mock_name}' should define exactly one function. Found: {names}.")
-            all_callables.append((mock_name, callables[0]))
 
-        # 3. Compile main function into shared globals
-        _, callables = sandbox_compile(config, code, sandbox_globals=shared_globals)
-        if len(callables) != 1:
-            names = [c.__name__ for c in callables] if callables else ["none"]
+        main_funcs = test_builder.add_source_code(code)
+        if len(main_funcs) != 1:
+            names = [f[0] for f in main_funcs] if main_funcs else ["none"]
             raise ValueError(f"expected exactly one function in code. Found: {names}.")
 
-        # 4. Validate main function
-        main_func_name, _ = self._extract_func_name_and_params(callables[0])
+        main_func_name, _ = main_funcs[0]
         if self._oap_tool_manager.get_tool(main_func_name):
             raise ValueError(
                 f"tool '{main_func_name}' already exists (collision with static tool)"
             )
-        all_callables.append((main_func_name, callables[0]))
 
-        # 5. Build test sandbox — attach callables via proxy, produce helpers
-        sandbox_self = SandboxSelf()
-        for name, func in all_callables:
-            setattr(sandbox_self, name, _make_test_proxy(func))
-        setattr(sandbox_self, "produce_output",
-            lambda data: f"produce_output({data!r})")
-        setattr(sandbox_self, "produce_error",
-            lambda msg: f"produce_error({msg!r})")
+        test_funcs = test_builder.add_source_code(tests)
 
-        # 6. Compile test code and run each callable as a test
-        try:
-            _, test_callables = sandbox_compile(config, tests)
-        except ValueError as e:
-            raise ValueError(f"failed to compile tests: {e}") from e
-        for i, test_func in enumerate(test_callables):
-            sandbox_self._test = _make_test_proxy(test_func)
+        sandbox = test_builder.get_sandbox()
+        for i, (name, _) in enumerate(test_funcs):
             try:
-                sandbox_self._test()
+                getattr(sandbox, name)()
             except Exception as e:
-                raise ValueError(f"test {i} ({test_func.__name__}) failed: {e}")
+                raise ValueError(f"test {i} ({name}) failed: {e}")
 
     @tool
     def define_function(
@@ -257,8 +255,8 @@ class AdaptiveObject(AgenticObject):
         """Define a Python member function with optional unit tests.
 
         Pass the full member function definition as a string and a docstring.
-        Optionally provide mocked_functions (name→code) and a tests string
-        containing multiple test functions. Tests run in an isolated sandbox
+        Optionally provide mocked member functions (name→code) and a tests string
+        containing multiple test member functions. Tests run in an isolated sandbox
         before registration. On failure, a ValueError is raised and the
         function is NOT registered.
 
