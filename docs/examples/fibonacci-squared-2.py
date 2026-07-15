@@ -15,8 +15,8 @@ class FibonacciSquared(AdaptiveObject):
 
 
 async def main():
-    from peteos.utils.logger import setup_logging
-    setup_logging(level="DEBUG", debug=True)
+    #from peteos.utils.logger import setup_logging
+    #setup_logging(level="DEBUG", debug=True)
 
     sq = FibonacciSquared()
     print(await sq.invoke_agent(
