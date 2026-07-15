@@ -105,7 +105,7 @@ class AdaptiveObject(AgenticObject):
         }
 
         # Build a proxy that closes over runner, so self.func_name(...) works.
-        def proxy(*args: Any, **kwargs: Any) -> str:
+        def proxy(*args: Any, runner: Runner, **kwargs: Any) -> str:
             return getattr(runner.sandbox, func_name)(*args, **kwargs)
 
         proxy._tool_name = func_name
@@ -116,9 +116,6 @@ class AdaptiveObject(AgenticObject):
         # Auto-approve on instance and runner's execution environment.
         self._oap_auto_approve_tools.append(func_name)
         runner._execution_environment.auto_approve_tools.append(func_name)
-
-        # Update runner's sandbox to include the new function.
-        runner.sandbox = runner.sandbox_builder.get_sandbox()
 
     def _try_compile(self, code: str) -> tuple[str, dict]:
         """Compile code, validating exactly one function. Rolls back on failure.
@@ -217,6 +214,9 @@ class AdaptiveObject(AgenticObject):
         test_builder.add_proxy("produce_output", _test_produce_output)
         test_builder.add_proxy("produce_error", _test_produce_error)
 
+        test_builder.add_global_func("assert_equal", lambda expected, actual: None if expected == actual else (_ for _ in ()).throw(AssertionError(f"expected {expected!r}, got {actual!r}")))
+        test_builder.add_global_func("assert_not_equal", lambda expected, actual: None if expected != actual else (_ for _ in ()).throw(AssertionError(f"expected {expected!r} != {actual!r}")))
+
         for mock_name, mock_code in mocked_functions.items():
             funcs = test_builder.add_source_code(mock_code)
             if len(funcs) != 1:
@@ -255,8 +255,8 @@ class AdaptiveObject(AgenticObject):
         """Define a Python member function with optional unit tests.
 
         Pass the full member function definition as a string and a docstring.
-        Optionally provide mocked_functions (name→code) and a tests string
-        containing multiple test functions. Tests run in an isolated sandbox
+        Optionally provide mocked member functions (name→code) and a tests string
+        containing multiple test member functions. Tests run in an isolated sandbox
         before registration. On failure, a ValueError is raised and the
         function is NOT registered.
 
