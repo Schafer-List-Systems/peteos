@@ -193,6 +193,7 @@ class SandboxBuilder:
         self._source_code: dict[int, tuple[str, bool]] = {}
         self._name_to_entry: dict[str, int] = {}  # maps function name -> source code id
         self._source_code_counter: int = 0
+        self._hooks: dict[str, list[Callable]] = {}  # op name -> handler functions
 
     @property
     def sandbox_namespace(self) -> dict[str, Callable]:
@@ -482,6 +483,7 @@ class SandboxBuilder:
             result.append((func_name, params))
             self._sandbox_namespace[func_name] = make_proxy(mf, has_unbound_self)
             self._name_to_entry[func_name] = key
+            self._fire_hook("on_add_member", func_name, params)
 
         return result
 
@@ -499,17 +501,55 @@ class SandboxBuilder:
             ``True`` if the source code entry was found and removed,
             ``False`` if no entry defines that name.
         """
-        key = self._name_to_entry.pop(name, None)
+        key = self._name_to_entry.get(name)
         if key is None:
             return False
-        del self._source_code[key]
-        del self._sandbox_namespace[name]
-        # Clean up all names that pointed to this key.
+        # Collect all names (primary + aliases) pointing to this key.
         to_remove = [n for n, k in self._name_to_entry.items() if k == key]
+        del self._source_code[key]
         for n in to_remove:
             del self._sandbox_namespace[n]
             del self._name_to_entry[n]
+            self._fire_hook("on_remove_member", n)
         return True
+
+    def add_hook(self, op: str, handler: Callable) -> None:
+        """Register a handler for *op*, propagating it up the builder chain.
+
+        The handler is attached to this builder and every ancestor via the
+        ``_base`` chain.
+
+        Args:
+            op: The event type (e.g. ``"on_add_member"``).
+            handler: Callable invoked when the event fires.
+        """
+        if op not in self._hooks:
+            self._hooks[op] = []
+        self._hooks[op].append(handler)
+        if self._base is not None:
+            self._base.add_hook(op, handler)
+
+    def remove_hook(self, op: str, handler: Callable) -> None:
+        """Remove *handler* for *op* from this builder up the chain.
+
+        Args:
+            op: The event type.
+            handler: The previously registered handler to remove.
+        """
+        if op in self._hooks:
+            self._hooks[op].remove(handler)
+        if self._base is not None:
+            self._base.remove_hook(op, handler)
+
+    def _fire_hook(self, op: str, *args, **kwargs) -> None:
+        """Invoke all registered handlers for *op* at this builder level only.
+
+        Args:
+            op: The event type.
+            *args, **kwargs: Arguments forwarded to each handler.
+        """
+        for handler in self._hooks.get(op, []):
+            handler(*args, **kwargs)
 
     def get_sandbox(self, freeze_namespaces: bool = True) -> Sandbox:
         """Return a sandbox snapshot from the builder chain.
