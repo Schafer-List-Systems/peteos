@@ -92,7 +92,7 @@ class TestPythonExecWithDynamicFunction:
             "        a, b = b, b**2 + a**2\n"
             "    return b\n"
         )
-        result = obj._define_function(code, "n-th element of the sequence", mock_runner)
+        result = obj._define_function(code, "n-th element of the sequence")
         assert result == "OK: registered as 'compute_sequence_element'"
         assert "compute_sequence_element" in obj._oap_define_functions
 

@@ -159,7 +159,6 @@ class TestToolDefsAfterMaterialize:
         obj._define_function(
             "def square(x: int) -> int:\n    return x * x",
             "Square a number",
-            _mock_runner(),
         )
         session, _, _ = _make_session_with_agent(obj)
 
@@ -174,13 +173,11 @@ class TestToolDefsAfterMaterialize:
     def test_removed_tool_disappears_after_materialize(self):
         """After remove_function, the removed tool should be gone from tool defs."""
         obj = AdaptiveTestObj()
-        runner = _mock_runner()
         obj._define_function(
             "def triple(x: int) -> int:\n    return x * 3",
             "Triple a number",
-            runner,
         )
-        obj.remove_function("triple", runner)
+        obj.remove_function("triple")
         session, _, _ = _make_session_with_agent(obj)
 
         session.materialize()
@@ -194,11 +191,9 @@ class TestToolDefsAfterMaterialize:
     def test_define_then_remove_and_verify(self):
         """Define, materialize (visible), remove, materialize (gone)."""
         obj = AdaptiveTestObj()
-        runner = _mock_runner()
         obj._define_function(
             "def double(x: int) -> int:\n    return x * 2",
             "Double a number",
-            runner,
         )
 
         session, _, _ = _make_session_with_agent(obj)
@@ -207,7 +202,7 @@ class TestToolDefsAfterMaterialize:
         tool_names_before = [t.name for t in content if t.type == "tool"]
         assert "double" in tool_names_before
 
-        obj.remove_function("double", runner)
+        obj.remove_function("double")
         session.materialize()
         content = session.active_context.tool_definitions_message.content
         tool_names_after = [t.name for t in content if t.type == "tool"]
@@ -257,7 +252,6 @@ class TestMockChatBotCapturesToolDefs:
         obj._define_function(
             "def triple(x: int) -> int:\n    return x * 3",
             "Triple a number",
-            _mock_runner(),
         )
         session.materialize()
         await bot.send_context(session, None, None)
@@ -320,7 +314,6 @@ class TestFullLifecycle:
         result = obj._define_function(
             "def multiply(a: int, b: int) -> int:\n    return a * b",
             "Multiply two numbers",
-            runner,
         )
         assert result == "OK: registered as 'multiply'"
 
@@ -329,5 +322,5 @@ class TestFullLifecycle:
         result = tool.execute(a=6, b=7, runner=runner)
         assert result == 42
 
-        obj.remove_function("multiply", runner)
+        obj.remove_function("multiply")
         assert obj._oap_tool_manager.get_tool("multiply") is None

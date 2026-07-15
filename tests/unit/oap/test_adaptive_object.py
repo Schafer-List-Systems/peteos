@@ -64,37 +64,33 @@ class TestDefineFunctionTool:
     def obj(self):
         return SimpleAdaptiveObject()
 
-    @pytest.fixture
-    def runner(self):
-        return _mock_runner()
-
-    def test_persist_simple_function(self, obj, runner):
+    def test_persist_simple_function(self, obj):
         """Persisting a simple function returns OK with the function name."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        result = obj.define_function(code, "Multiply by 2", runner)
+        result = obj.define_function(code, "Multiply by 2")
         assert result == "OK: registered as 'my_math'"
 
-    def test_defined_function_appears_in_tool_list(self, obj, runner):
+    def test_defined_function_appears_in_tool_list(self, obj):
         """A defined function is registered in the ToolManager's tool list."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        obj.define_function(code, "Multiply by 2", runner)
+        obj.define_function(code, "Multiply by 2")
         tools = [t.name for t in obj._oap_tool_manager.get_tool_list()]
         assert "my_math" in tools
 
-    def test_defined_function_tracks_metadata(self, obj, runner):
+    def test_defined_function_tracks_metadata(self, obj):
         """Defined functions are tracked in _oap_define_functions."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        obj.define_function(code, "Multiply by 2", runner)
+        obj.define_function(code, "Multiply by 2")
         assert "my_math" in obj._oap_define_functions
         meta = obj._oap_define_functions["my_math"]
         assert meta["code"] == code
         assert meta["docstring"] == "Multiply by 2"
         assert "x" in meta["parameters"]
 
-    def test_define_function_with_multiple_parameters(self, obj, runner):
+    def test_define_function_with_multiple_parameters(self, obj):
         """Persisting a function with multiple parameters extracts all of them."""
         code = "def combine(a: str, b: str) -> str:\n    return a + b"
-        result = obj.define_function(code, "Concatenate two strings", runner)
+        result = obj.define_function(code, "Concatenate two strings")
         assert result == "OK: registered as 'combine'"
         meta = obj._oap_define_functions["combine"]
         assert "a" in meta["parameters"]
@@ -102,50 +98,50 @@ class TestDefineFunctionTool:
         assert meta["parameters"]["a"]["required"] is True
         assert meta["parameters"]["b"]["required"] is True
 
-    def test_define_function_with_defaults(self, obj, runner):
+    def test_define_function_with_defaults(self, obj):
         """Persisting a function with default values marks params as not required."""
         code = "def greet(name: str, greeting: str = 'Hello') -> str:\n    return f'{greeting}, {name}'"
-        result = obj.define_function(code, "Create a greeting", runner)
+        result = obj.define_function(code, "Create a greeting")
         assert result == "OK: registered as 'greet'"
         meta = obj._oap_define_functions["greet"]
         assert meta["parameters"]["name"]["required"] is True
         assert meta["parameters"]["greeting"]["required"] is False
         assert meta["parameters"]["greeting"]["default"] == "Hello"
 
-    def test_define_function_syntax_error(self, obj, runner):
+    def test_define_function_syntax_error(self, obj):
         """Persisting code with a syntax error raises ValueError."""
         code = "def broken(:\n    return"
         with pytest.raises(ValueError):
-            obj.define_function(code, "Should fail", runner)
+            obj.define_function(code, "Should fail")
 
-    def test_define_function_no_function_defined(self, obj, runner):
+    def test_define_function_no_function_defined(self, obj):
         """Persisting code with no function raises ValueError."""
         code = "x = 42"
         with pytest.raises(ValueError):
-            obj.define_function(code, "No function", runner)
+            obj.define_function(code, "No function")
 
-    def test_define_function_multiple_functions(self, obj, runner):
+    def test_define_function_multiple_functions(self, obj):
         """Persisting code with multiple functions raises ValueError."""
         code = "def a(): pass\ndef b(): pass"
         with pytest.raises(ValueError):
-            obj.define_function(code, "Too many", runner)
+            obj.define_function(code, "Too many")
 
-    def test_define_function_name_collision(self, obj, runner):
+    def test_define_function_name_collision(self, obj):
         """Persisting a function that collides with an existing tool raises ValueError."""
         code = "def add(x: int) -> int:\n    return x"
         with pytest.raises(ValueError):
-            obj.define_function(code, "Collides", runner)
+            obj.define_function(code, "Collides")
 
-    def test_define_function_exec_error(self, obj, runner):
+    def test_define_function_exec_error(self, obj):
         """Persisting code that raises during exec raises ValueError."""
         code = "import os\nx = 1"
         with pytest.raises(ValueError):
-            obj.define_function(code, "Exec error", runner)
+            obj.define_function(code, "Exec error")
 
-    def test_define_function_with_self_param(self, obj, runner):
+    def test_define_function_with_self_param(self, obj):
         """The 'self' parameter is excluded from the tool parameters schema."""
         code = "def process(self, data: int) -> int:\n    return data"
-        result = obj.define_function(code, "Process data", runner)
+        result = obj.define_function(code, "Process data")
         assert result == "OK: registered as 'process'"
         meta = obj._oap_define_functions["process"]
         assert "self" not in meta["parameters"]
@@ -159,31 +155,27 @@ class TestRemoveToolTool:
     def obj(self):
         return SimpleAdaptiveObject()
 
-    @pytest.fixture
-    def runner(self):
-        return _mock_runner()
-
-    def test_remove_existing_defined_tool(self, obj, runner):
+    def test_remove_existing_defined_tool(self, obj):
         """Removing a defined tool succeeds and removes it from both registries."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        obj.define_function(code, "Multiply by 2", runner)
+        obj.define_function(code, "Multiply by 2")
         assert "my_math" in obj._oap_define_functions
         assert obj._oap_tool_manager.get_tool("my_math") is not None
 
-        result = obj.remove_function("my_math", runner)
+        result = obj.remove_function("my_math")
         assert result == "OK"
         assert "my_math" not in obj._oap_define_functions
         assert obj._oap_tool_manager.get_tool("my_math") is None
 
-    def test_remove_nonexistent_tool(self, obj, runner):
+    def test_remove_nonexistent_tool(self, obj):
         """Removing a tool that was never defined returns an error."""
-        result = obj.remove_function("nonexistent", runner)
+        result = obj.remove_function("nonexistent")
         assert result.startswith("Error:")
         assert "not found or not defined" in result
 
-    def test_remove_does_not_affect_static_tools(self, obj, runner):
+    def test_remove_does_not_affect_static_tools(self, obj):
         """Removing a name that matches a static tool returns an error."""
-        result = obj.remove_function("add", runner)
+        result = obj.remove_function("add")
         assert result.startswith("Error:")
         assert obj._oap_tool_manager.get_tool("add") is not None
 
@@ -203,7 +195,7 @@ class TestPersistedFunctionSandboxIsolation:
         """Calling a defined function through the ToolManager executes it."""
         _wire_runner(obj, runner)
         code = "def double(x: int) -> int:\n    return x * 2"
-        obj.define_function(code, "Double a number", runner)
+        obj.define_function(code, "Double a number")
         tool = obj._oap_tool_manager.get_tool("double")
         assert tool is not None
         result = tool.execute(x=21, runner=runner)
@@ -213,7 +205,7 @@ class TestPersistedFunctionSandboxIsolation:
         """Defined functions that return strings work correctly."""
         _wire_runner(obj, runner)
         code = "def upper(text: str) -> str:\n    return text.upper()"
-        obj.define_function(code, "Uppercase a string", runner)
+        obj.define_function(code, "Uppercase a string")
         tool = obj._oap_tool_manager.get_tool("upper")
         result = tool.execute(text="hello", runner=runner)
         assert result == "HELLO"
@@ -222,7 +214,7 @@ class TestPersistedFunctionSandboxIsolation:
         """Defined functions that return None return None (matching _python_exec)."""
         _wire_runner(obj, runner)
         code = "def noop(x: int) -> None:\n    pass"
-        obj.define_function(code, "No-op function", runner)
+        obj.define_function(code, "No-op function")
         tool = obj._oap_tool_manager.get_tool("noop")
         result = tool.execute(x=42, runner=runner)
         assert result is None
@@ -291,23 +283,21 @@ class TestAutoApproveToolsInstanceOwnership:
     def test_define_function_adds_to_instance_auto_approve(self, obj, runner):
         """define_function adds the new tool to the instance's auto-approve list."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        obj.define_function(code, "Multiply by 2", runner)
+        obj.define_function(code, "Multiply by 2")
         assert "my_math" in obj._oap_auto_approve_tools
 
     def test_remove_function_removes_from_instance_auto_approve(self, obj, runner):
         """remove_function removes the tool from the instance's auto-approve list."""
         code = "def my_math(x: int) -> int:\n    return x * 2"
-        obj.define_function(code, "Multiply by 2", runner)
-        obj.remove_function("my_math", runner)
+        obj.define_function(code, "Multiply by 2")
+        obj.remove_function("my_math")
         assert "my_math" not in obj._oap_auto_approve_tools
 
     def test_different_instances_have_separate_lists(self):
         """Two instances of the same class have independent auto-approve lists."""
         obj1 = SimpleAdaptiveObject()
         obj2 = SimpleAdaptiveObject()
-        runner1 = _mock_runner()
-        runner2 = _mock_runner()
-        obj1._define_function("def a(x: int) -> int:\n    return x", "A", runner1)
+        obj1._define_function("def a(x: int) -> int:\n    return x", "A")
         assert "a" in obj1._oap_auto_approve_tools
         assert "a" not in obj2._oap_auto_approve_tools
 
@@ -329,11 +319,10 @@ class TestAutoApproveToolsInstanceOwnership:
         obj._define_function(
             "def compute(x: int) -> int:\n    return x * 2",
             "Double a number",
-            runner1,
         )
 
-        # Verify it is in runner1's auto-approve list (active session)
-        assert "compute" in runner1._execution_environment.auto_approve_tools
+        # Verify it is in instance-level auto-approve list
+        assert "compute" in obj._oap_auto_approve_tools
 
         # Simulate a new invoke_agent call: _start_session creates a fresh runner
         runner2 = _mock_runner()
@@ -376,7 +365,7 @@ class TestAutoApproveToolsInstanceOwnership:
             "        a, b = b, a**2 + b**2\n"
             "    return b\n"
         )
-        result = obj._define_function(code, "n-th element of the sequence", runner)
+        result = obj._define_function(code, "n-th element of the sequence")
         assert result == "OK: registered as 'compute_sequence_element'"
 
         # Wire sandbox_builder for sandboxed execution
@@ -411,7 +400,7 @@ class TestAutoApproveToolsInstanceOwnership:
 
         # Define a function with self as first argument
         code = "def compute_double(self, x: int) -> int:\n    return x * 2"
-        result = obj._define_function(code, "Double a number", runner)
+        result = obj._define_function(code, "Double a number")
         assert result == "OK: registered as 'compute_double'"
 
         # Wire sandbox_builder for sandboxed execution
@@ -442,7 +431,7 @@ class TestDefineFunctionWithUnitTests:
     def test_no_mocks_no_tests_calls_define_function(self, obj, runner):
         """When no mocks or tests provided, delegates to define_function."""
         code = "def double_it(x: int) -> int:\n    return x * 2"
-        result = obj.define_function(code, "Double", runner)
+        result = obj.define_function(code, "Double")
         assert result == "OK: registered as 'double_it'"
         assert "double_it" in obj._oap_define_functions
 
@@ -453,7 +442,7 @@ class TestDefineFunctionWithUnitTests:
             "def test_basic(self):\n    assert self.double_it(5) == 10\n"
             "def test_zero(self):\n    assert self.double_it(0) == 0"
         )
-        result = obj.define_function(code, "Double", runner, tests=tests)
+        result = obj.define_function(code, "Double", tests=tests)
         assert result == "OK: registered as 'double_it'"
         assert "double_it" in obj._oap_define_functions
 
@@ -468,7 +457,7 @@ class TestDefineFunctionWithUnitTests:
         }
         tests = "def test_mocked(self):\n    assert self.compute(5) == 12"
         result = obj.define_function(
-            code, "Compute", runner, mocked_functions=mocks, tests=tests,
+            code, "Compute", mocked_functions=mocks, tests=tests,
         )
         assert result == "OK: registered as 'compute'"
 
@@ -539,4 +528,3 @@ class TestDefineFunctionWithUnitTests:
         )
         with pytest.raises(ValueError):
             obj._test_function_in_sandbox(code, {}, tests)
-
