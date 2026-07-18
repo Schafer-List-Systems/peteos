@@ -82,6 +82,18 @@ The configuration file defines chatbot backends (LLM providers) that Peteos uses
 - **Chatbot backends** — configure OpenAI and Anthropic-compatible local AI servers via a singleton manager.
 - **Test-driven development** — OOP-aligned unit but Monte Carlo iterations for non-deterministic behavior.
 
+## Licensing
+
+This project is dual-licensed:
+
+- **Non-commercial use** (including evaluation of commercial use cases) is free
+  under the license in the `LICENSE` file.
+- **Commercial use** (production, products, services, SaaS, etc.) requires a
+  commercial license from the Schäfer List Systems.GmbH.
+
+If you intend to use this software commercially, please contact us at
+<info@schaeferlist.de> or visit <https://www.schaeferlist.de>.
+
 ## Resources
 
 - [Installation Guide](docs/developer/development.md) — developer setup and build instructions
