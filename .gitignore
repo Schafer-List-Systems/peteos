@@ -65,5 +65,8 @@ ISSUES.md
 *.json
 context-folding.md
 
+# Cython generated C files
+*.c
+
 # Archive docs
 docs/archive/
