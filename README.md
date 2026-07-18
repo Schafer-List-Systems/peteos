@@ -56,6 +56,22 @@ pip install -e ".[dev]"
 
 > **Note:** This installs from source code. Cython extensions are compiled in-place via `python setup.py build_ext --inplace`. See the [development guide](docs/developer/development.md) for build options.
 
+## Configuration
+
+Copy `peteos.json.example` to `peteos.json` and adapt it to your environment:
+
+```bash
+cp peteos.json.example peteos.json
+```
+
+The configuration file defines chatbot backends (LLM providers) that Peteos uses for agent reasoning:
+
+- **name** — a descriptive label for the backend
+- **url** — the API endpoint for the provider
+- **api_type** — `anthropic`, `gemini`, or omitted for OpenAI-compatible endpoints
+- **api_key** — environment variable name holding the API key (never hardcode keys)
+- **model_priorities** — maps model names to priority scores (higher = preferred)
+
 ## Key Features
 
 - **Agentic objects** — derive from `AgenticObject` and get a thinking agent behind every instance.
