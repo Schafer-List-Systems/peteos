@@ -770,6 +770,8 @@ class AgenticObject:
             if session is not None:
                 session.is_active = False
                 session._invocation_hooks.clear()
+                if session._autosave:
+                    session.save()
                 _logger.debug("invoke_agent[%s]: cleared invocation hooks on session %s", self.__class__.__name__, session.uuid)
             if persistent_thread_id is None:
                 try:

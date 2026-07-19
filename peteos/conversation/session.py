@@ -341,6 +341,8 @@ class Session:
     def __del__(self) -> None:
         """Auto-save the session and its active context on destruction."""
         try:
-            self.save()
+            if self._autosave:
+                self.save()
         except Exception:
             pass
+

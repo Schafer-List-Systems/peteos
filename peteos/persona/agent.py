@@ -141,8 +141,10 @@ class Agent:
         if session_uuid in self._sessions:
             session = self._sessions[session_uuid]
             # TODO: this is inconsistent: the persona package should not know about engine properties
-            await session.stop()
+            #await session.stop()
 
+            if session._autosave:
+                session.save()
             del self._sessions[session_uuid]
             return True
         return False
