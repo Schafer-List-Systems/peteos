@@ -703,6 +703,10 @@ class AgenticObject:
                 _logger.debug("invoke_agent[%s]: waiting for idle (iter %d)", self.__class__.__name__, iteration)
                 await runner.wait_for_idle(timeout=timeout)
                 _logger.debug("invoke_agent[%s]: idle reached (iter %d), checking state", self.__class__.__name__, iteration)
+
+                # Check for critical error from step() — runner is in a fatal state, stop looping
+                runner.take_critical_error()
+
                 produced_data = runner.state.get("_oap_produced_data")
                 if produced_data is not None:
                     _logger.debug("invoke_agent[%s]: produced_data found", self.__class__.__name__)

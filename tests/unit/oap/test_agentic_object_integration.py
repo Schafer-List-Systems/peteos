@@ -12,12 +12,10 @@ import pytest
 from peteos.chatbot import (
     ChatBotManager,
     SimpleMockBackendProvider,
-    SimpleMockChatBot,
 )
 from peteos.conversation.message import ContentPart, Message
 from peteos.conversation.session import Session
 from peteos.oap import AgenticObject, agentic_object
-from peteos.oap.error import Error
 from peteos.persona.agent import Agent
 from peteos.persona.role import Role
 
@@ -31,8 +29,7 @@ from peteos.persona.role import Role
 def _reset_chatbot_manager():
     """Reset ChatBotManager before each test to avoid provider name collisions."""
     ChatBotManager.reset()
-    to_remove = [k for k in ChatBotManager._providers if k.startswith("test-ao")]
-    for api_type in to_remove:
+    for api_type in list(ChatBotManager._providers.keys()):
         ChatBotManager.unregister_provider(api_type)
     yield
 
@@ -94,8 +91,8 @@ class TestInvokeAgentEmptyChatBot:
         await ChatBotManager.add_backend("simple-mock", url="http://localhost:9999", api_type="simple-mock")
 
         obj = SimpleTestObj()
-        result = await obj.invoke_agent("hello")
-        assert isinstance(result, Error)
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            await obj.invoke_agent("hello")
 
     @pytest.mark.asyncio
     async def test_invoke_agent_with_text_only_response(self):
@@ -110,6 +107,7 @@ class TestInvokeAgentEmptyChatBot:
         await ChatBotManager.add_backend("simple-mock", url="http://localhost:9999", api_type="simple-mock")
 
         obj = SimpleTestObj()
-        result = await obj.invoke_agent("hello")
-        # The chatbot exhausts → error response
-        assert isinstance(result, Error)
+        # First call returns text-only, after_step hook queues reminder.
+        # Second call exhausts mock → HTTP 503 → RuntimeError raised.
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            await obj.invoke_agent("hello")

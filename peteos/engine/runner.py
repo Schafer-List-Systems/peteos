@@ -65,6 +65,7 @@ class Runner(ActiveClass):
         self._session_uuid = session_uuid
         self.uuid = session_uuid
         self._channels: set[Channel] = set()
+        self._critical_error: BaseException | None = None
         self._idle: asyncio.Event = asyncio.Event()
 
         # Pull configuration from the agent (not the session data model)
@@ -177,6 +178,17 @@ class Runner(ActiveClass):
             return True
         except asyncio.TimeoutError:
             return False
+
+    def take_critical_error(self) -> None:
+        """Take and raise a critical error set during step() execution.
+
+        Raises the exception and clears the flag atomically.
+        No-op if no error was set.
+        """
+        err = self._critical_error
+        self._critical_error = None
+        if err is not None:
+            raise err
 
     # ------------------------------------------------------------------ #
     # Channel subscriptions & notifications
@@ -461,6 +473,7 @@ class Runner(ActiveClass):
                 status, response_msg = await self.step()
             except Exception as e:
                 _logger.error("[runner] step() raised exception: %s: %r", type(e).__name__, e)
+                self._critical_error = e
                 self._idle.set()
                 continue
             finally:

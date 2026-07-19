@@ -92,26 +92,25 @@ class TestSimpleMockChatBot:
         assert resp2.message.content[0].text == "Second"
 
     @pytest.mark.asyncio
-    async def test_returns_error_when_exhausted(self):
-        """After all messages are consumed, returns an error response."""
+    async def test_raises_when_exhausted(self):
+        """After all messages are consumed, raises RuntimeError (simulates HTTP 503)."""
         bot = SimpleMockChatBot([])
 
-        resp = await bot.send_context(None)
-        assert "error" in resp
-        assert resp["error"] == "unexpected request — no more mock responses"
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            await bot.send_context(None)
 
     @pytest.mark.asyncio
     async def test_pops_messages_from_list(self):
-        """Messages are popped, allowing error response after exhaustion."""
+        """Messages are popped, allowing RuntimeError after exhaustion."""
         bot = SimpleMockChatBot([_make_message("assistant", [ContentPart.create_text("X")])])
 
         # First call succeeds
         resp1 = await bot.send_context(None)
         assert resp1.message.content[0].text == "X"
 
-        # Second call fails
-        resp2 = await bot.send_context(None)
-        assert "error" in resp2
+        # Second call raises
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            await bot.send_context(None)
 
     @pytest.mark.asyncio
     async def test_tool_use_content_part(self):

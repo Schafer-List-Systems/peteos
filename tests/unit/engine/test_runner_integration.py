@@ -242,18 +242,18 @@ class TestRunnerStepChains:
 
     @pytest.mark.asyncio
     async def test_error_response(self):
-        """Chatbot exhausts → error response → ERROR status."""
+        """Chatbot exhausts → RuntimeError is raised."""
         role = _make_role()
         agent = MagicMock()
         agent._tool_manager = role._tool_manager
         agent.role = role
 
-        bot = SimpleMockChatBot([])  # empty → error immediately
+        bot = SimpleMockChatBot([])  # empty → RuntimeError
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
 
-        status, _ = await runner.step()
-        assert status is ExecStatus.ERROR
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            await runner.step()
 
     @pytest.mark.asyncio
     async def test_tool_use_and_text_in_same_response(self):
@@ -296,13 +296,13 @@ class TestRunnerStepChains:
         status, _ = await runner.step()
         assert status is ExecStatus.CONTINUE  # still continuous
 
-        # After messages exhausted, error
-        status, _ = await runner.step()
-        assert status is ExecStatus.ERROR
+        # After messages exhausted, RuntimeError
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            await runner.step()
 
     @pytest.mark.asyncio
     async def test_chatbot_error_skips_response(self):
-        """Chatbot returns error → ERROR status, no message appended."""
+        """Chatbot exhausts → RuntimeError is raised."""
         role = _make_role()
         agent = MagicMock()
         agent._tool_manager = role._tool_manager
@@ -312,9 +312,8 @@ class TestRunnerStepChains:
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
 
-        status, msg = await runner.step()
-        assert status is ExecStatus.ERROR
-        assert msg is None
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            await runner.step()
 
 
 # ---------------------------------------------------------------------------

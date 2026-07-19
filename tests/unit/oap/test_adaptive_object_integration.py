@@ -294,6 +294,8 @@ class TestSingleStepDefineAndExec:
                     ),
                 ],
             ),
+            # Second response so step() doesn't exhaust the mock after tools execute
+            Message.create("assistant", [ContentPart.create_text("Done")]),
         ]
         ChatBotManager.register_provider("simple-mock", SimpleMockBackendProvider(messages))
         await ChatBotManager.add_backend("simple-mock", api_type="simple-mock")

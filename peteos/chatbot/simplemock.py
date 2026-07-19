@@ -72,13 +72,9 @@ class SimpleMockChatBot(ChatBot):
         if self._responses:
             return SimpleMockChatBotResponse(self._responses.pop(0))
 
-        # Exhausted — simulate HTTP 500
-        # Must return SimpleMockChatBotResponse (which has __aiter__) because
-        # the runner always does `async for _ in response`
-        empty_msg = Message.create("assistant", [])
-        response = SimpleMockChatBotResponse(empty_msg)
-        response._data["error"] = "unexpected request — no more mock responses"
-        return response
+        # Exhausted — simulate HTTP 503 Service Unavailable.
+        # Real chatbots raise RuntimeError on 5xx errors, so do the same.
+        raise RuntimeError("HTTP 503 from http://localhost: unexpected request — no more mock responses")
 
     def list_available_models(self) -> List[str]:
         return ["simple-mock"]
