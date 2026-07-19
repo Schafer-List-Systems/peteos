@@ -278,13 +278,14 @@ class AgenticStringComparator(AgenticObject):
 
     async def _question(self, prompt: str) -> bool:
         """Ask the judge a yes/no question."""
-        result = await self.invoke_agent(
+        result: bool | Error = await self.invoke_agent(
             prompt,
             output_schema=bool,
             persistent_thread_id=None,
         )
         if isinstance(result, Error):
-            raise result
+            # pyrefly: ignore [bad-raise]
+            raise result.message
         return bool(result)
 
     async def contains(self, text: str, substring: str) -> bool:

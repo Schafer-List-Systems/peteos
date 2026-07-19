@@ -30,7 +30,7 @@ async def test_contains():
     async def test_fn(row: BenchmarkRow) -> bool:
         expected, text, substring = row.input_dimensions["test_case"]
         result = await comp.contains(text, substring)
-        return result == expected
+        assert result == expected
 
     runner = BenchmarkRunner(test_fn)
     runner.add_dimension("test_case", test_cases)
