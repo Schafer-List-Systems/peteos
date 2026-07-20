@@ -101,21 +101,21 @@ class Context:
             ctx.raw_dict["tool_definitions_message_id"] = tool_definitions_message.id
         return ctx
 
-    @staticmethod
-    def load(path: str) -> "Context":
+    @classmethod
+    def load(cls, path: str) -> "Context":
         """Load a context from a file."""
         with open(path, "r") as f:
             json_dict = json.load(f)
-        return Context.load_from_dict(json_dict)
+        return cls.load_from_dict(json_dict)
 
-    @staticmethod
-    def load_from_dict(json_dict: dict) -> "Context":
+    @classmethod
+    def load_from_dict(cls, json_dict: dict) -> "Context":
         """Load a context from a dictionary.
 
         The context is built exactly as it was serialized  -  no system
         prompt message is injected or modified.
         """
-        return Context(json_dict)
+        return cls(json_dict)
 
     def save(self, session_dir: str | Path) -> None:
         """Save the context to a JSON file in the session directory.
@@ -429,7 +429,7 @@ class Context:
         ]
 
         # Create child — build from scratch via __init__
-        child = Context(json_dict={}, parent_context=self)
+        child = type(self)(json_dict={}, parent_context=self)
         child._json_dict["system_prompt_message_id"] = system_prompt_id
         child._json_dict["tool_definitions_message_id"] = tool_definitions_id
 
