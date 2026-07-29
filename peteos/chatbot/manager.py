@@ -51,6 +51,7 @@ class ChatBotManager:
         """
         if timeout is not None:
             ChatBotManager._timeout = timeout
+            BackendConfig._default_timeout = timeout
 
     @classmethod
     def reset(cls) -> None:
@@ -102,7 +103,7 @@ class ChatBotManager:
     async def _add_backend(cls, config: BackendConfig) -> BackendInfo:
         """Add a backend from a BackendConfig (no duplicate or validation check)."""
         client = HTTPClient(
-            timeout=config.timeout if config.timeout is not None else cls._timeout,
+            timeout=config.timeout,
             retry_delays=config.retry_delays,
         )
 
