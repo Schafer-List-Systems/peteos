@@ -32,6 +32,7 @@ class BackendConfig:
     retry_delays: Optional[list[float]] = None
     api_key: Optional[str] = None
     model_priorities: Optional[Dict[str, int]] = None
+    timeout: Optional[float] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "BackendConfig":

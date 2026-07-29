@@ -102,7 +102,7 @@ class ChatBotManager:
     async def _add_backend(cls, config: BackendConfig) -> BackendInfo:
         """Add a backend from a BackendConfig (no duplicate or validation check)."""
         client = HTTPClient(
-            timeout=cls._timeout,
+            timeout=config.timeout if config.timeout is not None else cls._timeout,
             retry_delays=config.retry_delays,
         )
 
