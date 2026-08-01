@@ -136,7 +136,11 @@ class build_ext(_build_ext):
 setup(
     name="peteos",
     packages=find_packages(include=["peteos", "peteos.*"]),
-    ext_modules=cythonize(extensions, language_level="3str"),
+    ext_modules=cythonize(
+        extensions,
+        language_level="3str",
+        compiler_directives={"annotation_typing": False},
+    ),
     zip_safe=False,
     cmdclass={
         "build_py": build_py,
