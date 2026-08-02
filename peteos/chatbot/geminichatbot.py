@@ -216,7 +216,9 @@ class GeminiChatBot(ChatBot):
         - inline_data for images/videos/audio (base64)
         """
         body: Dict[str, Any] = {}
-        body["generationConfig"] = {}
+        body["generationConfig"] = {
+            "maxOutputTokens": self._config.max_tokens,
+        }
 
         # Gemini's generation config field names differ from OpenAI's
         _GEMINI_GEN_CONFIG_FIELDS = {
