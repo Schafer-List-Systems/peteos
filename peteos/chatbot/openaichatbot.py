@@ -165,6 +165,7 @@ class OpenAIChatBot(ChatBot):
         body: Dict[str, Any] = {}
         body["model"] = self._config.model
         body["stream"] = self._config.streaming if streaming is None else streaming
+        body["max_tokens"] = self._config.max_tokens
 
         if generation_config:
             for key, value in generation_config.items():
