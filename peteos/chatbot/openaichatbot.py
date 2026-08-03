@@ -15,31 +15,39 @@ from peteos.conversation.message import Message, ContentPart
 
 _logger = get_logger(__name__)
 
-THINKING_START = "<think>"
-THINKING_END = "</think>"
+_THINKING_MARKERS = [
+    ("<think>", "</think>"),
+    ("<|channel>thought", "<channel|>"),
+]
 
 
 def _split_thinking_tokens(text: str) -> tuple[str, str]:
-    """Extract thinking portion from text marked with <think>/</think> tokens.
+    """Extract thinking portion from text marked with inline thinking markers.
+
+    Supports two marker styles:
+      - <think> / </think> (native model output)
+      - <|channel>thought / <|channel|> (LM Studio variant)
 
     Args:
         text: The raw response text which may contain inline thinking markers.
 
     Returns:
-        A tuple of (thinking_text, remaining_text). When thinking markers are
-        present, thinking_text contains the content between <think> and
-        </think>, and remaining_text contains everything after </think>.
-        When no markers are found, both elements are empty strings.
+        A tuple of (thinking_text, remaining_text). When markers are found,
+        thinking_text contains the content between them, and remaining_text
+        contains everything after. When no markers are found, returns
+        ("", text) — the entire input becomes remaining_text.
     """
-    start = text.find(THINKING_START)
-    if start == -1:
-        return ("", text)
-    end = text.find(THINKING_END, start)
-    if end == -1:
-        return ("", text)
-    thinking = text[start + len(THINKING_START):end]
-    remaining = text[end + len(THINKING_END):]
-    return (thinking, remaining)
+    for start_tag, end_tag in _THINKING_MARKERS:
+        start = text.find(start_tag)
+        if start == -1:
+            continue
+        end = text.find(end_tag, start)
+        if end == -1:
+            return ("", text[start + len(start_tag):])
+        thinking = text[start + len(start_tag):end]
+        remaining = text[end + len(end_tag):]
+        return (thinking, remaining)
+    return ("", text)
 
 
 class OpenAIChatBot(ChatBot):
