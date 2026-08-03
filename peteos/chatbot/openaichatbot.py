@@ -15,6 +15,32 @@ from peteos.conversation.message import Message, ContentPart
 
 _logger = get_logger(__name__)
 
+THINKING_START = "<think>"
+THINKING_END = "</think>"
+
+
+def _split_thinking_tokens(text: str) -> tuple[str, str]:
+    """Extract thinking portion from text marked with <think>/</think> tokens.
+
+    Args:
+        text: The raw response text which may contain inline thinking markers.
+
+    Returns:
+        A tuple of (thinking_text, remaining_text). When thinking markers are
+        present, thinking_text contains the content between <think> and
+        </think>, and remaining_text contains everything after </think>.
+        When no markers are found, both elements are empty strings.
+    """
+    start = text.find(THINKING_START)
+    if start == -1:
+        return ("", text)
+    end = text.find(THINKING_END, start)
+    if end == -1:
+        return ("", text)
+    thinking = text[start + len(THINKING_START):end]
+    remaining = text[end + len(THINKING_END):]
+    return (thinking, remaining)
+
 
 class OpenAIChatBot(ChatBot):
     """ChatBot implementation for OpenAI-compatible API."""
@@ -349,7 +375,14 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
             # Extract content
             content = message.get("content", "")
             if isinstance(content, str) and content:
-                response._data["content"] = [{"index": 0, "type": "text", "content": content}]
+                thinking_text, remaining_text = _split_thinking_tokens(content)
+                content_parts: list[Dict[str, Any]] = []
+                if thinking_text:
+                    content_parts.append({"index": 0, "type": "thinking", "content": thinking_text})
+                    content_parts.append({"index": 1, "type": "text", "content": remaining_text})
+                else:
+                    content_parts.append({"index": 0, "type": "text", "content": content})
+                response._data["content"] = content_parts
             elif isinstance(content, list):
                 response._data["content"] = []
                 for item in content:
