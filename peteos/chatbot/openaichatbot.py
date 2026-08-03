@@ -25,8 +25,8 @@ def _split_thinking_tokens(text: str) -> tuple[str, str]:
     """Extract thinking portion from text marked with inline thinking markers.
 
     Supports two marker styles:
-      - <think> / </think> (native model output)
-      - <|channel>thought / <|channel|> (LM Studio variant)
+      - <think> / </think> (GLM models)
+      - <|channel>thought / <|channel|> (Gemma models)
 
     Args:
         text: The raw response text which may contain inline thinking markers.
