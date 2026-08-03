@@ -27,7 +27,6 @@ class AnthropicChatBot(ChatBot):
 
     DEFAULT_CHAT_ENDPOINT = "/v1/messages"
     DEFAULT_MODELS_ENDPOINT = "/v1/models"
-    DEFAULT_MAX_TOKENS = 4096
 
     # Default translation configuration for Anthropic API
     # Translates Anthropic SSE events to uniform delta format
@@ -149,8 +148,6 @@ class AnthropicChatBot(ChatBot):
             bot_cfg["response_translations"] = self.RESPONSE_TRANSLATIONS
         if bot_cfg.get("request_translations") is None:
             bot_cfg["request_translations"] = self.REQUEST_TRANSLATIONS
-        if bot_cfg.get("max_tokens") is None:
-            bot_cfg["max_tokens"] = self.DEFAULT_MAX_TOKENS
         super().__init__(ChatBotConfig.from_dict(bot_cfg))
         self._models: List[str] = []
 

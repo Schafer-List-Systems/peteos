@@ -28,15 +28,12 @@ class GeminiChatBot(ChatBot):
     """
 
     DEFAULT_CHAT_ENDPOINT = "/v1beta/models/"
-    DEFAULT_MAX_TOKENS = 4096
 
     def __init__(self, http_client: HTTPClient, config: ChatBotConfig):
         bot_cfg = asdict(config)
         if bot_cfg.get("chat_endpoint") is None:
             # chat_endpoint becomes the model path prefix (e.g. /v1beta/models/{model}:generateContent)
             bot_cfg["chat_endpoint"] = self.DEFAULT_CHAT_ENDPOINT
-        if bot_cfg.get("max_tokens") is None:
-            bot_cfg["max_tokens"] = self.DEFAULT_MAX_TOKENS
         super().__init__(ChatBotConfig.from_dict(bot_cfg))
         self._models: List[str] = []
 
