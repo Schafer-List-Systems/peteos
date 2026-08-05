@@ -108,7 +108,7 @@ class AnthropicChatBot(ChatBot):
             "bool": "boolean",
             "list": "array",
             "dict": "object",
-            "any": "string",
+            "any": "object",
         }
 
         for param_name, param_info in raw_params.items():

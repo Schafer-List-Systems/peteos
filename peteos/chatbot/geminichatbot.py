@@ -104,7 +104,7 @@ class GeminiChatBot(ChatBot):
             "bool": "BOOLEAN",
             "list": "ARRAY",
             "dict": "OBJECT",
-            "any": "STRING",
+            "any": "OBJECT",
         }
 
         for param_name, param_info in raw_params.items():

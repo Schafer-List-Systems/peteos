@@ -12,6 +12,28 @@ from typing import Any, get_args, get_origin
 import dataclasses
 
 
+def relaxed_parse_data(raw: Any, schema: type | None) -> Any:
+    """Try strict parsing first, then unwrap single-key dicts as a fallback.
+
+    Args:
+        raw: The raw value — a JSON string or an already-parsed object.
+        schema: The expected output schema type.
+
+    Returns:
+        The typed data cast to the schema type.
+    """
+    try:
+        return parse_data(raw, schema)
+    except ValueError:
+        if schema is not None and isinstance(raw, dict):
+            if len(raw) == 1:
+                return parse_data(next(iter(raw.values())), schema)
+            if len(raw) == 2 and "type" in raw:
+                other = next(k for k in raw if k != "type")
+                return parse_data(raw[other], schema)
+        raise
+
+
 def _resolve_type(hint: Any, globalns: dict | None = None) -> type:
     """Resolve a type hint — already a class, or a string annotation.
 
@@ -30,20 +52,17 @@ def _resolve_type(hint: Any, globalns: dict | None = None) -> type:
     return hint  # generic alias (list[...], dict[...], etc.) — already a valid type
 
 
-def parse_data(raw: str, schema: type | None) -> Any:
+def parse_data(raw: Any, schema: type | None) -> Any:
     """Full pipeline: parse JSON and cast to typed schema.
 
-    Returns the parsed data cast to the schema type (dataclass instances,
-    list[dataclass], etc.) or raises ValueError on any failure.
+    Accepts either a raw JSON string or an already-parsed Python value
+    (dict, list, scalar). For strings, attempts ``json.loads()`` first;
+    on failure, treats the string directly as the value (scalars only).
 
-    When JSON parsing fails and the schema is a scalar type (str, int,
-    float, bool, Enum), treats the raw string as the actual value and
-    casts it directly. This handles LLMs that return bare strings
-    (e.g. ``"string_argument"``) instead of JSON-encoded strings
-    (e.g. ``"\"string_argument\""``).
+    For already-parsed values, skips JSON parsing and casts directly.
 
     Args:
-        raw: The raw JSON string from the agent.
+        raw: The raw value — a JSON string or an already-parsed object.
         schema: The expected output schema type.
 
     Returns:
@@ -55,19 +74,17 @@ def parse_data(raw: str, schema: type | None) -> Any:
     if schema is None:
         return raw
 
+    # Already a parsed value — skip JSON decoding
+    if not isinstance(raw, str):
+        return _recursive_cast(raw, schema)
+
     try:
         parsed = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         # Fallback for scalar schemas: interpret raw string directly.
         # Complex types (dataclass, list) fundamentally need JSON syntax,
         # so we only handle scalars and Enums here.
-        #origin = get_origin(schema)
-        #args = get_args(schema)
-        #is_enum = origin is None and isinstance(schema, type) and issubclass(schema, Enum)
-        #is_scalar = schema in (str, int, float, bool)
-        #if is_enum or is_scalar:
         return _recursive_cast(raw, schema)
-        #raise
 
     return _recursive_cast(parsed, schema)
 
@@ -77,107 +94,176 @@ def _type_name(schema: type, globalns: dict | None = None) -> str:
     if globalns is None:
         globalns = {}
     resolved = _resolve_type(schema, globalns)
+    origin = get_origin(schema)
+    args = get_args(schema)
     if isinstance(resolved, type) and issubclass(resolved, Enum):
-        return resolved.__name__
+        allowed = ", ".join(f'"{m.value}"' for m in resolved)
+        return f"one of: {allowed}"
+    if is_dataclass(resolved):
+        fields = dataclasses.fields(resolved)
+        inner_globalns = dict(sys.modules[resolved.__module__].__dict__)
+        type_names = []
+        for f in fields:
+            resolved_field = _resolve_type(f.type, inner_globalns)
+            type_names.append(f"'{f.name}': {_type_name(resolved_field)}")
+        return "{" + ", ".join(type_names) + "}"
+    # Generic types: dict, list, etc.
+    if origin is dict and len(args) == 2:
+        k, v = args
+        return "{" + _type_name(k) + ": " + _type_name(v) + "}"
+    if origin is list and args:
+        return "[" + ", ".join(_type_name(a) for a in args) + ", ...]"
     return resolved.__name__
 
 
-def get_schema_description(schema: type | None) -> tuple[str, str] | None:
-    """Extract the JSON schema dict and docstring for an output schema.
+def _format_docs(docs: list[tuple[str, str]]) -> str:
+    """Format a list of (type_name, docstring) tuples into a readable block.
+
+    Each non-empty docstring gets a '# TypeName' header for clarity.
+    """
+    if not docs:
+        return ""
+    lines = []
+    for type_name, doc in docs:
+        if doc:
+            lines.append(f"# {type_name}")
+            lines.append(doc)
+            lines.append("")
+    return "\n".join(lines).strip()
+
+
+def get_schema_description(schema: type | None, _seen: set | None = None) -> tuple[str, list[tuple[str, str]]]:
+    """Extract the JSON schema type expression and structured docstrings.
 
     Handles dataclasses, enums, lists, unions, and scalar primitives.
 
+    The first element is a concise type expression with dataclass names
+    (e.g. "Person{'name': str}", "list[Person{'name': str}]").
+    The second element is a list of (type_name, docstring) tuples for
+    every type that has a user-provided docstring.
+
     Args:
         schema: The output schema to describe.
+        _seen: Internal set to prevent infinite recursion on self-referential types.
 
     Returns:
-        A tuple of (json_schema_str, docstring) or None if the schema
-        is not supported.
+        A tuple of (type_expression, [(type_name, docstring), ...]).
     """
-    if schema is None:
-        return None
-    origin = get_origin(schema)
-    args = get_args(schema)
+    if _seen is None:
+        _seen = set()
 
-    # Dataclass: describe fields
+    if schema is None or schema is Any:
+        return "any", [("any", "accept any value")]
+
+    # Resolve string annotations so _seen works on the actual type
+    if isinstance(schema, str):
+        try:
+            resolved_schema = _resolve_type(schema)
+        except NameError:
+            return schema, []
+    else:
+        resolved_schema = schema
+
+    schema_id = id(resolved_schema)
+    if schema_id in _seen:
+        return resolved_schema.__name__ if hasattr(resolved_schema, "__name__") else str(resolved_schema), []
+    _seen.add(schema_id)
+
+    origin = get_origin(resolved_schema)
+    args = get_args(resolved_schema)
+
+    # Dataclass: describe as ClassName{field: type, ...}
     if is_dataclass(schema):
         fields = dataclasses.fields(schema)
         globalns = dict(sys.modules[schema.__module__].__dict__)
+        globalns[schema.__name__] = schema
         type_names = []
+        doc_entries: list[tuple[str, str]] = []
+        class_doc = (schema.__doc__ or "").strip()
+        # Skip auto-generated dataclass docstrings (pattern: "ClassName(field: type, ...)")
+        if class_doc and not (class_doc.startswith(schema.__name__ + "(") and class_doc.endswith(")")):
+            doc_entries.append((schema.__name__, class_doc))
         for f in fields:
-            resolved = _resolve_type(f.type, globalns)
-            type_names.append(f"'{f.name}': {_type_name(resolved)}")
-        json_schema = "{" + ", ".join(type_names) + "}"
-        docstring = (schema.__doc__ or "").strip()
-        return json_schema, docstring
+            try:
+                resolved = _resolve_type(f.type, globalns)
+            except NameError:
+                type_names.append(f"'{f.name}': {schema.__name__}")
+                continue
+            inner_schema, inner_docs = get_schema_description(resolved, _seen)
+            type_names.append(f"'{f.name}': {inner_schema}")
+            if inner_docs:
+                doc_entries.extend(inner_docs)
+        json_schema = f"{schema.__name__}{{{', '.join(type_names)}}}"
+        return json_schema, doc_entries
 
-    # Enum: describe as a string with allowed values
+    # Enum: describe as ClassName("val1" | "val2" | ...)
     if origin is None and isinstance(schema, type) and issubclass(schema, Enum):
-        allowed = ", ".join(f'"{m.value}"' for m in schema)
+        allowed = " | ".join(f'"{m.value}"' for m in schema)
         docstring = (schema.__doc__ or "").strip()
-        return (
-            f'{schema.__name__} is a placeholder for one of the following strings: {allowed}.',
-            docstring if docstring else ''
-        )
+        entry: tuple[str, str] = (schema.__name__, docstring) if docstring else ()
+        return f'{schema.__name__}({allowed})', [entry] if entry else []
 
     # List with inner type
     if origin is list and args:
-        inner = get_schema_description(args[0])
-        if inner is not None:
-            inner_schema, inner_doc = inner
-            return f"[{inner_schema}, ...]", inner_doc
+        inner_schema, inner_docs = get_schema_description(args[0], _seen)
+        return f"list[{inner_schema}]", inner_docs
 
     # Union type
     is_union = origin is types.UnionType or (args and type(None) in args)
     if is_union:
         non_none = [t for t in args if t is not type(None)]
         parts = []
+        doc_entries: list[tuple[str, str]] = []
         for t in non_none:
-            desc = get_schema_description(t)
+            desc = get_schema_description(t, _seen)
             if desc is not None:
                 parts.append(desc[0])
+                if desc[1]:
+                    doc_entries.extend(desc[1])
             else:
                 parts.append(_type_name(t))
-        return " | ".join(parts), ""
+        return " | ".join(parts), doc_entries
 
     # Generic dict: describe as key-type → value-type
     if origin is dict and args:
-        key_desc = get_schema_description(args[0])
-        val_desc = get_schema_description(args[1])
+        key_desc = get_schema_description(args[0], _seen)
+        val_desc = get_schema_description(args[1], _seen)
         key_str = key_desc[0] if key_desc else _type_name(args[0])
         val_str = val_desc[0] if val_desc else _type_name(args[1])
-        return (f'{{"{key_str}": {val_str}}}', f"dict with {key_str} keys and {val_str} values")
+        doc_entries = []
+        if key_desc[1]:
+            doc_entries.extend(key_desc[1])
+        if val_desc[1]:
+            doc_entries.extend(val_desc[1])
+        return f'{{{key_str}: {val_str}}}', doc_entries
 
-    # Generic list: describe as list of inner type
-    if origin is list and args:
-        inner = get_schema_description(args[0])
-        if inner:
-            return (f"[{inner[0]}, ...]", inner[1])
-
-    # Scalar primitives
+    # Scalar primitives — return empty docs (type name is self-documenting)
     if schema is str:
-        return '"string"', "string type"
+        return "str", []
     if schema is int:
-        return "123", "integer type"
+        return "int", []
     if schema is float:
-        return "1.0", "float type"
+        return "float", []
     if schema is bool:
-        return "true", "boolean type"
+        return "bool", []
     if schema is list:
-        return "[1, 2]", "list type"
+        return "list", []
     if schema is dict:
-        return '{"key": "value"}', "dict type"
+        return "dict", []
     if schema is str | int | float | bool | list | dict | type(None):
         parts = []
+        doc_entries: list[tuple[str, str]] = []
         for t in [str, int, float, bool, list, dict, type(None)]:
             if t in schema:
-                desc = get_schema_description(t)
+                desc = get_schema_description(t, _seen)
                 if desc:
                     parts.append(desc[0])
-        return " | ".join(parts), "one of the above types"
+                    if desc[1]:
+                        doc_entries.extend(desc[1])
+        return " | ".join(parts), doc_entries
 
-    # No matching schema type
-    return None
+    raise ValueError(f"unsupported schema type: {schema}")
+
 
 def _recursive_cast(data: Any, schema: type) -> Any:
     """Recursively cast data to a schema, handling nested dataclasses.
@@ -185,6 +271,16 @@ def _recursive_cast(data: Any, schema: type) -> Any:
 
     Walks the parsed data tree and instantiates dataclass objects at every
     level.  Supports scalar types, dicts, lists, and arbitrary nesting depth.
+
+    Args:
+        data: The parsed data to cast.
+        schema: The target type schema.
+
+    Returns:
+        The data cast to the schema type.
+
+    Raises:
+        ValueError: If data doesn't match the schema.
 
     10 progressively complex examples:
 
@@ -253,6 +349,14 @@ def _recursive_cast(data: Any, schema: type) -> Any:
         data   = {"label": "tree", "metrics": [{"name": "depth", "value": 3.0}], "parent": {"label": "root", "metrics": [], "parent": null}}
         → Node(label="tree", metrics=[Metric(name="depth", value=3.0)], parent=Node(label="root", metrics=[], parent=None))
     """
+    # Any: pass through unchanged — validation happens elsewhere
+    if schema is Any:
+        return data
+
+    # type(None): pass through unchanged
+    if schema is type(None):
+        return data
+
     # Compute origin/args once — reused by list and union branches below
     origin = get_origin(schema)
     args = get_args(schema)

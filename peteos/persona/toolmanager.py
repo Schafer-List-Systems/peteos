@@ -69,7 +69,7 @@ class Tool:
 
             # Get type information
             if param.annotation != inspect.Parameter.empty:
-                param_info["type"] = param.annotation.__name__ if hasattr(param.annotation, "__name__") else str(param.annotation)
+                param_info["type"] = param.annotation.__name__.lower() if hasattr(param.annotation, "__name__") else str(param.annotation).lower()
             else:
                 param_info["type"] = "any"
 

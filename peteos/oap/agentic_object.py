@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import inspect
-import json
 import os
 import threading
 import time
@@ -68,7 +66,7 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     }
 
 
-from peteos.utils._schema import get_schema_description, parse_data
+from peteos.utils._schema import _format_docs, get_schema_description, relaxed_parse_data
 
 
 from peteos.persona.agent import Agent
@@ -134,16 +132,10 @@ class AgenticObject:
 
     def _output_schema_hook(self) -> str:
         """System prompt hook: returns formatted output schema description."""
-        desc = get_schema_description(self._oap_current_output_schema)
-        if desc is not None:
-            json_schema, docstring = desc
-            return f"# Output\n\nProvide your final answer with the `produce_output` tool with a JSON object matching:\n{json_schema}\nSchema description: {docstring}"
-        if self._oap_current_output_schema is not None:
-            return f"# Output\n\nProvide your final answer with the `produce_output` tool with a value of type {self._oap_current_output_schema.__name__}."
-        return (
-            "# Output\n\nProvide your final answer with the `produce_output` tool. "
-            "Any value (string, array, or dict) is acceptable."
-        )
+        output_schema = self._oap_current_output_schema
+        desc = get_schema_description(output_schema)
+        json_schema, doc_entries = desc
+        return _format_docs(doc_entries)
 
     def _register_sandbox_hook(self) -> None:
         """Register the python_exec system prompt hook when code execution is enabled."""
@@ -270,9 +262,9 @@ class AgenticObject:
         builder = SandboxBuilder("session", base=self._oap_sandbox_builder)
 
         # add proxies for produce_output, produce_error and invoke tools but with runner registered already
-        def _produce_output(data: Any) -> str:
+        def _produce_output(answer: Any) -> str | None:
             _logger.debug("build_session_sandbox: _produce_output wrapper called, runner=%s", runner)
-            return self._produce_output(data, runner=runner)
+            return self._produce_output(answer, runner=runner)
 
         def _produce_error(message: str) -> str:
             return self._produce_error(message, runner=runner)  # type: ignore[arg-type]
@@ -354,16 +346,16 @@ class AgenticObject:
         func = getattr(sandbox, matching[0])
         return func(*args, **kwargs)
 
-    @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the result as a JSON string describing the output data.")
-    def _produce_output(self, data: str, runner: "Runner | None" = None) -> str:
+    @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the answer matching the output schema.")
+    def _produce_output(self, answer: Any, runner: "Runner | None" = None) -> str | None:
         """Protected tool: signals the agent has produced its final answer.
 
-        Parses the JSON string and validates it against the current output
-        schema. If validation fails, returns an error message the agent can
-        use to correct its tool call.
+        Validates the answer against the current output schema. If validation
+        fails, returns an error message the agent can use to correct its
+        tool call.
 
         Args:
-            data: The result as a JSON string.
+            answer: The result as a structured value (dict, list, or scalar).
             runner: The runner (injected by the execution environment).
 
         Returns:
@@ -373,21 +365,22 @@ class AgenticObject:
             _logger.debug("_produce_output: runner is None")
             return "Error: runner not available."
         try:
-            parsed = parse_data(data, self._oap_current_output_schema)
+            parsed = relaxed_parse_data(answer, self._oap_current_output_schema)
         except ValueError as e:
-            desc = get_schema_description(self._oap_current_output_schema)
-            if desc is None:
-                hint = f"Expected a value of type {self._oap_current_output_schema.__name__}."
-            else:
-                hint = f"Expected data matching schema: {desc[0]}."
-                if desc[1]:
-                    hint += f"\nSchema description: {desc[1]}."
+            output_schema = self._oap_current_output_schema
+            
+            desc = get_schema_description(output_schema)
+            json_schema, doc_entries = desc
+            hint = f"Expected answer matching schema format: {json_schema}."
+            docstring = _format_docs(doc_entries)
+            if docstring:
+                hint += f"\nSchema description:\n{docstring}"
             return f"{e}\n{hint}"
 
         try:
             if runner.state.get("_oap_produced_data"):
                 runner.state.delete("_oap_produced_data")
-            runner.state.create("_oap_produced_data", data)
+            runner.state.create("_oap_produced_data", answer)
             _logger.debug(
                 "_produce_output: wrote to runner %s, _oap_produced_data=%s",
                 runner.session_uuid, parsed,
@@ -651,24 +644,22 @@ class AgenticObject:
                     _logger.debug("_on_step_done: error found, returning FINISHED")
                     return ExecStatus.FINISHED
                 elif produced is not None:
-                    _logger.debug("_on_step_done: produced data found, returning FINISHED")
+                    _logger.debug("_on_step_done: produced answer found, returning FINISHED")
                     return ExecStatus.FINISHED
                 elif status == ExecStatus.FINISHED:
-                    schema_desc = ""
-                    desc = get_schema_description(self._oap_current_output_schema)
-                    if desc is not None:
-                        json_schema, docstring = desc
-                        schema_desc = (
-                            f"Provide your final answer with the `produce_output` tool with a JSON object matching:\n{json_schema}\nSchema description: {docstring}"
-                        )
-                    elif self._oap_current_output_schema is not None:
-                        schema_desc = (
-                            f"Provide your final answer with the `produce_output` tool with a value of type {self._oap_current_output_schema.__name__}."
-                        )
+                    output_schema = self._oap_current_output_schema
+                    desc = get_schema_description(output_schema)
+                    json_schema, doc_entries = desc
+                    docstring = _format_docs(doc_entries)
+
+                    schema_desc = f"Provide your final answer with the `produce_output` tool and arguments matching the schema:\n{json_schema}"
+                    if docstring:
+                        schema_desc += f"\nSchema description:\n{docstring}"
                     reminder = (
                         f"It looks like you finished a step without calling `produce_output` or `produce_error`. "
-                        f"If you have your final answer, call `produce_output` with your result in the following schema: {schema_desc} "
+                        f"If you have your final answer, call `produce_output` with arguments in the following schema: {schema_desc} "
                     )
+
                     await r.queue_message(Message.create(
                         role="user",
                         content_parts=[ContentPart.create_text(reminder)],
@@ -711,11 +702,11 @@ class AgenticObject:
                 if produced_data is not None:
                     _logger.debug("invoke_agent[%s]: produced_data found", self.__class__.__name__)
                     try:
-                        final_result = parse_data(produced_data, self._oap_current_output_schema)
+                        final_result = relaxed_parse_data(produced_data, self._oap_current_output_schema)
                         return final_result
                     except ValueError as e:
-                        _logger.warning("invoke_agent[%s]: produced data failed to parse: %s", self.__class__.__name__, e)
-                        final_result = Error(f"Agent produced data that failed schema validation: {e}")
+                        _logger.warning("invoke_agent[%s]: produced answer failed to parse: %s", self.__class__.__name__, e)
+                        final_result = Error(f"Agent produced answer that failed schema validation: {e}")
                     break
                 error_msg = runner.state.get("_oap_error")
                 if error_msg is not None:
