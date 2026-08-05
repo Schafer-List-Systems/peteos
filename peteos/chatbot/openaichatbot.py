@@ -12,6 +12,7 @@ from .httpclient import HTTPClient
 from peteos.conversation.context import Context
 from peteos.utils.delta_merge import merge_delta_into_target
 from peteos.conversation.message import Message, ContentPart
+from .response_types import normalize_stop_reason
 
 _logger = get_logger(__name__)
 
@@ -351,6 +352,12 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
     For non-streaming, overrides from_json to extract fields from the
     complete response format (choices array with message role/content).
     """
+
+    def _finalize(self) -> None:
+        """Normalize OpenAI stop_reason to unified values."""
+        raw = self._data.get("stop_reason")
+        if raw is not None:
+            self._data["stop_reason"] = normalize_stop_reason(raw)
 
     @classmethod
     def from_json(cls, data: Dict[str, Any], translations: Dict[str, str]) -> "OpenAIChatBotResponse":

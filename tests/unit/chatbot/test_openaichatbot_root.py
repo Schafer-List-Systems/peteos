@@ -195,7 +195,7 @@ class TestOpenAIChatBotResponse:
 
     @pytest.mark.asyncio
     async def test_stop_reason_preserved(self):
-        """OpenAI finish_reason maps to stop_reason."""
+        """OpenAI finish_reason maps to unified stop_reason."""
         async def mock_stream():
             yield 'data: {"choices": [{"delta": {"role": "assistant", "content": "Hello"}}]}'
             yield 'data: {"choices": [{"delta": {"finish_reason": "stop"}}]}'
@@ -205,7 +205,7 @@ class TestOpenAIChatBotResponse:
         async for _ in response:
             pass
 
-        assert response.data.get("stop_reason") == "stop"
+        assert response.data.get("stop_reason") == "end_turn"
 
 
 class TestOpenAIRequestTranslation:

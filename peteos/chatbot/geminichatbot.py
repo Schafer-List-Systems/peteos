@@ -12,6 +12,7 @@ from .httpclient import HTTPClient
 from peteos.conversation.context import Context
 from peteos.utils.delta_merge import merge_delta_into_target
 from peteos.conversation.message import Message, ContentPart
+from .response_types import normalize_stop_reason
 
 _logger = get_logger(__name__)
 
@@ -409,6 +410,12 @@ class GeminiChatBotResponse(GenericChatBotResponse):
     Non-streaming returns the complete response directly.
     """
 
+    def _finalize(self) -> None:
+        """Normalize Gemini finishReason to unified stop_reason values."""
+        raw = self._data.get("stop_reason")
+        if raw is not None:
+            self._data["stop_reason"] = normalize_stop_reason(raw)
+
     # Gemini uses full-state events: each event contains the complete
     # accumulated response. Override _accumulate_event to replace instead of merge.
     def _accumulate_event(self, event: Dict[str, Any]) -> None:
@@ -570,15 +577,10 @@ class GeminiChatBotResponse(GenericChatBotResponse):
         if content_array:
             result["content"] = content_array
 
-        # Extract finish reason → stop_reason
+        # Extract finish reason → stop_reason (use unified mapping)
         finish_reason = candidate.get("finishReason", "")
         if finish_reason:
-            if finish_reason in ("STOP", "MAX_TOKENS"):
-                result["stop_reason"] = "stop"
-            elif finish_reason == "SAFETY":
-                result["stop_reason"] = "safety"
-            else:
-                result["stop_reason"] = finish_reason.lower()
+            result["stop_reason"] = normalize_stop_reason(finish_reason)
 
         return result
 

@@ -147,7 +147,7 @@ class TestGeminiChatBotResponse:
 
     @pytest.mark.asyncio
     async def test_stop_reason_from_finish_reason(self):
-        """Gemini finishReason maps to stop_reason."""
+        """Gemini finishReason maps to unified stop_reason."""
         mock_data = {
             "candidates": [{
                 "content": {"role": "model", "parts": [{"text": "Hello"}]},
@@ -156,11 +156,11 @@ class TestGeminiChatBotResponse:
         }
         response = GeminiChatBotResponse.from_json(mock_data)
 
-        assert response.data["stop_reason"] == "stop"
+        assert response.data["stop_reason"] == "max_tokens"
 
     @pytest.mark.asyncio
     async def test_safety_stop_reason(self):
-        """SAFETY finishReason maps to safety stop_reason."""
+        """SAFETY finishReason maps to content_filter stop_reason."""
         mock_data = {
             "candidates": [{
                 "content": {"role": "model", "parts": [{"text": "Hello"}]},
@@ -169,7 +169,7 @@ class TestGeminiChatBotResponse:
         }
         response = GeminiChatBotResponse.from_json(mock_data)
 
-        assert response.data["stop_reason"] == "safety"
+        assert response.data["stop_reason"] == "content_filter"
 
     @pytest.mark.asyncio
     async def test_empty_response(self):
