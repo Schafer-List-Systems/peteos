@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from peteos.conversation.session import SessionState
 from peteos.sandbox import Sandbox, SandboxBuilder
-from peteos.chatbot import ChatBot, ChatBotManager, Message
+from peteos.chatbot import ChatBot, ChatBotResponse, ChatBotManager, Message, ContentPart
 
 from peteos.utils.activeclass import ActiveClass
 from peteos.engine.exec_status import ExecStatus
@@ -23,6 +23,7 @@ from peteos.engine.executionenvironment import (
 )
 from peteos.utils import get_logger
 from peteos.persona.role import Role
+from peteos.chatbot.response_types import StopReason
 
 if TYPE_CHECKING:
     from peteos.engine.channel import Channel
@@ -82,6 +83,8 @@ class Runner(ActiveClass):
         self._chatbot: ChatBot = chatbot or self._select_chatbot()
         self._sandbox: Sandbox | None = None
         self._sandbox_builder: SandboxBuilder | None = None
+        self._max_truncation_retries = agent.role.max_truncation_retries
+        self._truncation_counter: int = 0
 
     # ------------------------------------------------------------------ #
     # Properties
@@ -297,6 +300,11 @@ class Runner(ActiveClass):
             _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
             return (ExecStatus.ERROR, None)
 
+        # --- Phase 2.5: Handle max_tokens truncation ---
+        truncation_result = await self._handle_truncation(response)
+        if truncation_result is not None:
+            return truncation_result
+
         # --- Phase 3: Use the normalized message from the chatbot ---
         response_msg: Message = response.message
         await self.append_and_notify(response_msg)
@@ -328,6 +336,80 @@ class Runner(ActiveClass):
 
         _logger.debug("[runner] step(): Had final answer.")
         return (ExecStatus.FINISHED, response_msg)
+
+    async def _handle_truncation(
+        self, response: ChatBotResponse
+    ) -> tuple[ExecStatus, Message] | None:
+        """Handle a response that was truncated by max_tokens.
+
+        Drops truncated tool_use parts, appends a system notification
+        telling the LLM to be concise, and decides whether to retry or
+        error out based on the truncation counter.
+
+        Returns a (status, message) tuple to return from step(), or None
+        if the response was not truncated.
+        """
+        stop_reason = response.data.get("stop_reason")
+        if stop_reason != StopReason.MAX_TOKENS:
+            if self._truncation_counter > 0:
+                _logger.debug("[runner] step(): Non-truncated response, resetting truncation counter.")
+                self._truncation_counter = 0
+            return None
+
+        self._truncation_counter += 1
+        _logger.warning(
+            "[runner] step(): Response truncated (max_tokens). "
+            "Truncation #%d of %d.",
+            self._truncation_counter,
+            self._max_truncation_retries,
+        )
+
+        # Truncation can only corrupt the last part.
+        # Drop it if it's a tool_use (dangerous) or text (corrupted message).
+        # Keep thinking blocks — they represent complete reasoning.
+        parts = response.message.content
+        content_parts = list(parts)
+        if content_parts and content_parts[-1].type in ("tool_use", "text"):
+            content_parts = content_parts[:-1]
+        truncated_msg = Message.create(
+            role=response.message.role,
+            content_parts=content_parts,
+        )
+        await self.append_and_notify(truncated_msg)
+
+        # Tell the LLM it was cut off
+        truncation_note = (
+            f"**[Response truncated by token limit (#{self._truncation_counter}/{self._max_truncation_retries})]**\n"
+            "Your previous response was cut off. Please provide a concise final answer."
+        )
+        note_msg = Message.create(
+            role="user",
+            content_parts=[ContentPart.create_text(truncation_note)],
+        )
+        self._session.active_context.append(note_msg)
+        await self._call_after_message_append(note_msg)
+        await self.publish_notification(note_msg)
+
+        if self._truncation_counter >= self._max_truncation_retries:
+            _logger.warning(
+                "[runner] step(): Truncation counter exhausted (%d/%d).",
+                self._truncation_counter,
+                self._max_truncation_retries,
+            )
+            hook_status = await self.execution_environment.call_hooks(
+                "after_truncation_exhausted",
+                self._truncation_counter,
+                self._max_truncation_retries,
+            )
+            hook_return = hook_status if hook_status is not None else ExecStatus.ERROR
+            self._truncation_counter = 0
+            return (
+                hook_return if isinstance(hook_return, ExecStatus)
+                else ExecStatus.ERROR,
+                truncated_msg,
+            )
+
+        return (ExecStatus.CONTINUE, truncated_msg)
 
     async def _append_result_message(self, group: "ToolCallGroup") -> bool:
         """Append the group's result message to the active context at the group's anchor.
