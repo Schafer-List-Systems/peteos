@@ -62,8 +62,17 @@ class ChatBotResponse:
         Override in subclasses to provide API-specific construction.
         """
         if self._message_cache is None:
+            self._finalize()
             self._message_cache = self._build_message()
         return self._message_cache
+
+    def _finalize(self) -> None:
+        """Normalize response data after accumulation is complete.
+
+        Override in subclasses to handle provider-specific normalization.
+        Called before _build_message() to ensure data is in a consistent state.
+        """
+        pass
 
     def _build_message(self) -> Message:
         """Convert accumulated data into a Message via factories.
@@ -151,6 +160,7 @@ class GenericChatBotResponse(ChatBotResponse):
                 # Check for [DONE] first (can be "data: [DONE]" or just "[DONE]")
                 if line.strip() == "[DONE]" or line == "data: [DONE]\n" or line == "data: [DONE]":
                     _logger.debug("Received [DONE] signal")
+                    self._finalize()
                     break
                 if line.startswith("data: "):
                     data = line[6:]
