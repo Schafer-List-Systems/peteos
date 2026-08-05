@@ -298,7 +298,7 @@ class Runner(ActiveClass):
         # --- Phase 2: Error handling ---
         if "error" in response.data:
             _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
-            return (ExecStatus.ERROR, None)
+            return (ExecStatus.CRITICAL, None)
 
         # --- Phase 2.5: Handle max_tokens truncation ---
         truncation_result = await self._handle_truncation(response)
@@ -401,11 +401,11 @@ class Runner(ActiveClass):
                 self._truncation_counter,
                 self._max_truncation_retries,
             )
-            hook_return = hook_status if hook_status is not None else ExecStatus.ERROR
+            hook_return = hook_status if hook_status is not None else ExecStatus.CRITICAL
             self._truncation_counter = 0
             return (
                 hook_return if isinstance(hook_return, ExecStatus)
-                else ExecStatus.ERROR,
+                else ExecStatus.CRITICAL,
                 truncated_msg,
             )
 
@@ -566,7 +566,7 @@ class Runner(ActiveClass):
             hook_return = hook_status if hook_status is not None else status
             _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
 
-            if hook_return == ExecStatus.ERROR:
+            if hook_return == ExecStatus.CRITICAL:
                 _logger.debug("[runner] run(): Execution error, exiting loop.")
                 break
             _logger.debug("[runner] run(): Iterating...")
