@@ -2,6 +2,7 @@
 
 import json
 import re
+import socket
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -187,12 +188,54 @@ class ChatBotManager:
         return False
 
     @staticmethod
-    async def _detect_api_and_list_models(backend_name: str, api_key: Optional[str] = None) -> Tuple[str, List[str]]:
+    def _classify_exception(exc: Exception) -> bool:
+        """Return True if the exception is soft (should try next provider).
+
+        Fatal errors are re-raised immediately; the backend is genuinely
+        unavailable so other providers won't help either.
+
+        Args:
+            exc: The caught exception.
+
+        Returns:
+            True for soft errors (try next provider), False for fatal errors.
+        """
+        import httpx
+
+        # Fatal: network/transport-level issues
+        if isinstance(exc, (httpx.RequestError, httpx.InvalidURL,
+                            socket.error, ConnectionRefusedError, OSError)):
+            return False
+
+        # Fatal: timeouts
+        if isinstance(exc, httpx.TimeoutException):
+            return False
+
+        # Soft: got an HTTP response but not right for this provider
+        if isinstance(exc, (httpx.HTTPStatusError, httpx.ProtocolError,
+                            httpx.RemoteProtocolError)):
+            return True
+
+        # Soft: malformed response (wrong JSON shape, missing fields, etc.)
+        if isinstance(exc, (ValueError, KeyError, TypeError,
+                            json.JSONDecodeError)):
+            return True
+
+        # Unknown: re-raise conservatively
+        return False
+
+    @staticmethod
+    async def _detect_api_and_list_models(
+        backend_name: str, api_key: Optional[str] = None
+    ) -> Tuple[str, List[str]]:
         """Detect API type by probing all providers and listing available models.
 
-        Tries each registered provider's list_models method and uses whichever
-        succeeds. Falls back to OpenAI (data) before Anthropic (models) before
-        Gemini to maintain backward compatibility with auto-detection.
+        Classifies each exception as fatal (re-raise immediately — the backend
+        is unreachable) or soft (collect and try the next provider). If all
+        providers yield soft errors, raises a RuntimeError with diagnostics
+        for all of them.
+
+        Probing order: OpenAI -> Anthropic -> Gemini (backward compat).
 
         Args:
             backend_name: Backend identifier used to look up URL.
@@ -202,35 +245,37 @@ class ChatBotManager:
             Tuple of (api_type, [model_ids]).
 
         Raises:
-            RuntimeError: If no provider succeeds.
+            RuntimeError: If no provider succeeds and all errors were soft.
+            (Fatal exceptions propagate immediately.)
         """
         url = ChatBotManager._backends[backend_name].url
+        soft_errors: list[str] = []
 
-        # Try OpenAI first (backward compat with auto-detection)
-        try:
-            models = await ChatBotManager._providers["openai"].list_models(url, api_key)
-            if models:
-                return "openai", models
-        except Exception:
-            pass
+        for api_type, provider_name in [
+            ("openai", "OpenAI"),
+            ("anthropic", "Anthropic"),
+            ("gemini", "Gemini"),
+        ]:
+            try:
+                models = await ChatBotManager._providers[api_type].list_models(
+                    url, api_key
+                )
+                if models:
+                    return api_type, models
+                soft_errors.append(f"{provider_name}: no models found")
+            except Exception as exc:
+                if ChatBotManager._classify_exception(exc):
+                    soft_errors.append(
+                        f"{provider_name}: {type(exc).__name__}: {exc}"
+                    )
+                else:
+                    raise
 
-        # Try Anthropic
-        try:
-            models = await ChatBotManager._providers["anthropic"].list_models(url, api_key)
-            if models:
-                return "anthropic", models
-        except Exception:
-            pass
-
-        # Try Gemini
-        try:
-            models = await ChatBotManager._providers["gemini"].list_models(url, api_key)
-            if models:
-                return "gemini", models
-        except Exception:
-            pass
-
-        raise RuntimeError(f"Failed to detect API type or list models from {url}")
+        raise RuntimeError(
+            f"Failed to detect API type or list models from {url}.\n"
+            f"Providers tried:\n"
+            + "\n".join(f"  - {e}" for e in soft_errors)
+        )
 
     @classmethod
     def list_chatbots(cls, model_regex: str) -> List[Tuple[str, Any]]:
