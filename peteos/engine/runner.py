@@ -396,17 +396,15 @@ class Runner(ActiveClass):
                 self._truncation_counter,
                 self._max_truncation_retries,
             )
-            hook_status = await self.execution_environment.call_hooks(
-                "after_truncation_exhausted",
+            await self.execution_environment.call_hooks(
+                "on_truncation_exhausted",
                 self._truncation_counter,
                 self._max_truncation_retries,
             )
-            hook_return = hook_status if hook_status is not None else ExecStatus.CRITICAL
+            counter = self._truncation_counter
             self._truncation_counter = 0
-            return (
-                hook_return if isinstance(hook_return, ExecStatus)
-                else ExecStatus.CRITICAL,
-                truncated_msg,
+            raise RuntimeError(
+                f"Truncation exhausted after {counter}/{self._max_truncation_retries} attempts"
             )
 
         return (ExecStatus.CONTINUE, truncated_msg)
