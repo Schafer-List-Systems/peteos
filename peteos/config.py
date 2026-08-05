@@ -29,9 +29,9 @@ class ConfigManager:
 
     Discovery order (first found wins):
         1. PETEOS_CONFIG environment variable (full path)
-        2. $XDG_CONFIG_HOME/peteos/peteos.json (defaults to ~/.config/peteos/)
-        3. /etc/peteos/peteos.json
-        4. ./peteos.json (current working directory)
+        2. ./peteos.json (current working directory — project-local)
+        3. $XDG_CONFIG_HOME/peteos/peteos.json (defaults to ~/.config/peteos/ — user-specific)
+        4. /etc/peteos/peteos.json (system-wide — last resort)
     """
 
     @staticmethod
@@ -46,7 +46,12 @@ class ConfigManager:
         if env_path and Path(env_path).is_file():
             return os.path.abspath(env_path)
 
-        # 2. XDG config directory
+        # 2. Current working directory
+        local_path = Path.cwd() / "peteos.json"
+        if local_path.is_file():
+            return str(local_path)
+
+        # 3. User-specific XDG config directory
         xdg_config = os.environ.get("XDG_CONFIG_HOME")
         if not xdg_config:
             xdg_config = str(Path.home() / ".config")
@@ -54,15 +59,10 @@ class ConfigManager:
         if xdg_path.is_file():
             return str(xdg_path)
 
-        # 3. System config
+        # 4. System-wide config (last resort)
         system_path = "/etc/peteos/peteos.json"
         if Path(system_path).is_file():
             return system_path
-
-        # 4. Current working directory
-        local_path = Path.cwd() / "peteos.json"
-        if local_path.is_file():
-            return str(local_path)
 
         return None
 
@@ -95,6 +95,7 @@ class ConfigManager:
             _logger.warning("No peteos.json config file found in standard locations")
             return ConfigResult()
 
+        _logger.debug("Using peteos.json config from: %s", filepath)
         config_dir = str(Path(filepath).parent)
         json_obj = cls._load_config_file(filepath)
 
