@@ -266,7 +266,7 @@ class AgenticObject:
             _logger.debug("build_session_sandbox: _produce_output wrapper called, runner=%s", runner)
             return self._produce_output(answer, runner=runner)
 
-        def _produce_error(message: str) -> str:
+        def _produce_error(message: Any) -> str:
             return self._produce_error(message, runner=runner)  # type: ignore[arg-type]
 
         builder.add_proxy("produce_output", _produce_output)
@@ -456,7 +456,7 @@ class AgenticObject:
         _logger.debug("_send_media: queued media (type=%s) for runner %s", mime_type, runner.session_uuid)
 
     @tool(name="produce_error", description="Signal that you could not produce the requested output. Pass an error message explaining why (e.g., missing required data or an invalid state).")
-    def _produce_error(self, message: str, runner: "Runner | None" = None) -> str:
+    def _produce_error(self, message: Any, runner: "Runner | None" = None) -> str:
         """Protected tool: signals the agent could not fulfill the task.
 
         Writes the error message to the runner's SessionState so that
