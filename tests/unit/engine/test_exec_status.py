@@ -14,7 +14,7 @@ class TestExecStatusMembers:
             (ExecStatus.FINISHED, "finished"),
             (ExecStatus.CONTINUE, "continue"),
             (ExecStatus.PENDING, "pending"),
-            (ExecStatus.ERROR, "error"),
+            (ExecStatus.CRITICAL, "critical"),
             (ExecStatus.TOOL_NOT_FOUND, "tool_not_found"),
             (ExecStatus.TOOL_FAILED, "tool_failed"),
             (ExecStatus.TOOL_DENIED, "tool_denied"),
@@ -47,7 +47,7 @@ class TestExecSeverityMap:
             _EXEC_SEVERITY[ExecStatus.TOOL_NOT_FOUND],
             _EXEC_SEVERITY[ExecStatus.TOOL_DENIED],
             _EXEC_SEVERITY[ExecStatus.TOOL_FAILED],
-            _EXEC_SEVERITY[ExecStatus.ERROR],
+            _EXEC_SEVERITY[ExecStatus.CRITICAL],
         ]
         assert values == sorted(values)
 
@@ -77,10 +77,10 @@ class TestMergeExecStatus:
         assert _merge_exec_status(ExecStatus.FINISHED, ExecStatus.CONTINUE) is ExecStatus.FINISHED
 
     def test_worst_wins_error_vs_continue(self):
-        result = _merge_exec_status(ExecStatus.CONTINUE, ExecStatus.ERROR)
-        assert result is ExecStatus.ERROR
-        result = _merge_exec_status(ExecStatus.ERROR, ExecStatus.CONTINUE)
-        assert result is ExecStatus.ERROR
+        result = _merge_exec_status(ExecStatus.CONTINUE, ExecStatus.CRITICAL)
+        assert result is ExecStatus.CRITICAL
+        result = _merge_exec_status(ExecStatus.CRITICAL, ExecStatus.CONTINUE)
+        assert result is ExecStatus.CRITICAL
 
     def test_tool_denied_vs_tool_failed(self):
         assert _merge_exec_status(ExecStatus.TOOL_DENIED, ExecStatus.TOOL_FAILED) is ExecStatus.TOOL_FAILED
@@ -90,13 +90,13 @@ class TestMergeExecStatus:
         pairs = [
             (ExecStatus.CONTINUE, ExecStatus.FINISHED),
             (ExecStatus.TOOL_DENIED, ExecStatus.TOOL_NOT_FOUND),
-            (ExecStatus.ERROR, ExecStatus.PENDING),
+            (ExecStatus.CRITICAL, ExecStatus.PENDING),
         ]
         for a, b in pairs:
             assert _merge_exec_status(a, b) is _merge_exec_status(b, a)
 
     def test_associative(self):
-        a, b, c = ExecStatus.CONTINUE, ExecStatus.TOOL_DENIED, ExecStatus.ERROR
+        a, b, c = ExecStatus.CONTINUE, ExecStatus.TOOL_DENIED, ExecStatus.CRITICAL
         first = _merge_exec_status(_merge_exec_status(a, b), c)
         second = _merge_exec_status(a, _merge_exec_status(b, c))
         assert first is second

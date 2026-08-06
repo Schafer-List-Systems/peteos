@@ -584,7 +584,7 @@ class TestAfterStepHook:
 
     @pytest.mark.asyncio
     async def test_after_step_returns_error_stops_run(self):
-        """after_step hook returning ExecStatus.ERROR → run loop breaks."""
+        """after_step hook returning ExecStatus.CRITICAL → run loop breaks."""
         role = _make_role()
         agent = MagicMock()
         agent._tool_manager = role._tool_manager
@@ -597,7 +597,7 @@ class TestAfterStepHook:
 
         runner.execution_environment.register_hook(
             "after_step",
-            lambda status: ExecStatus.ERROR,
+            lambda status: ExecStatus.CRITICAL,
         )
 
         user_msg = _make_message("user", [ContentPart.create_text("hello")])
@@ -1111,10 +1111,10 @@ class TestEEHooks:
             tool_failure_policy="abort",
         )
 
-        ee.register_hook("after_step", lambda *a: ExecStatus.ERROR)
+        ee.register_hook("after_step", lambda *a: ExecStatus.CRITICAL)
 
         merged = await ee.call_hooks("after_step")
-        assert merged is ExecStatus.ERROR
+        assert merged is ExecStatus.CRITICAL
 
     @pytest.mark.asyncio
     async def test_call_hooks_deny(self):

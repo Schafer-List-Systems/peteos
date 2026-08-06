@@ -17,7 +17,8 @@ class Role:
         model: str = ".*",
         auto_approve_tools: Optional[list[str]] = None,
         tool_filter: Optional[list[str]] = None,
-        behavior_policy: str = "responsive"
+        behavior_policy: str = "responsive",
+        max_truncation_retries: int = 2
     ):
         """
         Initialize Role.
@@ -47,6 +48,7 @@ class Role:
         self.auto_approve_tools = auto_approve_tools if auto_approve_tools is not None else []
         self.tool_filter = tool_filter if tool_filter is not None else []
         self.behavior_policy = behavior_policy
+        self.max_truncation_retries = max_truncation_retries
 
     def __copy__(self) -> "Role":
         import copy
@@ -61,6 +63,7 @@ class Role:
             auto_approve_tools=list(self.auto_approve_tools),
             tool_filter=list(self.tool_filter),
             behavior_policy=self.behavior_policy,
+            max_truncation_retries=self.max_truncation_retries,
         )
 
     def add_system_prompt_hook(self, hook: Callable[[], str]) -> None:
@@ -96,6 +99,7 @@ class Role:
         auto_approve_tools = data.get("auto_approve_tools", [])
         tool_filter = data.get("tool_filter", [])
         behavior_policy = data.get("behavior_policy", "responsive")
+        max_truncation_retries = data.get("max_truncation_retries", 2)
         return Role(
             name=name,
             description=description,
@@ -106,6 +110,7 @@ class Role:
             auto_approve_tools=auto_approve_tools,
             tool_filter=tool_filter,
             behavior_policy=behavior_policy,
+            max_truncation_retries=max_truncation_retries,
         )
 
     @staticmethod
@@ -168,6 +173,7 @@ class Role:
         auto_approve_tools = config.get("auto_approve_tools", [])
         tool_filter = config.get("tool_filter", [])
         behavior_policy = config.get("behavior_policy", "responsive")
+        max_truncation_retries = config.get("max_truncation_retries", 2)
 
         return Role(
             name=name,
@@ -179,4 +185,5 @@ class Role:
             auto_approve_tools=auto_approve_tools,
             tool_filter=tool_filter,
             behavior_policy=behavior_policy,
+            max_truncation_retries=max_truncation_retries,
         )

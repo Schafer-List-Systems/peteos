@@ -9,7 +9,7 @@ class ExecStatus(str, Enum):
     FINISHED = "finished"
     CONTINUE = "continue"
     PENDING = "pending"
-    ERROR = "error"
+    CRITICAL = "critical"
     TOOL_NOT_FOUND = "tool_not_found"
     TOOL_FAILED = "tool_failed"
     TOOL_DENIED = "tool_denied"
@@ -23,7 +23,7 @@ _EXEC_SEVERITY: dict[ExecStatus | None, int] = {
     ExecStatus.TOOL_NOT_FOUND: 3,
     ExecStatus.TOOL_DENIED: 4,
     ExecStatus.TOOL_FAILED: 5,
-    ExecStatus.ERROR: 6,
+    ExecStatus.CRITICAL: 6,
 }
 
 
