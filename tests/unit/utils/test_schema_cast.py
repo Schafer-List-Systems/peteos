@@ -505,13 +505,14 @@ class TestEnumSupport:
 class TestSchemaDescription:
 
     def test_no_schema_returns_none(self):
-        assert get_schema_description(None) is None
+        result = get_schema_description(None)
+        assert result[0] == "any"
 
     def test_scalar_schema_description(self):
-        assert get_schema_description(int) == ("123", "integer type")
-        assert get_schema_description(str) == ('"string"', "string type")
-        assert get_schema_description(bool) == ("true", "boolean type")
-        assert get_schema_description(float) == ("1.0", "float type")
+        assert get_schema_description(int) == ("int", [])
+        assert get_schema_description(str) == ("str", [])
+        assert get_schema_description(bool) == ("bool", [])
+        assert get_schema_description(float) == ("float", [])
 
     def test_simple_dataclass(self):
         result = get_schema_description(TaskStatus)
@@ -532,5 +533,5 @@ class TestSchemaDescription:
             """A documented schema."""
             name: str
 
-        _, doc = get_schema_description(WithDoc)
-        assert doc == "A documented schema."
+        _, doc_entries = get_schema_description(WithDoc)
+        assert doc_entries == [("WithDoc", "A documented schema.")]
