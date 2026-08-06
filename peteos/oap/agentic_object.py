@@ -714,6 +714,18 @@ class AgenticObject:
                     final_result = Error(error_msg)
                     break
 
+                max_turns = self._oap_role.max_output_turns
+                if iteration > max_turns:
+                    _logger.error(
+                        "invoke_agent max_output_turns hit for %s thread=%s after %d turns (limit=%d)",
+                        self.__class__.__name__,
+                        persistent_thread_id,
+                        iteration,
+                        max_turns,
+                    )
+                    final_result = Error(f"Agent exceeded max output turns ({max_turns}) without producing output or error")
+                    break
+
                 elapsed = time.time() - start_time
                 if timeout is not None and elapsed > timeout:
                     _logger.error(
