@@ -426,17 +426,38 @@ def _recursive_cast(data: Any, schema: type) -> Any:
 
     # Scalar: strict type checks
     if schema is int:
-        if not isinstance(data, int) or isinstance(data, bool):
+        if isinstance(data, bool):
             raise ValueError(f"expected int. Got instead: {type(data).__name__} {data!r}")
-        return data
+        if isinstance(data, int):
+            return data
+        if isinstance(data, str):
+            try:
+                return int(data)
+            except ValueError:
+                raise ValueError(f"expected int. Got instead: {type(data).__name__}: {data!r}")
+        raise ValueError(f"expected int. Got instead: {type(data).__name__} {data!r}")
     if schema is float:
-        if not isinstance(data, (int, float)) or isinstance(data, bool):
+        if isinstance(data, bool):
             raise ValueError(f"expected float. Got instead: {type(data).__name__} {data!r}")
-        return data
+        if isinstance(data, (int, float)):
+            return float(data)
+        if isinstance(data, str):
+            try:
+                return float(data)
+            except ValueError:
+                raise ValueError(f"expected float. Got instead: {type(data).__name__}: {data!r}")
+        raise ValueError(f"expected float. Got instead: {type(data).__name__} {data!r}")
     if schema is bool:
-        if not isinstance(data, bool):
-            raise ValueError(f"expected bool. Got instead: {type(data).__name__} {data!r}")
-        return data
+        if isinstance(data, bool):
+            return data
+        if isinstance(data, str):
+            lower = data.strip().lower()
+            if lower == "true":
+                return True
+            if lower == "false":
+                return False
+            raise ValueError(f"expected bool. Got instead: {type(data).__name__}: {data!r}")
+        raise ValueError(f"expected bool. Got instead: {type(data).__name__} {data!r}")
     if schema is str:
         if not isinstance(data, str):
             raise ValueError(f"expected str. Got instead: {type(data).__name__} {data!r}")
