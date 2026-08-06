@@ -301,7 +301,7 @@ class TestRunnerStepTextOnly:
         )
 
         status, _ = await runner.step()
-        assert status is ExecStatus.ERROR
+        assert status is ExecStatus.CRITICAL
 
 
 # ---------------------------------------------------------------------------

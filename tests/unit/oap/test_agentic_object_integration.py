@@ -83,7 +83,7 @@ class TestInvokeAgentEmptyChatBot:
         """invoke_agent with an empty SimpleMockChatBot should NOT hang.
 
         An empty chatbot (no messages) returns an error response from send_context.
-        The runner step() should return ExecStatus.ERROR, and invoke_agent should
+        The runner step() should return ExecStatus.CRITICAL, and invoke_agent should
         return an Error object, not loop forever.
         """
         # Empty chatbot — no messages
