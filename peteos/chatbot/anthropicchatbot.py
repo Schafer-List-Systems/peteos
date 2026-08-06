@@ -109,28 +109,37 @@ class AnthropicChatBot(ChatBot):
             "bool": "boolean",
             "list": "array",
             "dict": "object",
-            "any": "object",
+            "any": "any_of",
         }
 
         for param_name, param_info in raw_params.items():
             if isinstance(param_info, str):
-                json_type = type_map.get(param_info, "string")
-                prop = {"type": json_type}
+                py_type = param_info
                 required_params.append(param_name)
-            else:
-                py_type = param_info.get("type", "string")
-                json_type = type_map.get(py_type, "string")
+                prop = {"type": type_map.get(py_type, "string")}
+                properties[param_name] = prop
+                continue
 
+            py_type = param_info.get("type", "string")
+            if param_info.get("required", True):
+                required_params.append(param_name)
+
+            json_type = type_map.get(py_type, "string")
+
+            if json_type == "any_of":
+                prop = {"anyOf": [
+                    {"type": "integer"},
+                    {"type": "string"},
+                    {"type": "number"},
+                    {"type": "boolean"},
+                    {"type": "array"},
+                    {"type": "object"},
+                ]}
+            else:
                 prop = {"type": json_type}
 
-                if "required" in param_info:
-                    if param_info["required"]:
-                        required_params.append(param_name)
-                else:
-                    required_params.append(param_name)
-
-                if "default" in param_info:
-                    prop["default"] = param_info["default"]
+            if "default" in param_info:
+                prop["default"] = param_info["default"]
 
             properties[param_name] = prop
 

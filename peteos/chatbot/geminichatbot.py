@@ -105,25 +105,34 @@ class GeminiChatBot(ChatBot):
             "bool": "BOOLEAN",
             "list": "ARRAY",
             "dict": "OBJECT",
-            "any": "OBJECT",
+            "any": "any_of",
         }
 
         for param_name, param_info in raw_params.items():
             if isinstance(param_info, str):
-                json_type = type_map.get(param_info, "STRING")
-                prop = {"type": json_type}
+                py_type = param_info
                 required_params.append(param_name)
+                prop = {"type": type_map.get(py_type, "STRING")}
+                properties[param_name] = prop
+                continue
+
+            py_type = param_info.get("type", "string")
+            if param_info.get("required", True):
+                required_params.append(param_name)
+
+            json_type = type_map.get(py_type, "STRING")
+
+            if json_type == "any_of":
+                prop = {"anyOf": [
+                    {"type": "INTEGER"},
+                    {"type": "STRING"},
+                    {"type": "NUMBER"},
+                    {"type": "BOOLEAN"},
+                    {"type": "ARRAY"},
+                    {"type": "OBJECT"},
+                ]}
             else:
-                py_type = param_info.get("type", "string")
-                json_type = type_map.get(py_type, "STRING")
-
                 prop = {"type": json_type}
-
-                if "required" in param_info:
-                    if param_info["required"]:
-                        required_params.append(param_name)
-                else:
-                    required_params.append(param_name)
 
                 if "default" in param_info:
                     prop["description"] = str(param_info["default"])
