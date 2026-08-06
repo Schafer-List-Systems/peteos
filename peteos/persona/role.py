@@ -18,7 +18,8 @@ class Role:
         auto_approve_tools: Optional[list[str]] = None,
         tool_filter: Optional[list[str]] = None,
         behavior_policy: str = "responsive",
-        max_truncation_retries: int = 2
+        max_truncation_retries: int = 2,
+        max_output_turns: int = 3,
     ):
         """
         Initialize Role.
@@ -37,6 +38,8 @@ class Role:
                 any pattern are visible to this role.
             behavior_policy: Agent behavior strategy. "responsive" yields on text output,
                 "continuous" keeps looping until yield_back is called.
+            max_truncation_retries: Maximum number of retries for rolling token window truncation.
+            max_output_turns: Maximum number of output-producing turns per invoke_agent call.
         """
         self.name = name
         self.description = description
@@ -49,6 +52,7 @@ class Role:
         self.tool_filter = tool_filter if tool_filter is not None else []
         self.behavior_policy = behavior_policy
         self.max_truncation_retries = max_truncation_retries
+        self.max_output_turns = max_output_turns
 
     def __copy__(self) -> "Role":
         import copy
@@ -64,6 +68,7 @@ class Role:
             tool_filter=list(self.tool_filter),
             behavior_policy=self.behavior_policy,
             max_truncation_retries=self.max_truncation_retries,
+            max_output_turns=self.max_output_turns,
         )
 
     def add_system_prompt_hook(self, hook: Callable[[], str]) -> None:
@@ -100,6 +105,7 @@ class Role:
         tool_filter = data.get("tool_filter", [])
         behavior_policy = data.get("behavior_policy", "responsive")
         max_truncation_retries = data.get("max_truncation_retries", 2)
+        max_output_turns = data.get("max_output_turns", 3)
         return Role(
             name=name,
             description=description,
@@ -111,6 +117,7 @@ class Role:
             tool_filter=tool_filter,
             behavior_policy=behavior_policy,
             max_truncation_retries=max_truncation_retries,
+            max_output_turns=max_output_turns,
         )
 
     @staticmethod
@@ -174,6 +181,7 @@ class Role:
         tool_filter = config.get("tool_filter", [])
         behavior_policy = config.get("behavior_policy", "responsive")
         max_truncation_retries = config.get("max_truncation_retries", 2)
+        max_output_turns = config.get("max_output_turns", 3)
 
         return Role(
             name=name,
