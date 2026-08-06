@@ -326,6 +326,32 @@ class TestScalarValidation:
         with pytest.raises(ValueError, match="expected int. Got instead: bool"):
             parse_data("true", int)
 
+    def test_parse_int_string_cast(self):
+        """String representations of integers are cast."""
+        assert parse_data("-7", int) == -7
+        assert parse_data("0", int) == 0
+        # Non-numeric strings still fail
+        with pytest.raises(ValueError, match="expected int"):
+            parse_data("notanumber", int)
+
+    def test_parse_float_string_cast(self):
+        """String representations of floats are cast."""
+        assert parse_data("3.14", float) == 3.14
+        assert parse_data("42", float) == 42.0
+        # Non-numeric strings still fail
+        with pytest.raises(ValueError, match="expected float"):
+            parse_data("notanumber", float)
+
+    def test_parse_bool_string_cast(self):
+        """String 'true'/'false' are cast to bool."""
+        assert parse_data("true", bool) is True
+        assert parse_data("false", bool) is False
+        assert parse_data("True", bool) is True
+        assert parse_data("FALSE", bool) is False
+        assert parse_data(" true ", bool) is True
+        with pytest.raises(ValueError, match="expected bool"):
+            parse_data("maybe", bool)
+
     def test_parse_float_valid(self):
         assert parse_data("3.14", float) == 3.14
         assert parse_data("3", float) == 3
@@ -505,13 +531,14 @@ class TestEnumSupport:
 class TestSchemaDescription:
 
     def test_no_schema_returns_none(self):
-        assert get_schema_description(None) is None
+        result = get_schema_description(None)
+        assert result[0] == "any"
 
     def test_scalar_schema_description(self):
-        assert get_schema_description(int) == ("123", "integer type")
-        assert get_schema_description(str) == ('"string"', "string type")
-        assert get_schema_description(bool) == ("true", "boolean type")
-        assert get_schema_description(float) == ("1.0", "float type")
+        assert get_schema_description(int) == ("int", [])
+        assert get_schema_description(str) == ("str", [])
+        assert get_schema_description(bool) == ("bool", [])
+        assert get_schema_description(float) == ("float", [])
 
     def test_simple_dataclass(self):
         result = get_schema_description(TaskStatus)
@@ -532,5 +559,5 @@ class TestSchemaDescription:
             """A documented schema."""
             name: str
 
-        _, doc = get_schema_description(WithDoc)
-        assert doc == "A documented schema."
+        _, doc_entries = get_schema_description(WithDoc)
+        assert doc_entries == [("WithDoc", "A documented schema.")]
