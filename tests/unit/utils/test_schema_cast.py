@@ -326,6 +326,32 @@ class TestScalarValidation:
         with pytest.raises(ValueError, match="expected int. Got instead: bool"):
             parse_data("true", int)
 
+    def test_parse_int_string_cast(self):
+        """String representations of integers are cast."""
+        assert parse_data("-7", int) == -7
+        assert parse_data("0", int) == 0
+        # Non-numeric strings still fail
+        with pytest.raises(ValueError, match="expected int"):
+            parse_data("notanumber", int)
+
+    def test_parse_float_string_cast(self):
+        """String representations of floats are cast."""
+        assert parse_data("3.14", float) == 3.14
+        assert parse_data("42", float) == 42.0
+        # Non-numeric strings still fail
+        with pytest.raises(ValueError, match="expected float"):
+            parse_data("notanumber", float)
+
+    def test_parse_bool_string_cast(self):
+        """String 'true'/'false' are cast to bool."""
+        assert parse_data("true", bool) is True
+        assert parse_data("false", bool) is False
+        assert parse_data("True", bool) is True
+        assert parse_data("FALSE", bool) is False
+        assert parse_data(" true ", bool) is True
+        with pytest.raises(ValueError, match="expected bool"):
+            parse_data("maybe", bool)
+
     def test_parse_float_valid(self):
         assert parse_data("3.14", float) == 3.14
         assert parse_data("3", float) == 3
