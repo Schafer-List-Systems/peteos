@@ -452,9 +452,9 @@ def _recursive_cast(data: Any, schema: type) -> Any:
             return data
         if isinstance(data, str):
             lower = data.strip().lower()
-            if lower == "true":
+            if lower in ("true", "yes", "1"):
                 return True
-            if lower == "false":
+            if lower in ("false", "no", "0"):
                 return False
             raise ValueError(f"expected bool. Got instead: {type(data).__name__}: {data!r}")
         raise ValueError(f"expected bool. Got instead: {type(data).__name__} {data!r}")
