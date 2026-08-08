@@ -370,8 +370,12 @@ class AgenticObject:
             attempts = runner.state.get("_oap_output_attempts") + 1
             max_attempts = self._oap_role.max_output_attempts
             if attempts >= max_attempts:
-                raise ValueError(
-                    f"No valid arguments to `produce_output` provided after {attempts}/{max_attempts} attempts"
+                _logger.error(
+                    "invoke_agent[%s]: max output attempts hit after %d turns without calling produce_output or produce_error (limit=%d)",
+                    self.__class__.__name__, attempts, max_attempts,
+                )
+                raise RuntimeError(
+                    f"Agent exceeded max output attempts ({max_attempts}) by finishing steps without calling `produce_output` or `produce_error`"
                 )
             runner.state.update("_oap_output_attempts", attempts)
 
@@ -655,6 +659,18 @@ class AgenticObject:
                     _logger.debug("_on_step_done: produced answer found, returning FINISHED")
                     return ExecStatus.FINISHED
                 elif status == ExecStatus.FINISHED:
+                    attempts = r.state.get("_oap_output_attempts") + 1
+                    r.state.force_set("_oap_output_attempts", attempts)
+                    max_attempts = self._oap_role.max_output_attempts
+                    if attempts >= max_attempts:
+                        _logger.error(
+                            "invoke_agent[%s]: max output attempts hit after %d reminder turns (limit=%d)",
+                            self.__class__.__name__, attempts, max_attempts,
+                        )
+                        raise RuntimeError(
+                            f"Agent exceeded max output attempts ({max_attempts}) by finishing steps without calling `produce_output` or `produce_error`"
+                        )
+
                     output_schema = self._oap_current_output_schema
                     desc = get_schema_description(output_schema)
                     json_schema, doc_entries = desc
