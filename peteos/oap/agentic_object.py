@@ -468,7 +468,7 @@ class AgenticObject:
         _logger.debug("_send_media: queued media (type=%s) for runner %s", mime_type, runner.session_uuid)
 
     @tool(name="produce_error", description="Signal that you could not produce the requested output. Pass an error message explaining why (e.g., missing required data or an invalid state).")
-    def _produce_error(self, message: Any, runner: "Runner | None" = None) -> str:
+    def _produce_error(self, message: Any, runner: "Runner | None" = None) -> str | None:
         """Protected tool: signals the agent could not fulfill the task.
 
         Writes the error message to the runner's SessionState so that
@@ -487,7 +487,7 @@ class AgenticObject:
             runner.state.create("_oap_error", message)
         except ValueError as e:
             return f"Error: {e}"
-        return "OK"
+        return None
 
     def acquire(self, timeout: float | None = None) -> None:
         """Acquire the invocation lock.
