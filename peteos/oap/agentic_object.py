@@ -367,6 +367,14 @@ class AgenticObject:
         try:
             parsed = relaxed_parse_data(answer, self._oap_current_output_schema)
         except ValueError as e:
+            attempts = runner.state.get("_oap_output_attempts") + 1
+            max_attempts = self._oap_role.max_output_attempts
+            if attempts >= max_attempts:
+                raise ValueError(
+                    f"No valid arguments to `produce_output` provided after {attempts}/{max_attempts} attempts"
+                )
+            runner.state.update("_oap_output_attempts", attempts)
+
             output_schema = self._oap_current_output_schema
             
             desc = get_schema_description(output_schema)
@@ -688,6 +696,7 @@ class AgenticObject:
             start_time = time.time()
 
             iteration = 0
+            runner.state.force_set("_oap_output_attempts", 0)
             final_result: Any = None
             while True:
                 iteration += 1
