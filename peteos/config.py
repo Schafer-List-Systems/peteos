@@ -90,6 +90,11 @@ class ConfigManager:
         Returns:
             ConfigResult with the config directory and loaded items.
         """
+        # Allow external callers to force DEBUG logging for diagnostics
+        if os.environ.get("PETEOS_DEBUG") == "1":
+            from peteos.utils.logger import setup_logging
+            setup_logging(level="DEBUG", debug=True)
+
         filepath = cls.resolve_config_path()
         if filepath is None:
             _logger.warning("No peteos.json config file found in standard locations")
