@@ -57,7 +57,7 @@ def setup_logging(
     if log_to_file:
         handler = logging.FileHandler(log_to_file)
     else:
-        handler = logging.StreamHandler(sys.stdout)
+        handler = logging.StreamHandler(sys.stderr)
 
     handler.setFormatter(formatter)
 
