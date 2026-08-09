@@ -551,18 +551,16 @@ class Runner(ActiveClass):
             # Send context to chatbot and get a response, already passing the tool calls
             try:
                 status, response_msg = await self.step()
+                hook_status = await self.execution_environment.call_hooks("after_step", status)
+                hook_return = hook_status if hook_status is not None else status
+                _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
             except Exception as e:
-                _logger.error("[runner] step() raised exception: %s: %r", type(e).__name__, e)
+                _logger.error("[runner] step/hook raised exception: %s: %r", type(e).__name__, e)
                 self._critical_error = e
                 self._idle.set()
                 continue
             finally:
                 have_new_message = False
-
-            _logger.debug("[runner] step() returned status=%s", status)
-            hook_status = await self.execution_environment.call_hooks("after_step", status)
-            hook_return = hook_status if hook_status is not None else status
-            _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
 
             if hook_return == ExecStatus.CRITICAL:
                 _logger.debug("[runner] run(): Execution error, exiting loop.")
