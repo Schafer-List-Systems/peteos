@@ -369,12 +369,16 @@ class Runner(ActiveClass):
         # Keep thinking blocks — they represent complete reasoning.
         parts = response.message.content
         content_parts = list(parts)
+        truncated_content_part = None
         if content_parts and content_parts[-1].type in ("tool_use", "text"):
+            truncated_content_part = content_parts[-1]
             content_parts = content_parts[:-1]
         truncated_msg = Message.create(
             role=response.message.role,
             content_parts=content_parts,
         )
+        if truncated_content_part:
+            truncated_msg._json_dict['truncated_content_part'] = truncated_content_part.raw_dict
         await self.append_and_notify(truncated_msg)
 
         # Tell the LLM it was cut off
