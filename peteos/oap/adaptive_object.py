@@ -230,12 +230,20 @@ class AdaptiveObject(AgenticObject):
         test_builder.add_global_func("assert_not_equal", lambda expected, actual: None if expected != actual else (_ for _ in ()).throw(AssertionError(f"expected {expected!r} != {actual!r}")))
 
         for mock_name, mock_code in mocked_functions.items():
-            funcs = test_builder.add_source_code(mock_code)
+            try:
+                funcs = test_builder.add_source_code(mock_code)
+            except Exception as e:
+                raise ValueError(
+                    f"failed to compile mock function '{mock_name}': {e}"
+                ) from None
             if len(funcs) != 1:
                 names = [f[0] for f in funcs] if funcs else ["none"]
                 raise ValueError(f"mock '{mock_name}' should define exactly one function. Found: {names}.")
 
-        main_funcs = test_builder.add_source_code(code)
+        try:
+            main_funcs = test_builder.add_source_code(code)
+        except Exception as e:
+            raise ValueError(f"failed to compile main function: {e}") from None
         if len(main_funcs) != 1:
             names = [f[0] for f in main_funcs] if main_funcs else ["none"]
             raise ValueError(f"expected exactly one function in code. Found: {names}.")
@@ -246,7 +254,10 @@ class AdaptiveObject(AgenticObject):
                 f"tool '{main_func_name}' already exists (collision with static tool)"
             )
 
-        test_funcs = test_builder.add_source_code(tests)
+        try:
+            test_funcs = test_builder.add_source_code(tests)
+        except Exception as e:
+            raise ValueError(f"failed to compile test code: {e}") from None
 
         sandbox = test_builder.get_sandbox()
         for i, (name, _) in enumerate(test_funcs):
