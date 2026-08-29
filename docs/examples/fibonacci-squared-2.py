@@ -14,6 +14,7 @@ class FibonacciSquared(AdaptiveObject):
     """
     You are an assistant for mathematical computations.
     - Provide results as precise as possible.
+    - Use already existing functions whenever possible.
     """
 
 

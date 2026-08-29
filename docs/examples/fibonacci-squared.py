@@ -4,22 +4,21 @@ Usage: python fibonacci-squared.py <backend-url> [api_type] [api_key]
 """
 
 import asyncio
-import sys
 
-from peteos.chatbot.manager import ChatBotManager
 from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.decorators import agentic_object
 
 
 @agentic_object(allow_code_execution=True)
 class FibonacciSquared(AgenticObject):
-    """You are a helpful assistant."""
+    """
+    You are an assistant for mathematical computations.
+    - Provide results as precise as possible.
+    - If you have problems representing large numbers, then return large numbers as strings!
+    """
 
 
 async def main():
-    #from peteos.utils.logger import setup_logging
-    #setup_logging(level="DEBUG", debug=True)
-
     sq = FibonacciSquared()
     result = await sq.invoke_agent(
         "Compute the sequence where each element is the sum of the squares of its two predecessors."
