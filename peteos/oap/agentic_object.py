@@ -377,7 +377,7 @@ class AgenticObject:
                 raise RuntimeError(
                     f"Agent exceeded max output attempts ({max_attempts}) by finishing steps without calling `produce_output` or `produce_error`"
                 )
-            runner.state.update("_oap_output_attempts", attempts)
+            runner.state.force_set("_oap_output_attempts", attempts)
 
             output_schema = self._oap_current_output_schema
             
