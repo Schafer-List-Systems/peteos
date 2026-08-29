@@ -18,6 +18,9 @@ Role(
     auto_approve_tools: list[str] | None = None,
     tool_filter: list[str] | None = None,
     behavior_policy: str = "responsive",
+    max_truncation_retries: int = 2,
+    max_output_turns: int = 3,
+    max_output_attempts: int = 3,
 )
 ```
 
@@ -33,6 +36,9 @@ Role(
 | `auto_approve_tools` | `None` | Tool names the agent can call without user approval. |
 | `tool_filter` | `None` | Regex patterns. Only tools whose names match any pattern are visible to the agent. |
 | `behavior_policy` | `"responsive"` | Agent behavior strategy. `"responsive"` yields on text output; `"continuous"` keeps looping until yield. |
+| `max_truncation_retries` | `2` | Maximum number of retries due to token window truncation. |
+| `max_output_turns` | `3` | Maximum number of output-producing turns per `invoke_agent` call before giving up. |
+| `max_output_attempts` | `3` | Maximum number of `produce_output` call attempts per output turn before failing. |
 
 ## Methods
 
