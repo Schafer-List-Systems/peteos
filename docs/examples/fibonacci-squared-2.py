@@ -11,12 +11,15 @@ from peteos.oap.decorators import agentic_object
 
 @agentic_object(allow_code_execution=True)
 class FibonacciSquared(AdaptiveObject):
-    """You are a helpful assistant."""
+    """
+    You are an assistant for mathematical computations.
+    - Provide results as precise as possible.
+    """
 
 
 async def main():
-    #from peteos.utils.logger import setup_logging
-    #setup_logging(level="DEBUG", debug=True)
+    # from peteos.utils.logger import setup_logging
+    # setup_logging(level="DEBUG", debug=True)
 
     sq = FibonacciSquared()
     print(await sq.invoke_agent(
