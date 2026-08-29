@@ -17,8 +17,6 @@ from peteos.engine.executionenvironment import (
     ApprovalEvent,
     ExecutionEnvironment,
     ToolApprovalStatus,
-    ToolCallGroup,
-    ToolCallRecord,
     ToolExecutionStatus,
 )
 from peteos.utils import get_logger
@@ -182,6 +180,14 @@ class Runner(ActiveClass):
         except asyncio.TimeoutError:
             return False
 
+    def set_critical_error(self, e: BaseException) -> None:
+        """Set a critical error to be raised on the next check.
+
+        Called by tools (e.g. produce_output) that detect unrecoverable
+        failures during their execution.
+        """
+        self._critical_error = e
+
     def take_critical_error(self) -> None:
         """Take and raise a critical error set during step() execution.
 
@@ -321,6 +327,8 @@ class Runner(ActiveClass):
                     self._execution_environment.add_tool_call(cp)
             msg_index = self._session.active_context.get_anchor_msg_index("messages")
             self._session.active_context.add_anchor(anchor_name, msg_index, after_existing=False)
+            result_msg = self._execution_environment.get_foreground_group().result_message
+            self._session.active_context.append(result_msg, anchor_point=anchor_name)
 
         if any(cp.type == "tool_use" for cp in content_parts):
             _logger.debug("[runner] step(): Tool calls present, returning CONTINUE for tool execution.")
@@ -369,12 +377,16 @@ class Runner(ActiveClass):
         # Keep thinking blocks — they represent complete reasoning.
         parts = response.message.content
         content_parts = list(parts)
+        truncated_content_part = None
         if content_parts and content_parts[-1].type in ("tool_use", "text"):
+            truncated_content_part = content_parts[-1]
             content_parts = content_parts[:-1]
         truncated_msg = Message.create(
             role=response.message.role,
             content_parts=content_parts,
         )
+        if truncated_content_part:
+            truncated_msg._json_dict['truncated_content_part'] = truncated_content_part.raw_dict
         await self.append_and_notify(truncated_msg)
 
         # Tell the LLM it was cut off
@@ -408,18 +420,6 @@ class Runner(ActiveClass):
             )
 
         return (ExecStatus.CONTINUE, truncated_msg)
-
-    async def _append_result_message(self, group: "ToolCallGroup") -> bool:
-        """Append the group's result message to the active context at the group's anchor.
-
-        Returns True if a message was appended, False if the group had no
-        result message (e.g. all tool calls were fire-and-forget).
-        """
-        result_msg = group.result_message
-        if result_msg is not None:
-            self._session.active_context.append(result_msg, anchor_point=group.anchor_name)
-            return True
-        return False
 
     # ------------------------------------------------------------------ #
     # Tool group processing — called from run loop
@@ -472,6 +472,7 @@ class Runner(ActiveClass):
 
             result_str, success = await self._execution_environment.execute_and_inject(tool_call, runner=self)
             record.execution_status = ToolExecutionStatus.EXECUTED
+            record.execution_result = result_str
             if not success and result_str.startswith("Error: Tool '"):
                 _logger.debug("[runner] Tool %s not found", tool_name)
                 break
@@ -485,7 +486,7 @@ class Runner(ActiveClass):
 
         if foreground.is_done():
             self._execution_environment.close_foreground_group()
-            return await self._append_result_message(foreground)
+            return foreground.any_real_result
 
         # No reviewed calls — log the first un-reviewed tool call for debugging
         if foreground.records:

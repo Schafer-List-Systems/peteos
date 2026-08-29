@@ -60,11 +60,22 @@ class ToolCallGroup:
 
     id: str
     anchor_name: str
+    result_message: Message
     records: list[ToolCallRecord] = field(default_factory=list)
-    result_message: Optional[Message] = None
+    _any_real_result: bool = field(default=False)
+
+    @property
+    def any_real_result(self) -> bool:
+        return self._any_real_result
+
+    def mark_real_result(self) -> None:
+        self._any_real_result = True
 
     def add_tool_call(self, record: ToolCallRecord) -> None:
         self.records.append(record)
+        cp = ContentPart.create_tool_result(record.tool_call_id, "")
+        cp.raw_dict["name"] = record.tool_call.name
+        self.result_message.raw_dict["content"].append(cp.raw_dict)
 
     def has_pending(self) -> bool:
         return any(r.approval_status == ToolApprovalStatus.PENDING for r in self.records)
@@ -102,12 +113,6 @@ class ToolCallGroup:
                 r.approval_status = ToolApprovalStatus.DENIED
                 r.execution_status = ToolExecutionStatus.DENIED
                 r.denied_reason = f"Tool group denied: {reason}"
-
-    def set_result_message(self, message: Message) -> None:
-        self.result_message = message
-
-    def get_result_message(self) -> Optional[Message]:
-        return self.result_message
 
 
 @dataclass
@@ -225,7 +230,11 @@ class ExecutionEnvironment:
         """
         if self._foreground_group is not None:
             raise ValueError("A foreground tool call group already exists")
-        group = ToolCallGroup(id=group_id, anchor_name=anchor_name)
+        group = ToolCallGroup(
+            id=group_id,
+            anchor_name=anchor_name,
+            result_message=Message.create("tool_result", []),
+        )
         self._groups[group_id] = group
         self._foreground_group = group
 
@@ -316,11 +325,12 @@ class ExecutionEnvironment:
     # ------------------------------------------------------------------ #
 
     async def execute_and_inject(self, tool_call: ContentPart, runner: "Runner | None" = None) -> tuple[str | None, bool]:
-        """Execute a tool and inject the result ContentPart into the foreground group's result message.
+        """Execute a tool and update the matching placeholder in the group's result message.
 
-        Creates the result message lazily — only when the first non-None
-        result arrives. Returns (None, True) for fire-and-forget tools
-        without adding a ContentPart to the result message.
+        The result message with placeholders is pre-created when the tool group
+        is created. This method finds the placeholder by call_id and updates
+        its content. Returns (None, True) for fire-and-forget tools without
+        modifying the placeholder.
 
         Args:
             tool_call: ContentPart with type "tool_use".
@@ -337,14 +347,13 @@ class ExecutionEnvironment:
         if result_str is None:
             return None, success
 
-        result_msg = self._foreground_group.result_message
-        if result_msg is None:
-            result_msg = Message.create("tool_result", [])
-            self._foreground_group.result_message = result_msg
-        cp = ContentPart.create_tool_result(tool_call.call_id, result_str)
-        cp.raw_dict["name"] = tool_call.name
-        result_msg.raw_dict["content"].append(cp.raw_dict)
+        result_msg = group.result_message
+        for cp_raw in result_msg.raw_dict["content"]:
+            if cp_raw.get("type") == "tool_result" and cp_raw.get("call_id") == tool_call.call_id:
+                cp_raw["content"] = result_str
+                break
 
+        group.mark_real_result()
         return result_str, success
 
     # ------------------------------------------------------------------ #
@@ -403,7 +412,7 @@ class ExecutionEnvironment:
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
             return result_str, True
         except Exception as e:
-            _logger.debug("Tool %s failed: %s", tool_name, str(e))
+            _logger.debug("Tool %s raised an exception: %s", tool_name, str(e))
             return f"Error: {type(e).__name__}: {str(e)}", False
 
 

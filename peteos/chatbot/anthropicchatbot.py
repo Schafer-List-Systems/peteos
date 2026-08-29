@@ -281,22 +281,12 @@ class AnthropicChatBot(ChatBot):
                     "content": content
                 })
             elif role == "tool_result":
-                # Extract tool_use_id from the preceding assistant message
-                tool_use_id = None
-                for prev_msg in reversed(messages):
-                    if prev_msg["role"] == "assistant":
-                        for item in prev_msg.get("content", []):
-                            if isinstance(item, dict) and item.get("type") == "tool_use":
-                                tool_use_id = item.get("id")
-                                break
-                        if tool_use_id:
-                            break
                 content = []
                 for part in msg.content:
                     if part.type == "tool_result":
                         content_item = {
                             "type": "tool_result",
-                            "tool_use_id": tool_use_id,
+                            "tool_use_id": part.call_id,
                             "content": part.content or "",
                         }
                         content.append(content_item)

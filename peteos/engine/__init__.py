@@ -8,16 +8,16 @@ executing tools, and producing output.
 
 from peteos.engine.channel import Channel, NotificationEvent
 from peteos.utils.activeclass import ActiveClass
-from peteos.engine.executionenvironment import ExecutionEnvironment, ToolCallGroup
-from peteos.engine.exec_status import ExecStatus
-from peteos.conversation.session import SessionState
-from peteos.engine.runner import (
+from peteos.engine.executionenvironment import (
     ApprovalEvent,
-    Runner,
+    ExecutionEnvironment,
     ToolApprovalStatus,
     ToolCallRecord,
     ToolExecutionStatus,
 )
+from peteos.engine.exec_status import ExecStatus
+from peteos.conversation.session import SessionState
+from peteos.engine.runner import Runner
 
 # Driver is kept as a deprecated alias for Runner
 Driver = Runner

@@ -486,7 +486,7 @@ class TestHandleToolGroup:
 
     @pytest.mark.asyncio
     async def test_result_message_appended(self):
-        """Group with result message → _append_result_message appends it."""
+        """create_result_message creates placeholder entries in the group's result message."""
         role = _make_role(auto_approve_tools=["search"], tool_names=["search"])
         agent = MagicMock()
         agent._tool_manager = role._tool_manager
@@ -502,17 +502,15 @@ class TestHandleToolGroup:
         runner.execution_environment.add_tool_call(tc)
 
         fg = runner.execution_environment.get_foreground_group()
-        result_msg = _make_message("tool_result", [
-            ContentPart.create_text("search result"),
-        ])
-        fg.result_message = result_msg
-
-        appended = await runner._append_result_message(fg)
-        assert appended is True
+        result_msg = fg.result_message
+        assert len(result_msg.raw_dict["content"]) == 1
+        assert result_msg.raw_dict["content"][0]["type"] == "tool_result"
+        assert result_msg.raw_dict["content"][0]["call_id"] == "tc1"
+        assert result_msg.raw_dict["content"][0]["content"] == ""
 
     @pytest.mark.asyncio
     async def test_result_message_none_fire_and_forget(self):
-        """Group with no result message → _append_result_message returns False."""
+        """Group with all fire-and-forget results → _handle_tool_group returns False."""
         role = _make_role(auto_approve_tools=["add"], tool_names=["add"])
         agent = MagicMock()
         agent._tool_manager = role._tool_manager
@@ -527,9 +525,11 @@ class TestHandleToolGroup:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         runner.execution_environment.add_tool_call(tc)
 
-        fg = runner.execution_environment.get_foreground_group()
-        appended = await runner._append_result_message(fg)
-        assert appended is False
+        # Make the tool return None (fire-and-forget)
+        role._tool_manager.get_tool("add").execute = MagicMock(return_value=None)
+
+        result_appended = await runner._handle_tool_group()
+        assert result_appended is False  # all fire-and-forget, so idle
 
     @pytest.mark.asyncio
     async def test_no_foreground_group(self):
@@ -1272,17 +1272,17 @@ class TestEEExecuteTool:
             tool_failure_policy="abort",
         )
 
-        group = ToolCallGroup(id="g1", anchor_name="g1:tool_result")
-        ee._foreground_group = group
+        ee.create_tool_group("g1", "g1:tool_result")
+        ee.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
         result_str, success = await ee.execute_and_inject(tc)
 
         assert success is True
         assert result_str == "42"
-        assert group.result_message is not None
-        assert len(group.result_message.content) == 1
-        assert group.result_message.content[0].type == "tool_result"
+        fg = ee.get_foreground_group()
+        assert len(fg.result_message.content) == 1
+        assert fg.result_message.content[0].type == "tool_result"
 
     @pytest.mark.asyncio
     async def test_execute_and_inject_none_result(self):
@@ -1299,15 +1299,14 @@ class TestEEExecuteTool:
             tool_failure_policy="abort",
         )
 
-        group = ToolCallGroup(id="g1", anchor_name="g1:tool_result")
-        ee._foreground_group = group
-
+        ee.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "notify", "{}")
         result_str, success = await ee.execute_and_inject(tc)
 
         assert success is True
         assert result_str is None
-        assert group.result_message is None
+        fg = ee.get_foreground_group()
+        assert fg.result_message is not None
 
     @pytest.mark.asyncio
     async def test_execute_and_inject_no_foreground_raises(self):

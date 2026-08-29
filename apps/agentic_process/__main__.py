@@ -21,22 +21,14 @@ from peteos.utils.logger import setup_logging
 
 async def main() -> None:
     """Watch for incoming emails and route them via the dispatcher."""
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <workflow-canvas> <backend-url>")
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <workflow-canvas>")
         sys.exit(1)
 
-    workflow_path, backend_url = sys.argv[1], sys.argv[2]
+    workflow_path = sys.argv[1]
 
     # --- Enable debug logging ---
     setup_logging(level="DEBUG", debug=True)
-
-    # --- Connect to LLM backend ---
-    chatbot_manager = ChatBotManager(timeout=300)
-    await chatbot_manager.add_backend("local", backend_url,
-        api_type="anthropic",
-        streaming=False,
-        max_tokens=8192
-    )
 
     app_main = AppMain(workflow_path=workflow_path)
 

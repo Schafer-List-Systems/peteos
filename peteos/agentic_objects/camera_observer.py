@@ -116,16 +116,16 @@ class CameraObserver(AgenticObject):
         return f"OK: Image captured ({w}x{h}), cached in memory."
 
     @tool(description="Read the cached image from the last grab_image call and send it to the session.")
-    async def read_cached_image(self, session: "Session | None" = None) -> str:
+    async def read_cached_image(self, runner: "Runner") -> str:
         if self._cached_camera_frame is None:
             return "ERROR: No image has been captured yet. Call grab_image first."
 
-        if session is None:
-            return "ERROR: Session not available."
+        if runner is None:
+            return "ERROR: Runner not available."
 
         await self._send_media(
             data=self._cached_camera_frame,
             mime_type="image/png",
-            session=session,
+            runner=runner,
         )
         return "OK: Image sent to session."

@@ -28,17 +28,22 @@ class TextEditor(AgenticObject):
         self._file_mtime: float | None = None
         self._trailing_newline: bool = False
 
-    @tool(description="Load a file from disk into the editor. Stores the file path and modification time for safe writing.")
+    @tool(description="Try to load a file from disk into the editor. Stores the file path and modification time for safe writing.")
     def load(self, file_path: str) -> str:
         """Load a file into the editor's internal line representation."""
         abs_path = os.path.abspath(file_path)
+        self._file_path = abs_path
         if not os.path.isfile(abs_path):
-            return f"Error: file not found: {abs_path}"
+            with open(abs_path, "w", encoding="utf-8") as f:
+                pass
+            self._lines = []
+            self._file_mtime = os.path.getmtime(abs_path)
+            self._trailing_newline = False
+            return f"File not found. Created empty file: {abs_path}."
         try:
             with open(abs_path, "r", encoding="utf-8") as f:
                 content = f.read()
             self._lines = content.splitlines()
-            self._file_path = abs_path
             self._file_mtime = os.path.getmtime(abs_path)
             self._trailing_newline = content.endswith("\n")
             return f"Loaded {abs_path} ({len(self._lines)} lines)."
@@ -62,15 +67,13 @@ class TextEditor(AgenticObject):
         """Split text into lines and replace the internal representation."""
         self._lines = text.splitlines()
         self._trailing_newline = text.endswith("\n")
-        return f"Lines replaced ({len(self._lines)} lines)."
+        return f"Replaced ({len(self._lines)} lines)."
 
-    @tool(description="Write the internal lines array back to the loaded file. Fails if the file was modified externally since last read().")
+    @tool(description="Write the internal lines array back to the file. Fails if the file was modified externally since last read().")
     def store(self) -> str:
         """Write lines to disk, protecting against external file modifications via mtime check."""
         if not self._file_path:
             return "Error: no file loaded. Use load() first."
-        if not os.path.isfile(self._file_path):
-            return f"Error: file no longer exists: {self._file_path}"
         current_mtime = os.path.getmtime(self._file_path)
         if self._file_mtime is None:
             return "Error: internal mtime missing — could not verify file safety."

@@ -155,11 +155,12 @@ class AgenticObject:
             imports_str = f"\nAvailable modules: {mods_list}."
         return (
             "# Code Execution\n\n"
-            "You have the `python_exec` tool that runs Python code in a restricted sandbox.\n"
+            "Use the `python_exec` tool to run Python code.\n"
             "Usage: call `python_exec(function='...')` where `function` contains the Python `func(self)` definition.\n"
             "The function must be named exactly `func` and have the signature `func(self)`.\n"
             "Inside the function, `self` refers to the agentic object — you can call its tools and access its attributes.\n"
             "The function's return value is the result sent back to the caller (not print statements). Example: `def func(self):\n    import numpy\n    return numpy.array([1, 2, 3]).sum()`\n"
+            "When your function produces the output for the user's request directly, then use `return produce_output(result)` reading the return value yourself and then calling `produce_output` manually!\n"
             f"{imports_str}\n"
             "Forbidden: __builtins__, __import__, network access, filesystem I/O."
         )
@@ -346,8 +347,14 @@ class AgenticObject:
         func = getattr(sandbox, matching[0])
         return func(*args, **kwargs)
 
-    @tool(name="produce_output", description="Produce the desired output and signal your final answer. Pass the answer matching the output schema.")
-    def _produce_output(self, answer: Any, runner: "Runner | None" = None) -> str | None:
+    @tool(
+        name="produce_output",
+        description=(
+            "Produce the desired output and signal your final answer. "
+            "Pass the answer matching the output schema,"
+        )
+    )
+    def _produce_output(self, answer: Any, runner: Runner) -> str | None:
         """Protected tool: signals the agent has produced its final answer.
 
         Validates the answer against the current output schema. If validation
@@ -374,13 +381,14 @@ class AgenticObject:
                     "invoke_agent[%s]: max output attempts hit after %d turns without calling produce_output or produce_error (limit=%d)",
                     self.__class__.__name__, attempts, max_attempts,
                 )
-                raise RuntimeError(
-                    f"Agent exceeded max output attempts ({max_attempts}) by finishing steps without calling `produce_output` or `produce_error`"
-                )
-            runner.state.update("_oap_output_attempts", attempts)
+                runner.set_critical_error(RuntimeError(
+                    f"Agent exceeded max output attempts ({max_attempts}) by finishing steps without successfully calling `produce_output` or `produce_error`"
+                ))
+                return None
+            runner.state.force_set("_oap_output_attempts", attempts)
 
             output_schema = self._oap_current_output_schema
-            
+
             desc = get_schema_description(output_schema)
             json_schema, doc_entries = desc
             hint = f"Expected answer matching schema format: {json_schema}."
@@ -668,7 +676,7 @@ class AgenticObject:
                             self.__class__.__name__, attempts, max_attempts,
                         )
                         raise RuntimeError(
-                            f"Agent exceeded max output attempts ({max_attempts}) by finishing steps without calling `produce_output` or `produce_error`"
+                            f"Agent exceeded max output attempts ({max_attempts}) by finishing steps without successfully calling `produce_output` or `produce_error`"
                         )
 
                     output_schema = self._oap_current_output_schema
@@ -808,4 +816,3 @@ class AgenticObject:
                 except Exception:
                     pass
             self.release()
-
