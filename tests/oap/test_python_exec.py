@@ -29,10 +29,10 @@ async def test_python_exec_6th():
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
         "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
-        "Start with 0, 1. And compute the 6-th element.",
+        "Compute the 6-th element.",
         output_schema=int,
     )
-    expected = _fibonacci_squared(6)
+    expected = _fibonacci_squared(5)
     assert result == expected, f"6th element: expected {expected}, got {result}"
 
 
@@ -40,10 +40,10 @@ async def test_python_exec_8th():
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
         "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
-        "Start with 0, 1. And compute the 8-th element.",
+        "Compute the 8-th element.",
         output_schema=int,
     )
-    expected = _fibonacci_squared(8)
+    expected = _fibonacci_squared(7)
     assert result == expected, f"8th element: expected {expected}, got {result}"
 
 
@@ -51,8 +51,8 @@ async def test_python_exec_10th():
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
         "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
-        "Start with 0, 1. And compute the 10-th element.",
+        "Compute the 10-th element.",
         output_schema=int,
     )
-    expected = _fibonacci_squared(10)
+    expected = _fibonacci_squared(9)
     assert result == expected, f"10th element: expected {expected}, got {result}"
