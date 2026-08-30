@@ -29,7 +29,8 @@ class FibonacciSquared(AdaptiveObject):
 async def test_define_function_7th():
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
-        "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
+        "Compute the sequence where each element is the sum of the squares of its two predecessors.\n"
+        "For example, the first element is 0, the 4-th element is 2.\n"
         "Compute the 7-th element.",
         output_schema=int,
         persistent_thread_id="define_func_7",
@@ -42,7 +43,8 @@ async def test_define_function_8th_persistent():
     """Compute 8th element in the same persistent thread as the 7th."""
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
-        "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
+        "Compute the sequence where each element is the sum of the squares of its two predecessors.\n"
+        "For example, the first element is 0, the 4-th element is 2.\n"
         "Compute the 8-th element.",
         output_schema=int,
         persistent_thread_id="define_func_7",
@@ -55,7 +57,8 @@ async def test_define_function_10th_new_thread():
     """Compute 10th element in a fresh thread."""
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
-        "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
+        "Compute the sequence where each element is the sum of the squares of its two predecessors.\n"
+        "For example, the first element is 0, the 4-th element is 2.\n"
         "Compute the 10-th element.",
         output_schema=int,
     )

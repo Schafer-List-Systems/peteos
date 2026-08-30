@@ -28,7 +28,8 @@ class FibonacciSquared(AgenticObject):
 async def test_python_exec_6th():
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
-        "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
+        "Compute the sequence where each element is the sum of the squares of its two predecessors.\n"
+        "For example, the first element is 0, the 4-th element is 2.\n"
         "Compute the 6-th element.",
         output_schema=int,
     )
@@ -39,7 +40,8 @@ async def test_python_exec_6th():
 async def test_python_exec_8th():
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
-        "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
+        "Compute the sequence where each element is the sum of the squares of its two predecessors.\n"
+        "For example, the first element is 0, the 4-th element is 2.\n"
         "Compute the 8-th element.",
         output_schema=int,
     )
@@ -50,7 +52,8 @@ async def test_python_exec_8th():
 async def test_python_exec_10th():
     agent = FibonacciSquared()
     result = await agent.invoke_agent(
-        "Compute the sequence where each element is the sum of the squares of its two predecessors: 0:0, 1:1, 2:1, 3:2, ... "
+        "Compute the sequence where each element is the sum of the squares of its two predecessors.\n"
+        "For example, the first element is 0, the 4-th element is 2.\n"
         "Compute the 10-th element.",
         output_schema=int,
     )
