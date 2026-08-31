@@ -1,0 +1,3 @@
+[submodule "docs"]
+	path = docs
+	url = git@gitlab.dax:sls/peteos_docs.git
