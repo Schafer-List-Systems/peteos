@@ -262,7 +262,7 @@ class SandboxBuilder:
             Description string listing available modules if any.
         """
         prompt = (
-            "The value must be a Python function with the exact signature "
+            "The function must be a Python function with the exact signature "
             "`func(self)` where `self` is a wrapper object for the agentic "
             "instance. "
             "Define exactly one function named `func` — the harness will find "

@@ -17,6 +17,7 @@ from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.utils import get_logger
 from peteos.oap.error import Error
+from peteos.oap import prompts
 from peteos.sandbox import SandboxBuilder
 
 from peteos.oap.decorators import tool
@@ -88,6 +89,7 @@ class AgenticObject:
         self._oap_lock: threading.Lock = threading.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
+        self._oap_system_prompt_hooks: dict[str, Callable[[], str]] = {}
         self._oap_thread_store: dict[str, str] = {}
         self._oap_auto_approve_tools: list[str] = []
         self._register_tools()
@@ -128,7 +130,7 @@ class AgenticObject:
 
     def _register_output_schema_hook(self) -> None:
         """Register the output schema system prompt hook."""
-        self._oap_role.add_system_prompt_hook(self._output_schema_hook)
+        self._oap_system_prompt_hooks["output_schema"] = self._output_schema_hook
 
     def _output_schema_hook(self) -> str:
         """System prompt hook: returns formatted output schema description."""
@@ -142,7 +144,7 @@ class AgenticObject:
         config = _collect_oap_config(self.__class__)
         if not config.get("allow_code_execution", False):
             return
-        self._oap_role.add_system_prompt_hook(self._python_exec_system_prompt_hook)
+        self._oap_system_prompt_hooks["python_exec"] = self._python_exec_system_prompt_hook
 
     def _python_exec_system_prompt_hook(self) -> str:
         """System prompt hook: instructs the agent on using the python_exec tool."""
@@ -153,18 +155,7 @@ class AgenticObject:
                 m.__name__ if hasattr(m, "__name__") else str(m) for m in imports
             )
             imports_str = f"\nAvailable modules: {mods_list}."
-        return (
-            "# Code Execution\n\n"
-            "AVOID MANUAL COMPUTATIONS AND CALCULATIONS!\n"
-            "Use the `python_exec` tool to run Python code.\n"
-            "Usage: call `python_exec(function='...')` where `function` contains the Python `func(self)` definition.\n"
-            "The function must be named exactly `func` and have the signature `func(self)`.\n"
-            "Inside the function, `self` refers to the agentic object — you can call its tools and access its attributes.\n"
-            "The function's return value is the result sent back to the caller (not print statements). Example: `def func(self):\n    import numpy\n    return numpy.array([1, 2, 3]).sum()`\n"
-            "When your function produces the output for the user's request directly, then use `return produce_output(result)` reading the return value yourself and then calling `produce_output` manually!\n"
-            f"{imports_str}\n"
-            "Forbidden: __builtins__, __import__, network access, filesystem I/O."
-        )
+        return prompts.PYTHON_EXEC_PROMPT.format(modules_section=imports_str)
 
     def _register_sandbox_tool(self) -> None:
         """Register python_exec tool when allow_code_execution is enabled on the class or any ancestor."""
@@ -352,7 +343,7 @@ class AgenticObject:
         name="produce_output",
         description=(
             "Produce the desired output and signal your final answer. "
-            "Pass the answer matching the output schema,"
+            "Pass the answer matching the output schema."
         )
     )
     def _produce_output(self, answer: Any, runner: Runner) -> str | None:
@@ -621,6 +612,9 @@ class AgenticObject:
         if session is None or runner is None:
             _logger.debug("invoke_agent[%s]: creating new session and runner", self.__class__.__name__)
             session = await self._oap_agent.create_session()
+            system_prompt_msg = session.active_context.system_prompt_message
+            for name, callback in self._oap_system_prompt_hooks.items():
+                session.register_hook(system_prompt_msg, name, callback)
             runner = await self._start_session(session)
             if persistent_thread_id is not None:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
