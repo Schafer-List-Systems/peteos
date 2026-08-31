@@ -157,6 +157,7 @@ class ExecutionEnvironment:
             "before_notification_publish": [],
             "before_tool_execution": [],
             "after_tool_execution": [],
+            "on_truncation_exhausted": [],
         }
 
     # ------------------------------------------------------------------ #
