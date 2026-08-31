@@ -155,6 +155,7 @@ class AgenticObject:
             imports_str = f"\nAvailable modules: {mods_list}."
         return (
             "# Code Execution\n\n"
+            "AVOID MANUAL COMPUTATIONS AND CALCULATIONS!\n"
             "Use the `python_exec` tool to run Python code.\n"
             "Usage: call `python_exec(function='...')` where `function` contains the Python `func(self)` definition.\n"
             "The function must be named exactly `func` and have the signature `func(self)`.\n"
@@ -409,7 +410,7 @@ class AgenticObject:
             return f"Error: {e}"
         return None
 
-    async def _read_media(self, src: str, runner: "Runner | None" = None) -> str:
+    async def _read_media(self, src: str, runner: Runner) -> str:
         """Tool: load a media file and queue it back to the agent's runner.
 
         Reads the file from disk or fetches from a URL, encodes it as a
@@ -443,7 +444,7 @@ class AgenticObject:
         _logger.debug("_read_media: queued media from %s for runner %s", src, runner.session_uuid)
         return f"OK: media queued from {src}"
 
-    async def _send_media(self, data: bytes, mime_type: str, runner: "Runner | None", *, text: str | None = None) -> None:
+    async def _send_media(self, data: bytes, mime_type: str, runner: Runner, *, text: str | None = None) -> None:
         """Send in-memory media bytes as a user message to the runner.
 
         Encodes the bytes as base64, creates a ContentPart, and queues it
@@ -476,7 +477,7 @@ class AgenticObject:
         _logger.debug("_send_media: queued media (type=%s) for runner %s", mime_type, runner.session_uuid)
 
     @tool(name="produce_error", description="Signal that you could not produce the requested output. Pass an error message explaining why (e.g., missing required data or an invalid state).")
-    def _produce_error(self, message: Any, runner: "Runner | None" = None) -> str | None:
+    def _produce_error(self, message: Any, runner: Runner = None) -> str | None:
         """Protected tool: signals the agent could not fulfill the task.
 
         Writes the error message to the runner's SessionState so that
