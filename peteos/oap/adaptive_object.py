@@ -13,22 +13,13 @@ from peteos.persona.toolmanager import Tool
 from peteos.conversation.session import Session
 
 from peteos.oap.agentic_registry import AgenticObjectRegistry
+from peteos.oap import prompts
 
 @agentic_object(define_functions=True)
 class AdaptiveObject(AgenticObject):
-    """
-    Create and write reusable Python functions for recurring computations using `define_function`.
-    - Prefer already existing functions if applicable!
-    - Use detailed and self-descriptive function names! Generic function names yield later conflicts.
-    - Build the signature including Python type hints.
-    - Address `description` string at yourself.
-    - Describe the parameters and return values including their types in the docstring!
-    - Formulate the optional `tests` as a member function of this object.
-      It will immediately become available for you as tool and as a member function of the `self` object after being defined.
-      Use these functions as tool directly or from within python functions.
-    - Use `remove_function` to unregister functions you previously registered.
-    - You cannot remove built-in/static tools.
-    """
+    """ """
+
+    __doc__ = prompts.ADAPTIVE_OBJECT_PROMPT
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)

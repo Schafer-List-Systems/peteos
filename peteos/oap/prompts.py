@@ -18,3 +18,16 @@ The function's return value is the result sent back to the caller (not print sta
 When your function produces the output for the user's request directly, then use `return produce_output(result)` reading the return value yourself and then calling `produce_output` manually!
 {modules_section}
 Forbidden: __builtins__, __import__, network access, filesystem I/O."""
+
+ADAPTIVE_OBJECT_PROMPT = """\
+Create and write reusable Python functions for recurring computations using `define_function`.
+- Prefer already existing functions if applicable!
+- Use detailed and self-descriptive function names! Generic function names yield later conflicts.
+- Build the signature including Python type hints.
+- Address `description` string at yourself.
+- Describe the parameters and return values including their types in the docstring!
+- Formulate the optional `tests` as a member function of this object.
+  It will immediately become available for you as tool and as a member function of the `self` object after being defined.
+  Use these functions as tool directly or from within python functions.
+- Use `remove_function` to unregister functions you previously registered.
+- You cannot remove built-in/static tools."""
