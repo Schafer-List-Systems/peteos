@@ -11,6 +11,7 @@ from .backendconfig import BackendConfig
 from .chatbotconfig import ChatBotConfig
 from .backendprovider import BackendProvider
 from .openaiprovider import OpenAIChatBotProvider
+from .openairprovider import OpenAIRChatBotProvider
 from .anthropicprovider import AnthropicChatBotProvider
 from .geminiprovider import GeminiChatBotProvider
 from peteos.utils import get_logger
@@ -40,6 +41,7 @@ class ChatBotManager:
     _timeout: Optional[float] = None
     _providers: Dict[str, BackendProvider] = {
         "openai": OpenAIChatBotProvider(),
+        "openair": OpenAIRChatBotProvider(),
         "anthropic": AnthropicChatBotProvider(),
         "gemini": GeminiChatBotProvider(),
     }
@@ -102,7 +104,10 @@ class ChatBotManager:
 
     @classmethod
     async def _add_backend(cls, config: BackendConfig) -> BackendInfo:
-        """Add a backend from a BackendConfig (no duplicate or validation check)."""
+        """Add a backend from a BackendConfig."""
+        if config.name in cls._backends:
+            raise ValueError(f"Duplicate backend name '{config.name}' in configuration")
+
         client = HTTPClient(
             timeout=config.timeout,
             retry_delays=config.retry_delays,
@@ -253,6 +258,7 @@ class ChatBotManager:
 
         for api_type, provider_name in [
             ("openai", "OpenAI"),
+            ("openair", "OpenAI/responses"),
             ("anthropic", "Anthropic"),
             ("gemini", "Gemini"),
         ]:
@@ -325,7 +331,7 @@ class ChatBotManager:
         for backend_config in json_obj.get("backends", []):
             config = BackendConfig.from_dict(backend_config)
 
-            if config.api_type is not None and config.api_type not in ("openai", "anthropic", "gemini"):
+            if config.api_type is not None and config.api_type not in ("openai", "openair", "anthropic", "gemini"):
                 raise ValueError(f"Invalid api_type in config: {config.api_type}")
 
             await cls._add_backend(config)
