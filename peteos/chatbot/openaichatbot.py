@@ -311,11 +311,8 @@ class OpenAIChatBot(ChatBot):
                     elif raw.get("type") == "thinking":
                         # Translate thinking to OpenAI reasoning field
                         msg_dict["reasoning"] = raw.get("text", "")
-                    elif raw.get("type") == "text":
-                        # Text or other content part
-                        msg_dict["text"] = raw.get("text", "")
                     else:
-                        # Other content part
+                        # Other content part (including text)
                         content_parts.append(raw)
 
                 if content_parts:
