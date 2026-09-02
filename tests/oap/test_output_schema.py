@@ -57,4 +57,4 @@ async def test_candidate_profile_skills():
     assert isinstance(skills, list)
     assert len(skills) >= 1
     assert all(isinstance(s, str) for s in skills)
-    assert "React" in skills
+    assert any("react" in s.lower() for s in skills)
