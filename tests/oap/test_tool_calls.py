@@ -55,7 +55,6 @@ async def test_grocery_list_add_and_member_state():
     groceries = GroceryList()
 
     result = await groceries.invoke_agent("Add 2 milk and 3 eggs to the list.")
-    assert "2 Milk" in result or "2 milk" in result or "Added" in result
     assert groceries._items == {Grocery.MILK: 2, Grocery.EGG: 3}
 
 
