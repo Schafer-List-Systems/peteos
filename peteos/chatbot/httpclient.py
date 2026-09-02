@@ -34,9 +34,12 @@ class HTTPClient:
         return len(self._retry_delays)
 
     async def _ensure_response(self, client: httpx.AsyncClient, method: str, url: str, json_body: Optional[dict] = None) -> httpx.Response:
-        """Make an HTTP request with retry for connection-level failures.
+        """Make an HTTP request with retry for network errors and HTTP error status codes.
 
-        Retries on HTTP errors (3xx, 5xx) and network errors.
+        Retries on:
+        - Network errors (connection refused, timeout, DNS failure)
+        - HTTP error status codes (3xx, 4xx, 5xx)
+
         GeneratorExit is always propagated without retry.
 
         Args:
@@ -46,7 +49,7 @@ class HTTPClient:
             json_body: Optional JSON body for POST requests.
 
         Returns:
-            The httpx.Response object.
+            The httpx.Response object (2xx status).
 
         Raises:
             GeneratorExit: Always re-raised without retry.
@@ -55,13 +58,17 @@ class HTTPClient:
         """
         for attempt in range(self._max_retries + 1):
             try:
-                if method == "GET":
-                    return await client.get(url)
-                else:
-                    return await client.post(url, json=json_body)
+                response = await client.get(url) if method == "GET" else await client.post(url, json=json_body)
+                if response.status_code >= 300:
+                    error_text = response.content.decode(errors='replace')
+                    _logger.error("HTTP %d from %s (attempt %d/%d): %s", response.status_code, url, attempt + 1, self._max_retries + 1, error_text)
+                    raise RuntimeError(
+                        f"HTTP {response.status_code} from {url}: {error_text}"
+                    )
+                return response
             except GeneratorExit:
                 raise
-            except Exception:
+            except Exception as e:
                 if attempt < self._max_retries:
                     delay = self._retry_delays[attempt]
                     if delay > 0:
@@ -79,8 +86,8 @@ class HTTPClient:
         """
         Send a POST request and stream SSE events.
 
-        The initial connection is retried on failure. Once streaming
-        begins, mid-stream failures are not retried.
+        The initial connection and HTTP error responses are retried.
+        Once streaming begins, mid-stream failures are not retried.
 
         Args:
             url: Endpoint URL.
@@ -91,41 +98,21 @@ class HTTPClient:
             Raw SSE lines as strings.
 
         Raises:
-            RuntimeError: If the response status code is not 2xx.
+            RuntimeError: If the response status code is not 2xx after all retries.
         """
-        for attempt in range(self._max_retries + 1):
-            client = httpx.AsyncClient(timeout=self._timeout, headers=headers or {})
-            try:
-                async with client:
-                    response = await self._ensure_response(client, "POST", url, body)
-                    if response.status_code >= 300:
-                        error_text = await response.aread()
-                        error_str = error_text.decode(errors='replace')
-                        _logger.error("HTTP %d from %s: %s", response.status_code, url, error_str)
-                        raise RuntimeError(
-                            f"HTTP {response.status_code} from {url}: {error_str}"
-                        )
+        client = httpx.AsyncClient(timeout=self._timeout, headers=headers or {})
+        try:
+            async with client:
+                response = await self._ensure_response(client, "POST", url, body)
 
-                    try:
-                        async for line in response.aiter_lines():
-                            if line:
-                                yield line
-                    finally:
-                        await response.aclose()
-                    return
-            except GeneratorExit:
-                await client.aclose()
-                raise
-            except Exception as e:
-                await client.aclose()
-                if attempt < self._max_retries:
-                    delay = self._retry_delays[attempt]
-                    if delay > 0:
-                        _logger.warning("HTTP POST to %s failed (attempt %d/%d), retrying in %ss", url, attempt + 1, self._max_retries, delay)
-                    await asyncio.sleep(delay)
-                    continue
-                _logger.error("HTTP POST to %s failed after %d retries: %s: %s", url, self._max_retries, type(e).__name__, e)
-                raise
+                try:
+                    async for line in response.aiter_lines():
+                        if line:
+                            yield line
+                finally:
+                    await response.aclose()
+        finally:
+            await client.aclose()
 
     async def get(self, url: str, headers: Optional[dict] = None) -> dict:
         """
@@ -139,16 +126,10 @@ class HTTPClient:
             Parsed JSON response.
 
         Raises:
-            RuntimeError: If the response status code is not 2xx.
+            RuntimeError: If the response status code is not 2xx after all retries.
         """
         async with httpx.AsyncClient(timeout=self._timeout, headers=headers or {}) as client:
             response = await self._ensure_response(client, "GET", url)
-            if response.status_code >= 300:
-                error_text = response.content.decode(errors='replace')
-                _logger.error("HTTP %d from %s: %s", response.status_code, url, error_text)
-                raise RuntimeError(
-                    f"HTTP {response.status_code} from {url}: {error_text}"
-                )
             return response.json()
 
     async def post(self, url: str, body: dict, headers: Optional[dict] = None) -> dict:
@@ -164,14 +145,8 @@ class HTTPClient:
             Parsed JSON response.
 
         Raises:
-            RuntimeError: If the response status code is not 2xx.
+            RuntimeError: If the response status code is not 2xx after all retries.
         """
         async with httpx.AsyncClient(timeout=self._timeout, headers=headers or {}) as client:
             response = await self._ensure_response(client, "POST", url, body)
-            if response.status_code >= 300:
-                error_text = response.content.decode(errors='replace')
-                _logger.error("HTTP %d from %s: %s", response.status_code, url, error_text)
-                raise RuntimeError(
-                    f"HTTP {response.status_code} from {url}: {error_text}"
-                )
             return response.json()

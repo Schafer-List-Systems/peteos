@@ -311,17 +311,12 @@ class OpenAIChatBot(ChatBot):
                     elif raw.get("type") == "thinking":
                         # Translate thinking to OpenAI reasoning field
                         msg_dict["reasoning"] = raw.get("text", "")
+                    elif raw.get("type") == "text":
+                        # Text or other content part
+                        msg_dict["text"] = raw.get("text", "")
                     else:
-                        # Text or other content part - apply key translation
-                        translated = {}
-                        for key, value in raw.items():
-                            if key in (self._config.request_translations or {}):
-                                api_key = self._config.request_translations[key]
-                            else:
-                                api_key = key
-                            if api_key != "type":
-                                translated[api_key] = value
-                        content_parts.append({"type": "text", **translated})
+                        # Other content part
+                        content_parts.append(raw)
 
                 if content_parts:
                     if len(content_parts) == 1:
