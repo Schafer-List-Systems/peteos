@@ -11,7 +11,6 @@ from .backendconfig import BackendConfig
 from .chatbotconfig import ChatBotConfig
 from .backendprovider import BackendProvider
 from .openaiprovider import OpenAIChatBotProvider
-from .openairprovider import OpenAIRChatBotProvider
 from .anthropicprovider import AnthropicChatBotProvider
 from .geminiprovider import GeminiChatBotProvider
 from peteos.utils import get_logger
@@ -41,7 +40,6 @@ class ChatBotManager:
     _timeout: Optional[float] = None
     _providers: Dict[str, BackendProvider] = {
         "openai": OpenAIChatBotProvider(),
-        "openair": OpenAIRChatBotProvider(),
         "anthropic": AnthropicChatBotProvider(),
         "gemini": GeminiChatBotProvider(),
     }
@@ -258,7 +256,6 @@ class ChatBotManager:
 
         for api_type, provider_name in [
             ("openai", "OpenAI"),
-            ("openair", "OpenAI/responses"),
             ("anthropic", "Anthropic"),
             ("gemini", "Gemini"),
         ]:
@@ -331,7 +328,7 @@ class ChatBotManager:
         for backend_config in json_obj.get("backends", []):
             config = BackendConfig.from_dict(backend_config)
 
-            if config.api_type is not None and config.api_type not in ("openai", "openair", "anthropic", "gemini"):
+            if config.api_type is not None and config.api_type not in ("openai", "anthropic", "gemini"):
                 raise ValueError(f"Invalid api_type in config: {config.api_type}")
 
             await cls._add_backend(config)
