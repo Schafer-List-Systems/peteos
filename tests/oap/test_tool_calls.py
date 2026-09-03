@@ -63,7 +63,7 @@ async def test_grocery_list_cost_and_member_state():
     groceries._items = {Grocery.MILK: 2, Grocery.EGG: 3}
 
     result = await groceries.invoke_agent("How much will my shopping cost?")
-    assert "3.75" in result
+    assert "3.75" in str(result)
     assert groceries._items == {Grocery.MILK: 2, Grocery.EGG: 3}
 
 
