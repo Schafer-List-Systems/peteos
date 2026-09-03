@@ -11,12 +11,15 @@ from peteos.agentic_objects.text_editor import TextEditor
 class TestTextEditor:
     """Tests for the TextEditor OAP."""
 
-    def test_load_nonexistent_file(self):
-        """Test loading a file that does not exist."""
+    def test_load_nonexistent_file_creates_empty_file(self):
+        """Test loading a file that does not exist creates an empty file."""
         obj = TextEditor()
-        result = obj.load("/nonexistent/path/file.txt")
-        assert "not found" in result.lower()
-        assert obj._file_path is None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "newfile.txt")
+            result = obj.load(path)
+            assert "Created empty file" in result
+            assert obj._file_path == os.path.abspath(path)
+            assert obj._lines == []
 
     def test_load_and_read(self):
         """Test loading a file and reading its content."""
@@ -50,7 +53,7 @@ class TestTextEditor:
         try:
             obj.load(tmp)
             result = obj.write("new line one\nnew line two")
-            assert "Lines replaced" in result
+            assert "Replaced" in result
             assert obj._lines == ["new line one", "new line two"]
         finally:
             os.unlink(tmp)
