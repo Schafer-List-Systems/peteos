@@ -1,10 +1,6 @@
-"""Integration tests for BashWorkspace OAP.
+"""OAP tests for BashWorkspace.
 
-These tests require a live LLM backend:
-    export OAP_BACKEND_URL=http://localhost:3001
-    pytest tests/oap/test_bash_workspace.py -v
-
-Runs via ChatBotManager like the existing PdfTranscriber benchmark.
+These tests require a live LLM backend configured in peteos.json.
 """
 
 from __future__ import annotations
