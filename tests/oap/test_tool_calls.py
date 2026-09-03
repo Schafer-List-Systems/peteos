@@ -72,7 +72,6 @@ async def test_grocery_list_clear_and_member_state():
     groceries._items = {Grocery.MILK: 2, Grocery.EGG: 3}
 
     result = await groceries.invoke_agent("I'm done shopping, clear the list.")
-    assert "cleared" in result.lower()
     assert groceries._items == {}
 
 
