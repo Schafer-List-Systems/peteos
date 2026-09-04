@@ -45,7 +45,7 @@ The documentation and the examples cover more complex agentic objects with the f
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/peteos.git
+git clone --recurse-submodules https://github.com/yourusername/peteos.git
 cd peteos
 python3 -m venv .venv
 source .venv/bin/activate
