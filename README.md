@@ -89,7 +89,7 @@ This project is dual-licensed:
 - **Non-commercial use** (including evaluation of commercial use cases) is free
   under the license in the `LICENSE` file.
 - **Commercial use** (production, products, services, SaaS, etc.) requires a
-  commercial license from the Schäfer List Systems.GmbH.
+  commercial license from the Schäfer List Systems GmbH.
 
 If you intend to use this software commercially, please contact us at
 <info@schaeferlist.de> or visit <https://www.schaeferlist.de>.
