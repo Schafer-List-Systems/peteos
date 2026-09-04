@@ -1,5 +1,20 @@
 {
-    "required_tools": ["example_tool_1", "example_tool_2"],
+    "description": "Overrides description.md if no description.md file exists. If description.md is present, it takes precedence over this value.",
+    "system_prompt": "Overrides system_prompt.md if no system_prompt.md file exists. If system_prompt.md is present, it takes precedence over this value.",
+    "required_tools": [
+        "example_tool_1",
+        "example_tool_2"
+    ],
+    "execution_environment": "REPL",
     "model": "example-model",
-    "auto_approve_tools": ["example_tool_1"]
+    "auto_approve_tools": [
+        "example_tool_1"
+    ],
+    "tool_filter": [
+        "example-pattern-.*"
+    ],
+    "behavior_policy": "responsive",
+    "max_truncation_retries": 2,
+    "max_output_turns": 3,
+    "max_output_attempts": 3
 }

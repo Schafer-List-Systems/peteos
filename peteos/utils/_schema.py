@@ -224,6 +224,20 @@ def get_schema_description(schema: type | None, _seen: set | None = None) -> tup
                 parts.append(_type_name(t))
         return " | ".join(parts), doc_entries
 
+    # Tuple types: fixed-size (str, str, str) or variable-length (str, ...)
+    if origin is tuple and args:
+        parts = []
+        doc_entries: list[tuple[str, str]] = []
+        if len(args) == 2 and args[1] is Ellipsis:
+            inner_schema, inner_docs = get_schema_description(args[0], _seen)
+            return f"tuple[{inner_schema}, ...]", inner_docs
+        for a in args:
+            inner_schema, inner_docs = get_schema_description(a, _seen)
+            parts.append(inner_schema)
+            if inner_docs:
+                doc_entries.extend(inner_docs)
+        return f"tuple[{', '.join(parts)}]", doc_entries
+
     # Generic dict: describe as key-type → value-type
     if origin is dict and args:
         key_desc = get_schema_description(args[0], _seen)
@@ -402,6 +416,20 @@ def _recursive_cast(data: Any, schema: type) -> Any:
                 f"{', '.join(repr(m.value) for m in schema)}. "
                 f"Got instead {type(data).__name__}: {data!r}."
             )
+
+    # Tuple types: fixed-size or variable-length (str, ...)
+    if origin is tuple and args:
+        if not isinstance(data, list):
+            raise ValueError(f"expected tuple, got {type(data).__name__}")
+        if len(args) == 2 and args[1] is Ellipsis:
+            # Variable-length: tuple[T, ...]
+            return tuple(_recursive_cast(item, args[0]) for item in data)
+        # Fixed-size: tuple[T1, T2, T3] — must match length exactly
+        if len(data) != len(args):
+            raise ValueError(
+                f"expected tuple of length {len(args)}, got {len(data)}"
+            )
+        return tuple(_recursive_cast(data[i], args[i]) for i in range(len(args)))
 
     # Bare and typed list
     if schema is list:

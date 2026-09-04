@@ -1,42 +1,86 @@
-"""OAP benchmarks for AgenticStringComparator.
+"""OAP tests for AgenticStringComparator.contains.
 
-Tests the correctness of the LLM-based comparison functions
-(contains, is_same, contradicts, is_complete) using known-good
-input/output pairs with Monte Carlo iterations for statistical
-confidence.
+Tests the LLM-based contains function with known-positive and
+known-negative semantic matching pairs. Each case is its own test.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from peteos.oap.benchmark import AgenticStringComparator, BenchmarkReport, BenchmarkRow, BenchmarkRunner
+from peteos.agentic_objects.string_comparator import AgenticStringComparator
 
 
 @pytest.mark.oap
-async def test_contains():
-    """Benchmark AgenticStringComparator.contains with known-positive and known-negative pairs."""
+async def test_contains_positive_1():
+    """Test positive match: 'The sky is blue' contains 'The color of the world's ceiling'."""
     comp = AgenticStringComparator.instance()
+    result = await comp.contains(
+        "The sky is blue",
+        "The color of the world's ceiling",
+    )
+    assert result is True, (
+        "contains('The sky is blue', 'The color of the world's ceiling')"
+    )
 
-    test_cases = [
-        (True, "The sky is blue", "The color of the world's ceiling"),
-        (True, "Water boils at 100 degrees Celsius", "Boiling temperatur of water"),
-        (True, "The plant uses sunlight to produce energy", "energy production"),
-        (False, "The sky is blue", "green"),
-        (False, "Water boils at 100 degrees Celsius", "freezing temperature"),
-        (False, "Photosynthesis converts sunlight into energy", "nuclear energy"),
-    ]
 
-    async def test_fn(row: BenchmarkRow) -> bool:
-        expected, text, substring = row.input_dimensions["test_case"]
-        result = await comp.contains(text, substring)
-        assert result == expected
+@pytest.mark.oap
+async def test_contains_positive_2():
+    """Test positive match: 'Water boils at 100 degrees Celsius' contains 'Boiling temperatur of water'."""
+    comp = AgenticStringComparator.instance()
+    result = await comp.contains(
+        "Water boils at 100 degrees Celsius",
+        "Boiling temperatur of water",
+    )
+    assert result is True, (
+        "contains('Water boils at 100 degrees Celsius', 'Boiling temperatur of water')"
+    )
 
-    runner = BenchmarkRunner(test_fn)
-    runner.add_dimension("test_case", test_cases)
-    runner.add_dimension("run", range(5))
 
-    report: BenchmarkReport = await runner.run()
+@pytest.mark.oap
+async def test_contains_positive_3():
+    """Test positive match: 'The plant uses sunlight to produce energy' contains 'energy production'."""
+    comp = AgenticStringComparator.instance()
+    result = await comp.contains(
+        "The plant uses sunlight to produce energy",
+        "energy production",
+    )
+    assert result is True, (
+        "contains('The plant uses sunlight to produce energy', 'energy production')"
+    )
 
-    summary = report.average(["success"])
-    assert summary["success"] >= 0.8, f"contains accuracy: {summary}"
+
+@pytest.mark.oap
+async def test_contains_negative_1():
+    """Test negative match: 'The sky is blue' does not contain 'green'."""
+    comp = AgenticStringComparator.instance()
+    result = await comp.contains("The sky is blue", "green")
+    assert result is False, (
+        "contains('The sky is blue', 'green') should be False"
+    )
+
+
+@pytest.mark.oap
+async def test_contains_negative_2():
+    """Test negative match: 'Water boils at 100 degrees Celsius' does not contain 'freezing temperature'."""
+    comp = AgenticStringComparator.instance()
+    result = await comp.contains(
+        "Water boils at 100 degrees Celsius",
+        "freezing temperature",
+    )
+    assert result is False, (
+        "contains('Water boils at 100 degrees Celsius', 'freezing temperature')"
+    )
+
+
+@pytest.mark.oap
+async def test_contains_negative_3():
+    """Test negative match: 'Photosynthesis converts sunlight into energy' does not contain 'nuclear energy'."""
+    comp = AgenticStringComparator.instance()
+    result = await comp.contains(
+        "Photosynthesis converts sunlight into energy",
+        "nuclear energy",
+    )
+    assert result is False, (
+        "contains('Photosynthesis converts sunlight into energy', 'nuclear energy')"
+    )

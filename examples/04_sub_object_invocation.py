@@ -3,16 +3,9 @@
 
 Invoke sub-agents on nested agentic objects for context-isolated reasoning.
 Each sub-agent gets its own independent context window.
-
-Usage:
-    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/04_sub_object_invocation.py \
-        http://localhost:8080
 """
 
-import sys
-
 from dataclasses import dataclass
-
 from peteos import AgenticObject, Error, agentic_object, tool
 
 
@@ -101,17 +94,6 @@ class InventoryManager(AgenticObject):
 
 async def main():
     """Set up an Agent and invoke it to parse prices via sub-agents."""
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <backend-url>")
-        sys.exit(1)
-    backend_url = sys.argv[1]
-
-    # --- Set up peteos components ---
-    from peteos.chatbot.manager import ChatBotManager
-
-    chatbot_manager = ChatBotManager(timeout=None)
-    await chatbot_manager.add_backend("local", backend_url)
-
     # --- Create OAP objects (Agents are auto-created in __init__) ---
     manager = InventoryManager()
 
