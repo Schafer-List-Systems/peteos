@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from .message_registry import MessageRegistry
+from peteos.utils import json
 
 
 class ContentPart:
@@ -327,8 +328,6 @@ class Message:
         Returns:
             Token count as an integer.
         """
-        import json
-
         from peteos.utils.tiktoken import count_tiktoken
 
         serialized = self._json_dict.get("content", [])

@@ -1,8 +1,8 @@
 """Unit tests for OpenAIChatBot implementation."""
 
-import json as _json
-
 import pytest
+
+from peteos.utils import json
 
 from peteos.chatbot.openaichatbot import OpenAIChatBot, OpenAIChatBotResponse
 from peteos.chatbot.chatbotconfig import ChatBotConfig
@@ -70,7 +70,7 @@ class TestOpenAIChatBotResponse:
                     "tool_calls": [{
                         "index": 0,
                         "id": "tc_1",
-                        "function": {"name": "calculator", "arguments": _json.dumps({"query": "1+1"})},
+                        "function": {"name": "calculator", "arguments": json.dumps({"query": "1+1"})},
                     }],
                 }
             }]
@@ -82,9 +82,9 @@ class TestOpenAIChatBotResponse:
         }
         finish = {"choices": [{"delta": {"finish_reason": "tool_calls"}}]}
         async def mock_stream():
-            yield f'data: {_json.dumps(first_delta)}'
-            yield f'data: {_json.dumps(second_delta)}'
-            yield f'data: {_json.dumps(finish)}'
+            yield f'data: {json.dumps(first_delta)}'
+            yield f'data: {json.dumps(second_delta)}'
+            yield f'data: {json.dumps(finish)}'
             yield "[DONE]"
 
         response = OpenAIChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)

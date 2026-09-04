@@ -1,10 +1,10 @@
 """Anthropic-compatible ChatBot implementation."""
 
-import json
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 from peteos.utils import get_logger
+from peteos.utils import json
 from .chatbot import ChatBot
 from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse, GenericChatBotResponse

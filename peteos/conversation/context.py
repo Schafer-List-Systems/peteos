@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import datetime
-import json
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .message import Message
-from peteos.utils import get_logger
+from peteos.utils import get_logger, json
 
 from .system_prompt_message import SystemPromptMessage
 from .tool_definitions_message import ToolDefinitionsMessage

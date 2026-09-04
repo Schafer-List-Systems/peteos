@@ -4,13 +4,13 @@ Resolves peteos.json from standard locations and bootstraps all
 subsystems that need configuration (chatbot backends, roles, etc.).
 """
 
-import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from peteos.utils import get_logger
+from peteos.utils import json
 
 _logger = get_logger(__name__)
 

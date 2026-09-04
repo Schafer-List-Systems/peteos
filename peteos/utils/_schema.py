@@ -2,11 +2,11 @@
 
 from enum import Enum
 
-import json
 import sys
 import types
 
-from dataclasses import dataclass, is_dataclass
+from dataclasses import is_dataclass
+from peteos.utils import json
 from typing import Any, get_args, get_origin
 
 import dataclasses
