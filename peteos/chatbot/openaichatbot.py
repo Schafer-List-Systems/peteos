@@ -459,13 +459,47 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
 
         OpenAI tool_calls don't have a type field (unlike Anthropic).
         The Uniform Delta Protocol expects type="tool_use" for all content array items.
+
+        When text and tool_calls collide in the same content item (hybrid),
+        split them into separate items with different indices.
         """
-        if "content" in translated and isinstance(translated["content"], list):
-            for item in translated["content"]:
-                if isinstance(item, dict):
-                    if ("name" in item and ("arguments" in item or "id" in item or len(item) == 1)) or \
-                       ("name" in item and "function" in item):
-                        item["type"] = "tool_use"
+        if "content" in translated and not isinstance(translated["content"], list):
+            return
+        items = translated.get("content", [])
+        if not items:
+            return
+
+        new_items: list[Dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                new_items.append(item)
+                continue
+
+            # Detect hybrid items: has both text field AND tool-use field
+            is_hybrid = (
+                "content" in item
+                and (
+                    ("name" in item and ("arguments" in item or "id" in item))
+                    or ("name" in item and "function" in item)
+                )
+            )
+            if not is_hybrid:
+                # Pure item — set type normally
+                if ("name" in item and ("arguments" in item or "id" in item or len(item) == 1)) or \
+                   ("name" in item and "function" in item):
+                    item["type"] = "tool_use"
+                new_items.append(item)
+            else:
+                # Hybrid item: split into text + tool_use sub-items
+                idx = item.get("index", 0)
+                text_item = {"index": idx, "type": "text", "content": item["content"]}
+                new_items.append(text_item)
+                tool_item = {k: v for k, v in item.items() if k not in ("content",)}
+                tool_item["index"] = idx + 1
+                tool_item["type"] = "tool_use"
+                new_items.append(tool_item)
+
+        translated["content"] = new_items
 
     @staticmethod
     def _set_text_types(translated: Dict[str, Any]) -> None:
