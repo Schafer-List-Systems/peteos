@@ -47,14 +47,12 @@ pip install peteos
 ### From source (development)
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
 git clone https://github.com/yourusername/peteos.git
 cd peteos
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
-
-> **Note:** This installs from source code. Cython extensions are compiled in-place via `python setup.py build_ext --inplace`. See the [development guide](docs/developer/development.md) for build options.
 
 ## Configuration
 
@@ -96,9 +94,9 @@ If you intend to use this software commercially, please contact us at
 
 ## Resources
 
+- [Getting Started](docs/getting-started.md) — installation and first example
 - [Installation Guide](docs/developer/development.md) — developer setup and build instructions
 - [Introduction](docs/introduction.md) — the sOAP paradigm
-- [Getting Started](docs/getting-started.md) — installation and first example
 - [Concepts](docs/concepts/index.md) — composition, invocation, state, testing
 - [Reference](docs/reference/index.md) — API docs, agentic objects
 - [Best Practices](docs/best-practices/index.md) — Best practices when using PeteOS
