@@ -79,4 +79,11 @@ class BackendConfig:
             if ep is not None and not ep.startswith("/"):
                 merged[endpoint_field] = "/" + ep
 
+        # Ensure model_priorities values are ints (JSON may parse them as strings).
+        priorities = merged.get("model_priorities")
+        if priorities is not None:
+            merged["model_priorities"] = {
+                k: int(v) for k, v in priorities.items()
+            }
+
         return cls(**merged)
