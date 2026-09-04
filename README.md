@@ -90,6 +90,15 @@ The configuration file defines chatbot backends (LLM providers) that Peteos uses
 
 To verify that your configuration is functional run `python3 examples/00_hello_pete.py`.
 
+## Resources
+
+- [Getting Started](docs/getting-started.md) — installation and first example
+- [Introduction](docs/introduction.md) — the sOAP paradigm
+- [Concepts](docs/concepts/index.md) — composition, invocation, state, testing
+- [Reference](docs/reference/index.md) — API docs, agentic objects
+- [Best Practices](docs/best-practices/index.md) — Best practices when using PeteOS
+- [Examples](docs/examples/) — Examples show-casing some features
+
 ## Licensing
 
 This project is dual-licensed:
@@ -101,13 +110,3 @@ This project is dual-licensed:
 
 If you intend to use this software commercially, please contact us at
 <info@schaeferlist.de> or visit <https://www.schaeferlist.de>.
-
-## Resources
-
-- [Getting Started](docs/getting-started.md) — installation and first example
-- [Installation Guide](docs/getting-started.md) — developer setup and build instructions
-- [Introduction](docs/introduction.md) — the sOAP paradigm
-- [Concepts](docs/concepts/index.md) — composition, invocation, state, testing
-- [Reference](docs/reference/index.md) — API docs, agentic objects
-- [Best Practices](docs/best-practices/index.md) — Best practices when using PeteOS
-- [Examples](docs/examples/) — Examples show-casing some features
