@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid as _uuid
 from typing import TYPE_CHECKING
 
@@ -19,7 +18,7 @@ from peteos.engine.executionenvironment import (
     ToolApprovalStatus,
     ToolExecutionStatus,
 )
-from peteos.utils import get_logger
+from peteos.utils import get_logger, json
 from peteos.persona.role import Role
 from peteos.chatbot.response_types import StopReason
 

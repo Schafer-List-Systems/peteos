@@ -1,8 +1,8 @@
 """Unit tests for Gemini ChatBot implementation."""
 
-import json
-
 import pytest
+
+from peteos.utils import json
 
 from peteos.chatbot.geminichatbot import GeminiChatBot, GeminiChatBotResponse
 from peteos.chatbot.chatbotconfig import ChatBotConfig

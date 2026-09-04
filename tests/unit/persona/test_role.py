@@ -1,7 +1,7 @@
 """Unit tests for the persona Role class."""
 
-import json
 import tempfile
+from peteos.utils import json
 from pathlib import Path
 
 import pytest

@@ -1,10 +1,11 @@
 """Unit tests for ExecutionEnvironment with tool groups."""
 
 import asyncio
-import json
 from unittest.mock import MagicMock, AsyncMock
 
 import pytest
+
+from peteos.utils import json
 
 from peteos.engine.executionenvironment import (
     ExecutionEnvironment,

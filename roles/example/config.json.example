@@ -1,0 +1,59 @@
+{
+    // Required: none. All configuration below is optional with sensible defaults.
+    // The role name is derived from the directory name (here, "example").
+
+    // description: A brief description of an agent's role.
+    // Overridden by description.md if it exists in the same directory.
+    // "description": "This is an example agent with no other purpose than showing how to configure one.",
+
+    // system_prompt: The system prompt for the role.
+    // Overridden by system_prompt.md if it exists in the same directory.
+    // "system_prompt": "You are a helpful assistant.",
+
+    // required_tools: List of tool names that this role is allowed to use.
+    // When empty (default), no tools are required.
+    // "required_tools": [
+    //     "example_tool_1",
+    //     "example_tool_2"
+    // ],
+
+    // *Deprecated* execution_environment: The execution environment for this role.
+    // Default: "REPL"
+    // "execution_environment": "REPL",
+
+    // model: A regex pattern to select which LLM model(s) this role can use.
+    // Upon multiple matching models, the one with the highest priority is seclected.
+    // Default: ".*" (matches any model)
+    // "model": "example-model",
+
+    // auto_approve_tools: Exact tool names that are auto-approved without user confirmation.
+    // When empty (default), all tools require approval.
+    // "auto_approve_tools": [
+    //     "example_tool_1"
+    // ],
+
+    // tool_filter: List of regex patterns that include tools visible to the agent.
+    // Only tools whose names match at least one pattern (full match) are shown to the agent.
+    // When empty (default), all tools are visible.
+    // "tool_filter": [
+    //     "example-pattern-.*"
+    // ],
+
+    // *Deprecated*: behavior_policy: Controls the role's interaction style.
+    // Default: "responsive"
+    // "behavior_policy": "responsive",
+
+    // max_truncation_retries: Maximum number of retries when output is truncated (due to max_output setting).
+    // Default: 2
+    // "max_truncation_retries": 2,
+
+    // max_output_turns: Maximum number of turns tolerated when the agent outputs text without calling any tool.
+    // Each turn must either call a tool or provide a return value to the prompting `invoke_agent` call.
+    // Default: 3
+    // "max_output_turns": 3,
+
+    // max_output_attempts: Maximum number of times the agent can retry if its output doesn't match the expected format.
+    // Higher values allow more correction attempts but increase cost.
+    // Default: 3
+    // "max_output_attempts": 3
+}

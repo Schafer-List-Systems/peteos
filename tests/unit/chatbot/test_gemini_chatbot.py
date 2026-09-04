@@ -1,9 +1,10 @@
 """Tests for GeminiChatBot._build_body."""
 
-import json
 from unittest.mock import MagicMock
 
 import pytest
+
+from peteos.utils import json
 
 from peteos.chatbot.geminichatbot import GeminiChatBot
 from peteos.chatbot.chatbotconfig import ChatBotConfig

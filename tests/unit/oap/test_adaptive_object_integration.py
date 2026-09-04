@@ -6,11 +6,12 @@ that the chatbot receives after session.materialize().
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
+
+from peteos.utils import json
 
 from peteos.chatbot import (
     ChatBotManager,
