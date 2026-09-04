@@ -1,1 +1,1 @@
-A simple test role for interactive shell testing.
+This is an example agent with no other purpose than showing how to configure one.
