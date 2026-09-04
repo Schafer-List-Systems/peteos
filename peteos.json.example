@@ -8,7 +8,7 @@
       "name": "local",
       "url": "http://localhost:3001",
       "api_type": "openai",
-      "streaming": true,
+      "streaming": false,
       "chat_endpoint": "/v1/chat/completions",
       "models_endpoint": "/models",
       "model_priorities": {
