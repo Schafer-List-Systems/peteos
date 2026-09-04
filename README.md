@@ -1,4 +1,4 @@
-# Peteos
+# PeteOS
 
 Simple Object-Agentic Programming (sOAP) — an agentic application framework that brings together object-oriented programming and AI agents.
 The easiest way to build reliable and powerful multi-agent systems.
@@ -42,6 +42,16 @@ The documentation and the examples cover more complex agentic objects with the f
 
 ## Installation
 
+Pick one way to install PeteOS:
+
+### From a Python package (PyPI / direct install)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install peteos
+```
+
 ### From source
 
 ```bash
@@ -64,20 +74,27 @@ source .venv/bin/activate
 pip install peteos-0.0.1-cp312-cp312-linux_x86_64.whl
 ```
 
-### From a Python package (PyPI / direct install)
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install peteos
-```
-
 ## Configuration
 
 Copy `peteos.json.example` to `peteos.json` and adapt it to your environment:
 
 ```bash
 cp peteos.json.example peteos.json
+```
+
+A small example for the `peteos.json` when running [ollama](https://ollama.com/download) locally with [glm-4.7](https://ollama.com/library/glm-4.7-flash:latest) installed:
+```
+{
+  "backends": [
+    {
+      "name": "ollama",
+      "url": "http://localhost:11434",
+      "model_priorities": {
+        "glm-4.7-flash:latest": 100
+      },
+      // maximum number of output tokens per LLM-API Call
+      "max_output": 16384
+    },
 ```
 
 The configuration file defines chatbot backends (LLM providers) that Peteos uses for agent reasoning:
@@ -88,7 +105,11 @@ The configuration file defines chatbot backends (LLM providers) that Peteos uses
 - **api_key** — environment variable name holding the API key (never hardcode keys)
 - **model_priorities** — maps model names to priority scores (higher = preferred)
 
-To verify that your configuration is functional run `python3 examples/00_hello_pete.py`.
+To verify that your configuration is functional run
+```
+python3 examples/00_hello_pete.py
+```
+
 
 ## Resources
 
