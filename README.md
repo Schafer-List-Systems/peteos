@@ -88,6 +88,8 @@ The configuration file defines chatbot backends (LLM providers) that Peteos uses
 - **api_key** — environment variable name holding the API key (never hardcode keys)
 - **model_priorities** — maps model names to priority scores (higher = preferred)
 
+To verify that your configuration is functional run `python3 examples/00_hello_pete.py`.
+
 ## Licensing
 
 This project is dual-licensed:
