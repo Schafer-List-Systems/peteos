@@ -415,9 +415,6 @@ issr
                 item_type = item.get("type", "")
                 if item_type == "tool_use":
                     content_parts.append(ContentPart(dict(item)))
-                elif item_type == "texttool_use":
-                    content_parts.append(ContentPart.create_text(item.get("content", "")))
-                    content_parts.append(ContentPart(dict(item)))
                 elif item_type == "text":
                     content_parts.append(ContentPart.create_text(item.get("content", "")))
                     has_text = True

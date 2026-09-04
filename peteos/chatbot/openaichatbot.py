@@ -66,6 +66,9 @@ class OpenAIChatBot(ChatBot):
     RESPONSE_TRANSLATIONS = {
         # Streaming mode (delta events)
         "choices[*].delta.role": "role",
+        # Reasoning is kept as a separate top-level field to avoid collision
+        # with content[0].content in the unified content array.
+        # It is converted to a "thinking" block in content[0] at stream end.
         "choices[*].delta.reasoning": "_reasoning",
         "choices[*].delta.content": "content[0].content",
         "choices[*].delta.finish_reason": "stop_reason",
@@ -456,13 +459,47 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
 
         OpenAI tool_calls don't have a type field (unlike Anthropic).
         The Uniform Delta Protocol expects type="tool_use" for all content array items.
+
+        When text and tool_calls collide in the same content item (hybrid),
+        split them into separate items with different indices.
         """
-        if "content" in translated and isinstance(translated["content"], list):
-            for item in translated["content"]:
-                if isinstance(item, dict):
-                    if ("name" in item and ("arguments" in item or "id" in item or len(item) == 1)) or \
-                       ("name" in item and "function" in item):
-                        item["type"] = "tool_use"
+        if "content" in translated and not isinstance(translated["content"], list):
+            return
+        items = translated.get("content", [])
+        if not items:
+            return
+
+        new_items: list[Dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                new_items.append(item)
+                continue
+
+            # Detect hybrid items: has both text field AND tool-use field
+            is_hybrid = (
+                "content" in item
+                and (
+                    ("name" in item and ("arguments" in item or "id" in item))
+                    or ("name" in item and "function" in item)
+                )
+            )
+            if not is_hybrid:
+                # Pure item — set type normally
+                if ("name" in item and ("arguments" in item or "id" in item or len(item) == 1)) or \
+                   ("name" in item and "function" in item):
+                    item["type"] = "tool_use"
+                new_items.append(item)
+            else:
+                # Hybrid item: split into text + tool_use sub-items
+                idx = item.get("index", 0)
+                text_item = {"index": idx, "type": "text", "content": item["content"]}
+                new_items.append(text_item)
+                tool_item = {k: v for k, v in item.items() if k not in ("content",)}
+                tool_item["index"] = idx + 1
+                tool_item["type"] = "tool_use"
+                new_items.append(tool_item)
+
+        translated["content"] = new_items
 
     @staticmethod
     def _set_text_types(translated: Dict[str, Any]) -> None:
@@ -526,9 +563,6 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
                     continue
                 item_type = item.get("type", "")
                 if item_type == "tool_use":
-                    content_parts.append(ContentPart(dict(item)))
-                elif item_type == "texttool_use":
-                    content_parts.append(ContentPart.create_text(item.get("content", "")))
                     content_parts.append(ContentPart(dict(item)))
                 elif item_type == "text":
                     content_parts.append(ContentPart.create_text(item.get("content", "")))

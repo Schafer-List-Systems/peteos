@@ -68,6 +68,9 @@ def merge_delta_into_target(target: Dict, delta: Any, path: str = "") -> None:
                 # If both target[idx][key] and value are dict/list, recurse
                 if key in target[idx] and isinstance(target[idx][key], (dict, list)) and isinstance(value, (dict, list)):
                     merge_delta_into_target(target[idx][key], value, current_path)
+                # Discriminator fields (e.g. "type") should overwrite, not concatenate
+                elif key == "type" and isinstance(value, str):
+                    target[idx][key] = value
                 # String: concatenate for token accumulation
                 elif isinstance(value, str):
                     target[idx][key] = target[idx].get(key, "") + value
@@ -87,6 +90,9 @@ def merge_delta_into_target(target: Dict, delta: Any, path: str = "") -> None:
                 merge_delta_into_target(target[key], value, current_path)
             elif key in target and isinstance(target[key], list) and isinstance(value, list):
                 merge_delta_into_target(target[key], value, current_path)
+            # Discriminator fields (e.g. "type") should overwrite, not concatenate
+            elif key == "type" and isinstance(value, str):
+                target[key] = value
             # String: concatenate for token accumulation
             elif isinstance(value, str):
                 target[key] = target.get(key, "") + value
