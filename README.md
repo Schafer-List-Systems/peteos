@@ -28,7 +28,7 @@ print(result)  # ['Pete', 'demonstrator']
 
 ## Key Features
 
-The documentation and the examples cover more complex Argentic objects with the following key features. 
+The documentation and the examples cover more complex agentic objects with the following key features. 
 
 - **Agentic objects** — derive from `AgenticObject` and get a thinking agent behind every instance.
 - **Inheritance** — inherit from agentic objects to refine the system prompt and extend its toolset.
