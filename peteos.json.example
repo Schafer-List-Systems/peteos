@@ -9,7 +9,7 @@
       "url": "http://localhost:3001",
       "api_type": "openai",
       "streaming": true,
-      "chat_endpoint": "/chat/completions",
+      "chat_endpoint": "/v1/chat/completions",
       "models_endpoint": "/models",
       "model_priorities": {
         "qwen/qwen3.6-35b-a3b": 1000
