@@ -65,4 +65,18 @@ class BackendConfig:
         for field_name in field_names:
             if defaults.get(field_name) is None and hasattr(cls, f"_default_{field_name}"):
                 defaults[field_name] = getattr(cls, f"_default_{field_name}")
-        return cls(**{**defaults, **{k: v for k, v in data.items() if k in field_names}})
+        merged = {**defaults, **{k: v for k, v in data.items() if k in field_names}}
+
+        # Normalize URL: strip trailing slash so concatenation with endpoint paths is safe.
+        url = merged.get("url")
+        if url is not None:
+            merged["url"] = url.rstrip("/")
+
+        # Normalize endpoint paths: ensure they start with "/" so concatenation with
+        # the base URL produces a valid absolute path (e.g. "url/v1/chat/completions").
+        for endpoint_field in ("chat_endpoint", "models_endpoint"):
+            ep = merged.get(endpoint_field)
+            if ep is not None and not ep.startswith("/"):
+                merged[endpoint_field] = "/" + ep
+
+        return cls(**merged)
