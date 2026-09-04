@@ -1,11 +1,12 @@
 """Unit tests for the persona Agent class."""
 
 import asyncio
-import json
 import uuid
 from pathlib import Path
 
 import pytest
+
+from peteos.utils import json
 
 from peteos.persona.agent import Agent
 from peteos.persona.role import Role

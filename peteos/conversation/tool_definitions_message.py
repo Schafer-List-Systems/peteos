@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 
 from peteos.conversation.message import Message
-from peteos.utils import get_logger
+from peteos.utils import get_logger, json
 
 _logger = get_logger(__name__)
 

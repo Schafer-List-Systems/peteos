@@ -1,7 +1,8 @@
 """Unit tests for ChatBotResponse and GenericChatBotResponse."""
 
-import json
 import pytest
+
+from peteos.utils import json
 
 from peteos.chatbot.chatbotresponse import ChatBotResponse, GenericChatBotResponse
 

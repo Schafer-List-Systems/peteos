@@ -1,6 +1,7 @@
-import json
 from pathlib import Path
 from typing import Callable, Optional
+
+from peteos.utils import json
 
 
 class Role:

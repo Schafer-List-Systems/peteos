@@ -1,12 +1,11 @@
 """Agent - Central hub for session management and notifications."""
 
 import asyncio
-import json
 import uuid
 from pathlib import Path
 from typing import Dict, Optional
 
-from peteos.utils import get_logger
+from peteos.utils import get_logger, json
 
 from peteos.conversation.system_prompt_message import SystemPromptMessage
 from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage

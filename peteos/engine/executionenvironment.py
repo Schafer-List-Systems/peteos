@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from peteos.utils import get_logger
+from peteos.utils import json
 
-from peteos.conversation.context import Context as ConversationContext
 from peteos.conversation.message import ContentPart, Message
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import ToolManager
