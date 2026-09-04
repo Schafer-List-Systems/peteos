@@ -1,7 +1,7 @@
 """Unit tests for Session."""
 
 import hashlib
-import json
+from peteos.utils import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import hmac
-import json
+from peteos.utils import json
 import logging
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch

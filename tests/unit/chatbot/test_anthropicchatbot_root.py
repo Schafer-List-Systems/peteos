@@ -1,7 +1,7 @@
 """Unit tests for Anthropic ChatBot implementation."""
 
-import json
 import pytest
+from peteos.utils import json
 from peteos.chatbot import AnthropicChatBotResponse
 from peteos.chatbot import AnthropicChatBot, Message, ContentPart
 from peteos.chatbot.chatbotconfig import ChatBotConfig
@@ -55,12 +55,11 @@ class TestAnthropicChatBotResponse:
     @pytest.mark.asyncio
     async def test_streaming_tool_calls(self):
         """Anthropic streaming with tool call produces content array with tool_use item."""
-        import json as _json
-        partial_json_1 = _json.dumps({"query": "1"})
+        partial_json_1 = json.dumps({"query": "1"})
         # Build SSE data with properly escaped nested JSON
-        start_event = _json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "tc_1", "name": "calculator"}})
-        delta1_event = _json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json_1}})
-        delta2_event = _json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "1"}})
+        start_event = json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "tc_1", "name": "calculator"}})
+        delta1_event = json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json_1}})
+        delta2_event = json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "1"}})
         async def mock_stream():
             yield f'data: {start_event}'
             yield f'data: {delta1_event}'

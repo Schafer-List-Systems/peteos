@@ -1,9 +1,9 @@
 import datetime
 import hashlib
-import json
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
+from peteos.utils import json
 
 
 class SessionState:

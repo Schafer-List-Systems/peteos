@@ -1,7 +1,9 @@
 """Unit tests for OpenAI ChatBot implementation."""
 
 import pytest
-from peteos.chatbot import OpenAIChatBotResponse, GenericChatBotResponse
+
+from peteos.utils import json
+from peteos.chatbot import OpenAIChatBotResponse
 from peteos.chatbot.chatbotconfig import ChatBotConfig
 from peteos.chatbot.httpclient import HTTPClient
 from peteos.chatbot.openaichatbot import OpenAIChatBot
@@ -54,7 +56,6 @@ class TestOpenAIChatBotResponse:
     @pytest.mark.asyncio
     async def test_streaming_tool_calls(self):
         """OpenAI streaming with tool call produces content array with tool_use item."""
-        import json as _json
         first_delta = {
             "choices": [{
                 "delta": {
@@ -64,7 +65,7 @@ class TestOpenAIChatBotResponse:
                         "id": "tc_1",
                         "function": {
                             "name": "calculator",
-                            "arguments": _json.dumps({"query": "1+1"})
+                            "arguments": json.dumps({"query": "1+1"})
                         }
                     }]
                 }
@@ -82,9 +83,9 @@ class TestOpenAIChatBotResponse:
         }
         finish = {"choices": [{"delta": {"finish_reason": "tool_calls"}}]}
         async def mock_stream():
-            yield f'data: {_json.dumps(first_delta)}'
-            yield f'data: {_json.dumps(second_delta)}'
-            yield f'data: {_json.dumps(finish)}'
+            yield f'data: {json.dumps(first_delta)}'
+            yield f'data: {json.dumps(second_delta)}'
+            yield f'data: {json.dumps(finish)}'
             yield "[DONE]"
 
         response = OpenAIChatBotResponse(mock_stream(), OpenAIChatBot.RESPONSE_TRANSLATIONS)

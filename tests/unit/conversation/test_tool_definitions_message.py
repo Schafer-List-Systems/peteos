@@ -1,11 +1,8 @@
 """Unit tests for ToolDefinitionsMessage."""
 
-import json
 import hashlib
+from peteos.utils import json
 
-import pytest
-
-from peteos.conversation.message import ContentPart
 from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 
 TOOL_LIST_HOOK_NAME = "tool_list"

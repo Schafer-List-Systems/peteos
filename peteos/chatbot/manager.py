@@ -1,6 +1,5 @@
 """ChatBot manager for multiple backend providers."""
 
-import json
 import re
 import socket
 from dataclasses import dataclass
@@ -13,7 +12,7 @@ from .backendprovider import BackendProvider
 from .openaiprovider import OpenAIChatBotProvider
 from .anthropicprovider import AnthropicChatBotProvider
 from .geminiprovider import GeminiChatBotProvider
-from peteos.utils import get_logger
+from peteos.utils import get_logger, json
 
 _logger = get_logger(__name__)
 

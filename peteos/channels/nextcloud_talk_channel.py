@@ -3,12 +3,12 @@
 import asyncio
 import hashlib
 import hmac
-import json
 import logging
 import uuid
 from typing import Optional
 
 from aiohttp import web
+import json
 
 from peteos.chatbot import Message, ContentPart
 from peteos.engine.channel import Channel
@@ -69,7 +69,8 @@ class NextcloudTalkChannel(Channel):
             KeyError: If required fields are missing.
         """
         with open(config_file, "r") as f:
-            config = json.load(f)
+            from peteos.utils import json as _json
+            config = _json.load(f)
         config.setdefault("default_role", "test")
         config.setdefault("host", "0.0.0.0")
         config.setdefault("port", 8766)

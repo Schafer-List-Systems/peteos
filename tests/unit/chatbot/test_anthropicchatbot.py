@@ -1,16 +1,14 @@
 """Unit tests for AnthropicChatBot implementation."""
 
-import json as _json
-
 import pytest
+
+from peteos.utils import json
 
 from peteos.chatbot.anthropicchatbot import AnthropicChatBot, AnthropicChatBotResponse
 from peteos.chatbot.chatbotconfig import ChatBotConfig
 from peteos.chatbot.httpclient import HTTPClient
 from peteos.conversation.context import Context
 from peteos.conversation.message import Message, ContentPart
-from peteos.conversation.system_prompt_message import SystemPromptMessage
-from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 
 
 def _make_context(messages: list[Message]) -> Context:
@@ -67,10 +65,10 @@ class TestAnthropicChatBotResponse:
     @pytest.mark.asyncio
     async def test_streaming_tool_calls(self):
         """Anthropic streaming with tool call produces content array with tool_use."""
-        partial_json_1 = _json.dumps({"query": "1"})
-        start_event = _json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "tc_1", "name": "calculator"}})
-        delta1_event = _json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json_1}})
-        delta2_event = _json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "1"}})
+        partial_json_1 = json.dumps({"query": "1"})
+        start_event = json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "tc_1", "name": "calculator"}})
+        delta1_event = json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json_1}})
+        delta2_event = json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "1"}})
         async def mock_stream():
             yield f'data: {start_event}'
             yield f'data: {delta1_event}'
@@ -159,7 +157,7 @@ class TestAnthropicChatBotResponse:
         assert response.data["content"][0]["type"] == "tool_use"
         assert response.data["content"][0]["call_id"] == "tc_1"
         assert response.data["content"][0]["name"] == "calculator"
-        assert response.data["content"][0]["arguments"] == _json.dumps({"query": "1+1"})
+        assert response.data["content"][0]["arguments"] == json.dumps({"query": "1+1"})
 
     @pytest.mark.asyncio
     async def test_role_default_to_assistant(self):

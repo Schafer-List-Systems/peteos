@@ -1,14 +1,13 @@
 """ReadStdoutChannel - Read stdout from a process and forward matching lines to a runner."""
 
 import asyncio
-import json
 import re
 import uuid
 from typing import Optional
 
 from peteos.chatbot import Message, ContentPart
 from peteos.engine.channel import Channel
-from peteos.utils import get_logger, truncate
+from peteos.utils import get_logger, json, truncate
 
 _logger = get_logger(__name__)
 

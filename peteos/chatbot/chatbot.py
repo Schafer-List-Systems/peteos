@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from peteos.utils import get_logger
+from peteos.utils import json
 from .httpclient import HTTPClient
 from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse
@@ -121,8 +122,6 @@ class ChatBot(ABC):
         Returns:
             An async callable ``(body, caller_headers) -> response``.
         """
-        import json
-
         headers_json = json.dumps(secure_headers)
 
         _code = f"""
@@ -165,8 +164,6 @@ async def executor(body, caller_headers):
             An async callable ``(body, caller_headers) ->
             AsyncGenerator[str, None]``.
         """
-        import json
-
         headers_json = json.dumps(secure_headers)
 
         _code = f"""
