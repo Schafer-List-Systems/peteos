@@ -3,15 +3,9 @@
 
 Use agent reasoning to drive decisions in simulations — game NPCs, robots,
 or any state-driven system.
-
-Usage:
-    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/02_simulation_decision_making.py \
-        http://localhost:8080
 """
 
-import sys
 from dataclasses import dataclass
-
 from peteos import AgenticObject, Error, tool
 
 
@@ -124,17 +118,6 @@ class NPC(AgenticObject):
 
 async def main():
     """Set up an Agent and invoke it on an NPC for decision making."""
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <backend-url>")
-        sys.exit(1)
-    backend_url = sys.argv[1]
-
-    # --- Set up peteos components ---
-    from peteos.chatbot.manager import ChatBotManager
-
-    chatbot_manager = ChatBotManager(timeout=None)
-    await chatbot_manager.add_backend("local", backend_url)
-
     npc = NPC()
 
     # --- Invoke the agent ---

@@ -3,16 +3,9 @@
 
 Allow agents to create new agentic objects dynamically and add them to
 collections via sandboxed code execution.
-
-Usage:
-    PYTHONPATH=/home/frygge/projects/private/peteos python examples/oap/03_dynamic_object_creation.py \
-        http://localhost:8080
 """
 
-import sys
-
 from dataclasses import dataclass
-
 from peteos import AgenticObject, Error, agentic_object, tool
 
 
@@ -92,17 +85,6 @@ class SetupResult:
 
 async def main():
     """Set up an Agent and invoke it to create inventory items."""
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <backend-url>")
-        sys.exit(1)
-    backend_url = sys.argv[1]
-
-    # --- Set up peteos components ---
-    from peteos.chatbot.manager import ChatBotManager
-
-    chatbot_manager = ChatBotManager(timeout=None)
-    await chatbot_manager.add_backend("local", backend_url)
-
     # --- Create OAP object (Agent is auto-created in __init__) ---
     manager = InventoryManager()
 
