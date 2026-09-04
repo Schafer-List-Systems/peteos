@@ -66,6 +66,9 @@ class OpenAIChatBot(ChatBot):
     RESPONSE_TRANSLATIONS = {
         # Streaming mode (delta events)
         "choices[*].delta.role": "role",
+        # Reasoning is kept as a separate top-level field to avoid collision
+        # with content[0].content in the unified content array.
+        # It is converted to a "thinking" block in content[0] at stream end.
         "choices[*].delta.reasoning": "_reasoning",
         "choices[*].delta.content": "content[0].content",
         "choices[*].delta.finish_reason": "stop_reason",
@@ -526,9 +529,6 @@ class OpenAIChatBotResponse(GenericChatBotResponse):
                     continue
                 item_type = item.get("type", "")
                 if item_type == "tool_use":
-                    content_parts.append(ContentPart(dict(item)))
-                elif item_type == "texttool_use":
-                    content_parts.append(ContentPart.create_text(item.get("content", "")))
                     content_parts.append(ContentPart(dict(item)))
                 elif item_type == "text":
                     content_parts.append(ContentPart.create_text(item.get("content", "")))
