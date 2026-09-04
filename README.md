@@ -11,6 +11,9 @@ No external memory stores or bolt-on intelligence — the object itself is the c
 After installing and configuring Peteos, you can build and use agentic objects like the following. 
 
 ```python
+import asyncio
+from peteos import AgenticObject, tool
+
 class Example(AgenticObject):
     """You are Pete, a concise assistant."""
     def __init__(self, job: str):
@@ -21,9 +24,12 @@ class Example(AgenticObject):
     def get_job(self) -> str:
         return self._job
 
-pete = Example("demonstrator")
-result = await pete.invoke_agent("Hello, what's your name and job?", output_schema=list[str])
-print(result)  # ['Pete', 'demonstrator']
+async def main():
+    pete = Example("demonstrator")
+    result = await pete.invoke_agent("Hello, what's your name and job?", output_schema=list[str])
+    print(result)  # ['Pete', 'demonstrator']
+
+asyncio.run(main())
 ```
 
 ## Key Features
@@ -125,7 +131,7 @@ python3 examples/00_hello_pete.py
 This project is dual-licensed:
 
 - **Non-commercial use** (including evaluation of commercial use cases) is free
-  under the license in the `LICENSE` file.
+  under the license in the [LICENSE](LICENSE) file.
 - **Commercial use** (production, products, services, SaaS, etc.) requires a
   commercial license from the Schäfer List Systems GmbH.
 
