@@ -1,7 +1,0 @@
-{
-    "command": ["journalctl", "-f"],
-    "pattern": ".*",
-    "prefix": "*Unfiltered messages (no matching exclude pattern):*\n",
-    "patterns_file": "apps/log_analyzer/config/exclude_patterns.json",
-    "process_terminate_timeout": 5.0
-}

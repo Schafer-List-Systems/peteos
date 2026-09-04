@@ -1,7 +1,0 @@
-{
-    "model": ".*",
-    "required_tools": ["mute_router", "unmute_router", "add_exclude_pattern", "remove_exclude_pattern", "list_exclude_patterns"],
-    "auto_approve_tools": ["mute_router", "unmute_router", "proceed", "update_topic", "fold_topic", "unfold_topic", "add_exclude_pattern", "remove_exclude_pattern", "list_exclude_patterns"],
-    "tool_filter": ["mute_router", "unmute_router", "proceed", "update_topic", "fold_topic", "unfold_topic", "add_exclude_pattern", "remove_exclude_pattern", "list_exclude_patterns"],
-    "behavior_policy": "responsive"
-}

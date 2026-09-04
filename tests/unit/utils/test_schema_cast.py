@@ -561,3 +561,79 @@ class TestSchemaDescription:
 
         _, doc_entries = get_schema_description(WithDoc)
         assert doc_entries == [("WithDoc", "A documented schema.")]
+
+    def test_fixed_tuple_description(self):
+        result = get_schema_description(tuple[str, int, float, bool])
+        assert result[0] == "tuple[str, int, float, bool]"
+
+    def test_variable_tuple_description(self):
+        result = get_schema_description(tuple[str, ...])
+        assert result[0] == "tuple[str, ...]"
+
+    def test_nested_tuple_in_dataclass_description(self):
+        @dataclass
+        class Row:
+            coords: tuple[float, float]
+
+        result = get_schema_description(Row)
+        assert result is not None
+        schema_str, _ = result
+        assert "tuple[float, float]" in schema_str
+
+
+class TestTupleCast:
+    """Tests for _recursive_cast with tuple schemas."""
+
+    def test_fixed_tuple_scalars(self):
+        result = _recursive_cast(["a", 42, 3.14, True], tuple[str, int, float, bool])
+        assert result == ("a", 42, 3.14, True)
+        assert isinstance(result, tuple)
+
+    def test_variable_tuple(self):
+        result = _recursive_cast([1, 2, 3, 4], tuple[int, ...])
+        assert result == (1, 2, 3, 4)
+        assert isinstance(result, tuple)
+
+    def test_variable_tuple_empty(self):
+        result = _recursive_cast([], tuple[str, ...])
+        assert result == ()
+
+    def test_nested_tuple_in_dataclass(self):
+        @dataclass
+        class Point:
+            coords: tuple[float, float]
+
+        result = _recursive_cast({"coords": [1.5, 2.5]}, Point)
+        assert isinstance(result, Point)
+        assert result.coords == (1.5, 2.5)
+        assert isinstance(result.coords, tuple)
+
+    def test_fixed_tuple_wrong_length_raises(self):
+        with pytest.raises(ValueError, match="expected tuple of length 2"):
+            _recursive_cast([1, 2, 3], tuple[int, int])
+
+    def test_fixed_tuple_not_list_raises(self):
+        with pytest.raises(ValueError, match="expected tuple"):
+            _recursive_cast("not a list", tuple[str, int])
+
+    def test_variable_tuple_wrong_element_type(self):
+        with pytest.raises(ValueError):
+            _recursive_cast([1, "two", 3], tuple[int, ...])
+
+    def test_parse_data_fixed_tuple(self):
+        result = parse_data('["a", 42, 3.14]', tuple[str, int, float])
+        assert result == ("a", 42, 3.14)
+        assert isinstance(result, tuple)
+
+    def test_parse_data_variable_tuple(self):
+        result = parse_data('[1, 2, 3]', tuple[int, ...])
+        assert result == (1, 2, 3)
+
+    def test_parse_data_nested_tuple_in_dataclass(self):
+        @dataclass
+        class Pair:
+            values: tuple[int, int]
+
+        result = parse_data('{"values": [10, 20]}', Pair)
+        assert result.values == (10, 20)
+        assert isinstance(result.values, tuple)

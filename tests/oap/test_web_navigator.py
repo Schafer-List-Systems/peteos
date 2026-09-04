@@ -1,10 +1,6 @@
-"""Integration tests for WebNavigator OAP.
+"""OAP tests for WebNavigator.
 
-These tests require a live LLM backend:
-    export OAP_BACKEND_URL=http://localhost:3001
-    pytest tests/oap/test_web_navigator.py -v
-
-Runs via the _oap_backend fixture from conftest.py.
+These tests require a live LLM backend configured in peteos.json.
 """
 
 from __future__ import annotations

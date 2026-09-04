@@ -1,9 +1,0 @@
-{
-    "backends": [
-        {
-            "name": "example-backend",
-            "url": "http://localhost:8000",
-            "api_type": "anthropic"
-        }
-    ]
-}

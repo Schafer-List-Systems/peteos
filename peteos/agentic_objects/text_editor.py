@@ -74,7 +74,10 @@ class TextEditor(AgenticObject):
         """Write lines to disk, protecting against external file modifications via mtime check."""
         if not self._file_path:
             return "Error: no file loaded. Use load() first."
-        current_mtime = os.path.getmtime(self._file_path)
+        try:
+            current_mtime = os.path.getmtime(self._file_path)
+        except FileNotFoundError:
+            return f"Error: file '{self._file_path}' no longer exists."
         if self._file_mtime is None:
             return "Error: internal mtime missing — could not verify file safety."
         if current_mtime != self._file_mtime:
