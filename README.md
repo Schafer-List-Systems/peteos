@@ -82,7 +82,7 @@ Copy `peteos.json.example` to `peteos.json` and adapt it to your environment:
 cp peteos.json.example peteos.json
 ```
 
-A small example for the `peteos.json` when running ollama locally with glm-4.7 installed:
+A small example for the `peteos.json` when running [ollama](https://ollama.com/download) locally with [glm-4.7](https://ollama.com/library/glm-4.7-flash:latest) installed:
 ```
 {
   "backends": [
