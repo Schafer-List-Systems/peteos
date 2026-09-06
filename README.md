@@ -4,6 +4,7 @@ Simple Object-Agentic Programming (sOAP) — an agentic application framework th
 The easiest way to build reliable and powerful multi-agent systems.
 
 Peteos lets you build **agentic objects**: ordinary Python objects that can think, decide, and act on their own.
+The agent can access and modify the object's own state through its tools, enabling self‑aware behavior.
 No external memory stores or bolt-on intelligence — the object itself is the center of persistence and agency.
 
 ## Quick Start
@@ -31,6 +32,7 @@ async def main():
 
 asyncio.run(main())
 ```
+This example shows how an agentic object can reason about a query and use its own tool to access its internal state, combining AI reasoning with ordinary object behavior.
 
 ## Key Features
 
@@ -48,36 +50,12 @@ The documentation and the examples cover more complex agentic objects with the f
 
 ## Installation
 
-Pick one way to install PeteOS:
-
-### From a Python package (PyPI / direct install)
+Install PeteOS via PyPI:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install peteos
-```
-
-### From source
-
-```bash
-git clone --recurse-submodules https://github.com/yourusername/peteos.git
-cd peteos
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
-### From a distribution package
-
-Download a `.tar.gz` archive and extract it, then install the wheel inside:
-
-```bash
-tar xzf peteos-0.0.1.tar.gz
-cd peteos-0.0.1
-python -m venv .venv
-source .venv/bin/activate
-pip install peteos-0.0.1-cp312-cp312-linux_x86_64.whl
 ```
 
 ## Configuration
@@ -100,7 +78,9 @@ A small example for the `peteos.json` when running [ollama](https://ollama.com/d
       },
       // maximum number of output tokens per LLM-API Call
       "max_output": 16384
-    },
+    }
+  ]
+}
 ```
 
 The configuration file defines chatbot backends (LLM providers) that Peteos uses for agent reasoning:
