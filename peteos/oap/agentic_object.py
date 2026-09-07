@@ -762,8 +762,7 @@ class AgenticObject:
                         persistent_thread_id,
                         elapsed,
                     )
-                    final_result = Error(f"Agent did not produce output within {timeout}s timeout")
-                    break
+                    raise TimeoutError(f"Agent did not produce output within {timeout}s timeout")
 
                 _logger.debug("invoke_agent[%s]: queuing reminder (iter %d)", self.__class__.__name__, iteration)
                 await runner.queue_message(Message.create(
