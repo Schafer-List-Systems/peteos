@@ -637,3 +637,36 @@ class TestTupleCast:
         result = parse_data('{"values": [10, 20]}', Pair)
         assert result.values == (10, 20)
         assert isinstance(result.values, tuple)
+
+    def test_direct_tuple_input_fixed_length(self):
+        """Test that direct tuple input (not from JSON) works for fixed-length tuples."""
+        result = _recursive_cast((10, 20), tuple[int, int])
+        assert result == (10, 20)
+        assert isinstance(result, tuple)
+
+    def test_direct_tuple_input_variable_length(self):
+        """Test that direct tuple input (not from JSON) works for variable-length tuples."""
+        result = _recursive_cast((1, 2, 3, 4), tuple[int, ...])
+        assert result == (1, 2, 3, 4)
+        assert isinstance(result, tuple)
+
+    def test_direct_tuple_input_nested_in_dataclass(self):
+        """Test that direct tuple input works for nested tuples in dataclasses."""
+        @dataclass
+        class Point:
+            coords: tuple[float, float]
+
+        result = _recursive_cast({"coords": (1.5, 2.5)}, Point)
+        assert isinstance(result, Point)
+        assert result.coords == (1.5, 2.5)
+        assert isinstance(result.coords, tuple)
+
+    def test_direct_tuple_input_wrong_length_raises(self):
+        """Test that wrong length direct tuple input raises appropriate error."""
+        with pytest.raises(ValueError, match="expected tuple of length 2"):
+            _recursive_cast((1, 2, 3), tuple[int, int])
+
+    def test_direct_tuple_input_wrong_element_type_raises(self):
+        """Test that wrong element type in direct tuple input raises appropriate error."""
+        with pytest.raises(ValueError):
+            _recursive_cast((1, "two", 3), tuple[int, ...])
