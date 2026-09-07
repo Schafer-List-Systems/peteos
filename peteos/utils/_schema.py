@@ -419,8 +419,12 @@ def _recursive_cast(data: Any, schema: type) -> Any:
 
     # Tuple types: fixed-size or variable-length (str, ...)
     if origin is tuple and args:
-        if not isinstance(data, list):
+        # Accept both list (from JSON parsing) and tuple (direct tool calls)
+        if not isinstance(data, (list, tuple)):
             raise ValueError(f"expected tuple, got {type(data).__name__}")
+        # Convert tuple to list for uniform processing
+        if isinstance(data, tuple):
+            data = list(data)
         if len(args) == 2 and args[1] is Ellipsis:
             # Variable-length: tuple[T, ...]
             return tuple(_recursive_cast(item, args[0]) for item in data)
