@@ -735,12 +735,13 @@ class AgenticObject:
                     except ValueError as e:
                         _logger.warning("invoke_agent[%s]: produced answer failed to parse: %s", self.__class__.__name__, e)
                         final_result = Error(f"Agent produced answer that failed schema validation: {e}")
-                    break
+                    return final_result
+
                 error_msg = runner.state.get("_oap_error")
                 if error_msg is not None:
                     _logger.debug("invoke_agent[%s]: error found", self.__class__.__name__)
                     final_result = Error(error_msg)
-                    break
+                    return final_result
 
                 max_turns = self._oap_role.max_output_turns
                 if iteration > max_turns:
@@ -752,7 +753,7 @@ class AgenticObject:
                         max_turns,
                     )
                     final_result = Error(f"Agent exceeded max output turns ({max_turns}) without producing output or error")
-                    break
+                    return final_result
 
                 elapsed = time.time() - start_time
                 if timeout is not None and elapsed > timeout:
