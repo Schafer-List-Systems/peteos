@@ -99,12 +99,12 @@ python3 examples/00_hello_pete.py
 
 ## Resources
 
-- [Getting Started](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/getting-started.md) — installation and first example
-- [Introduction](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/introduction.md) — the sOAP paradigm
-- [Concepts](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/concepts/index.md) — composition, invocation, state, testing
-- [Reference](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/reference/index.md) — API docs, agentic objects
-- [Best Practices](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/best-practices/index.md) — Best practices when using PeteOS
-- [Examples](https://github.com/Schafer-List-Systems/peteos_docs/tree/main/examples) — Examples show-casing some features
+- [Getting Started](https://github.com/Schafer-List-Systems/peteos_docs/blob/0.3.x/getting-started.md) — installation and first example
+- [Introduction](https://github.com/Schafer-List-Systems/peteos_docs/blob/0.3.x/introduction.md) — the sOAP paradigm
+- [Concepts](https://github.com/Schafer-List-Systems/peteos_docs/blob/0.3.x/concepts/index.md) — composition, invocation, state, testing
+- [Reference](https://github.com/Schafer-List-Systems/peteos_docs/blob/0.3.x/reference/index.md) — API docs, agentic objects
+- [Best Practices](https://github.com/Schafer-List-Systems/peteos_docs/blob/0.3.x/best-practices/index.md) — Best practices when using PeteOS
+- [Examples](https://github.com/Schafer-List-Systems/peteos_docs/tree/0.3.x/examples) — Examples show-casing some features
 
 ## Licensing
 
