@@ -99,12 +99,12 @@ python3 examples/00_hello_pete.py
 
 ## Resources
 
-- [Getting Started](docs/getting-started.md) — installation and first example
-- [Introduction](docs/introduction.md) — the sOAP paradigm
-- [Concepts](docs/concepts/index.md) — composition, invocation, state, testing
-- [Reference](docs/reference/index.md) — API docs, agentic objects
-- [Best Practices](docs/best-practices/index.md) — Best practices when using PeteOS
-- [Examples](docs/examples/) — Examples show-casing some features
+- [Getting Started](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/getting-started.md) — installation and first example
+- [Introduction](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/introduction.md) — the sOAP paradigm
+- [Concepts](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/concepts/index.md) — composition, invocation, state, testing
+- [Reference](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/reference/index.md) — API docs, agentic objects
+- [Best Practices](https://raw.githubusercontent.com/Schafer-List-Systems/peteos_docs/main/best-practices/index.md) — Best practices when using PeteOS
+- [Examples](https://github.com/Schafer-List-Systems/peteos_docs/tree/main/examples) — Examples show-casing some features
 
 ## Licensing
 
