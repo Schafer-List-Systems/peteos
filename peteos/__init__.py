@@ -12,6 +12,7 @@ from peteos.oap import (
     agentic_object,
     tool,
 )
+from peteos.oap.decorators import sandbox
 
 __all__ = [
     "AgenticObject",
@@ -19,6 +20,7 @@ __all__ = [
     "Error",
     "agentic_object",
     "tool",
+    "sandbox",
 ]
 
 # Bootstrap backends and roles from peteos.json at import time.
