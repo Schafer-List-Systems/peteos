@@ -625,10 +625,11 @@ class AgenticObject:
             except ValueError:
                 pass  # key may already exist from a prior invoke_agent call on the same persistent session
 
-        # Store invocation hooks on the session
+        # Store invocation hooks on the session (clear first, then merge)
+        session._invocation_hooks = {}
         if hooks is not None:
-            session.invocation_hooks = hooks
-            _logger.debug("invoke_agent[%s]: stored %d hooks on session %s", self.__class__.__name__, len(hooks), session.uuid)
+            session._invocation_hooks.update(hooks)
+        _logger.debug("invoke_agent[%s]: stored %d hooks on session %s", self.__class__.__name__, len(session._invocation_hooks), session.uuid)
 
         # Fire on_invoke hooks — first non-None string prevents invocation
         _invocation_prevented: str | None = None
@@ -693,8 +694,8 @@ class AgenticObject:
                     ))
                 return None
 
-            runner.execution_environment.register_hook(
-                "after_step", _on_step_done, runner
+            session._invocation_hooks.setdefault("after_step", []).append(
+                lambda status: _on_step_done(runner, status)
             )
             _logger.debug("invoke_agent[%s]: after_step hook registered", self.__class__.__name__)
 

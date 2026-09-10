@@ -149,71 +149,6 @@ class ExecutionEnvironment:
         self.tool_failure_policy = tool_failure_policy
         self._groups: dict[str, ToolCallGroup] = {}  # group_id -> ToolCallGroup
         self._foreground_group: ToolCallGroup | None = None
-        self._hooks: dict[str, list[Callable]] = {
-            "before_send_to_chatbot": [],
-            "after_step": [],
-            "after_message_append": [],
-            "before_notification_publish": [],
-            "before_tool_execution": [],
-            "after_tool_execution": [],
-            "on_truncation_exhausted": [],
-        }
-
-    # ------------------------------------------------------------------ #
-    # Hook management
-    # ------------------------------------------------------------------ #
-
-    def register_hook(self, hook_point: str, callback: Callable, *args: Any) -> None:
-        """Register a hook callback for a specific hook point."""
-        if hook_point not in self._hooks:
-            raise ValueError(f"Unknown hook point: {hook_point}")
-        self._hooks[hook_point].append(_partial(callback, *args))
-
-    def deregister_hook(self, hook_point: str, callback: Callable) -> None:
-        """Deregister a specific hook callback."""
-        if hook_point not in self._hooks:
-            raise ValueError(f"Unknown hook point: {hook_point}")
-        for hook in list(self._hooks[hook_point]):
-            if hasattr(hook, 'func') and hook.func == callback:
-                self._hooks[hook_point].remove(hook)
-                return
-            elif hook == callback:
-                self._hooks[hook_point].remove(hook)
-                return
-        raise ValueError(f"Callback not found for hook point '{hook_point}'")
-
-    def deregister_all_hooks(self, hook_point: str) -> None:
-        """Deregister all hooks for a specific hook point."""
-        if hook_point not in self._hooks:
-            raise ValueError(f"Unknown hook point: {hook_point}")
-        self._hooks[hook_point].clear()
-
-    async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
-        """Call all hooks for *hook_point*, merging results by severity."""
-        if hook_point not in self._hooks:
-            raise ValueError(f"Unknown hook point: {hook_point}")
-        merged: Any | None = None
-        from peteos.engine.exec_status import ExecStatus, _merge_exec_status
-        for callback in self._hooks[hook_point]:
-            result = callback(*args)
-            if asyncio.iscoroutine(result):
-                result = await result
-            if isinstance(result, ExecStatus):
-                merged = _merge_exec_status(merged, result)
-        return merged
-
-    async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
-        """Call all hooks for *hook_point*, collecting results and denying on the first deny."""
-        if hook_point not in self._hooks:
-            raise ValueError(f"Unknown hook point: {hook_point}")
-        first_deny: Any | None = None
-        for callback in self._hooks[hook_point]:
-            result = callback(*args)
-            if asyncio.iscoroutine(result):
-                result = await result
-            if first_deny is None and isinstance(result, tuple) and len(result) == 2 and result[0] is False:
-                first_deny = result
-        return first_deny
 
     # ------------------------------------------------------------------ #
     # Foreground group management
@@ -324,7 +259,7 @@ class ExecutionEnvironment:
     # Result injection — EE owns result message and ContentPart injection.
     # ------------------------------------------------------------------ #
 
-    async def execute_and_inject(self, tool_call: ContentPart, runner: "Runner | None" = None) -> tuple[str | None, bool]:
+    async def execute_and_inject(self, tool_call: ContentPart, runner: "Runner") -> tuple[str | None, bool]:
         """Execute a tool and update the matching placeholder in the group's result message.
 
         The result message with placeholders is pre-created when the tool group
@@ -334,7 +269,7 @@ class ExecutionEnvironment:
 
         Args:
             tool_call: ContentPart with type "tool_use".
-            runner: Optional runner to inject as ``runner`` kwarg into tool calls.
+            runner: Runner to inject as ``runner`` kwarg into tool calls.
 
         Returns:
             Tuple of (result_string_or_None, success_bool).
@@ -343,7 +278,7 @@ class ExecutionEnvironment:
         if group is None:
             raise RuntimeError("No foreground tool call group")
 
-        result_str, success = await self.execute_tool(tool_call, runner=runner)
+        result_str, success = await self.execute_tool(tool_call, runner)
         if result_str is None:
             return None, success
 
@@ -360,7 +295,7 @@ class ExecutionEnvironment:
     # Tool execution — standalone
     # ------------------------------------------------------------------ #
 
-    async def execute_tool(self, tool_call: ContentPart, runner: "Runner | None" = None) -> tuple[str | None, bool]:
+    async def execute_tool(self, tool_call: ContentPart, runner: "Runner") -> tuple[str | None, bool]:
         """Execute a single tool call.
 
         Looks up the tool by name, casts arguments, fires the
@@ -392,7 +327,7 @@ class ExecutionEnvironment:
         except ValueError as e:
             _logger.debug("Tool %s argument coercion failed: %s", tool_name, e)
             return f"Error: {e}", False
-        hook_result = await self.call_hooks_deny("before_tool_execution", tool_call)
+        hook_result = await runner.call_hooks_deny("before_tool_execution", tool_call)
         if hook_result is not None:
             allow, message = hook_result
             if not allow:
@@ -404,11 +339,11 @@ class ExecutionEnvironment:
             if asyncio.iscoroutine(result):
                 result = await result
             if result is None:
-                await self.call_hooks("after_tool_execution", tool_call, None, True)
+                await runner.call_hooks("after_tool_execution", tool_call, None, True)
                 _logger.debug("Tool %s returned None (fire-and-forget)", tool_name)
                 return None, True
             result_str = str(result)
-            await self.call_hooks("after_tool_execution", tool_call, result_str, True)
+            await runner.call_hooks("after_tool_execution", tool_call, result_str, True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
             return result_str, True
         except Exception as e:
@@ -417,17 +352,6 @@ class ExecutionEnvironment:
 
 
 # ------------------------------------------------------------------ #
-# Utility: _partial — lightweight replacement for functools.partial
-# ------------------------------------------------------------------ #
-
-def _partial(func: Callable, *args: Any) -> Callable:
-    """Return a callable that prepends *args* when invoked."""
-    def wrapper(*extra: Any, **kwargs: Any) -> Any:
-        return func(*args, *extra, **kwargs)
-    wrapper.func = func
-    return wrapper
-
-
 # ------------------------------------------------------------------ #
 # Type casting for tool arguments
 # ------------------------------------------------------------------ #
