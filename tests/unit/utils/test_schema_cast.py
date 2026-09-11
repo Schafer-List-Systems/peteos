@@ -670,3 +670,71 @@ class TestTupleCast:
         """Test that wrong element type in direct tuple input raises appropriate error."""
         with pytest.raises(ValueError):
             _recursive_cast((1, "two", 3), tuple[int, ...])
+
+
+class TestUnionWithScalarCoercion:
+    """Regression tests: union types with None coerce strings to the non-None
+    type, but only when no exact type match is available. Exact match is
+    preferred — if the data's type already matches a union member, it is
+    returned as-is without coercion."""
+
+    def test_int_none_coerces_string_to_int(self):
+        """LLM passes "42" but schema is int | None → should become 42."""
+        assert _recursive_cast("42", int | None) == 42
+        assert isinstance(_recursive_cast("42", int | None), int)
+
+    def test_int_none_coerces_float_string_to_int(self):
+        """LLM passes "3.14" but int | None schema → should raise (not coerce)."""
+        with pytest.raises(ValueError, match="does not match any type in union"):
+            _recursive_cast("3.14", int | None)
+
+    def test_int_none_keeps_none(self):
+        """None stays None regardless of schema."""
+        assert _recursive_cast(None, int | None) is None
+
+    def test_int_none_keeps_int(self):
+        """int passes through unchanged."""
+        assert _recursive_cast(42, int | None) == 42
+
+    def test_float_none_coerces_numeric_string(self):
+        """String numeric values are coerced to float in float | None."""
+        result = _recursive_cast("3.14", float | None)
+        assert result == 3.14
+        assert isinstance(result, float)
+
+    def test_str_none_rejects_incompatible_type(self):
+        """For str | None, int is not compatible with str and raises."""
+        with pytest.raises(ValueError, match="does not match any type in union"):
+            _recursive_cast(42, str | None)
+
+    def test_bool_none_coerces_string(self):
+        """String 'true'/'false' coerced to bool in bool | None."""
+        assert _recursive_cast("true", bool | None) is True
+        assert _recursive_cast("false", bool | None) is False
+
+    def test_int_none_rejects_non_numeric_string(self):
+        """Non-numeric string in int | None raises."""
+        with pytest.raises(ValueError, match="does not match any type in union"):
+            _recursive_cast("hello", int | None)
+
+    def test_parse_data_union_scalar_coerces(self):
+        """parse_data entry point also handles this (calls _recursive_cast)."""
+        assert parse_data("42", int | None) == 42
+
+    def test_union_multiple_scalars_preserves_exact_type(self):
+        """str | int | None: exact type match is checked before coercion.
+        An int stays int (not coerced to str). A string stays string."""
+        # String data: exact match on str — no coercion
+        result = _recursive_cast("hello", str | int | None)
+        assert result == "hello"
+        assert isinstance(result, str)
+        # String that looks numeric: exact match on str still wins — stays string
+        result = _recursive_cast("42", str | int | None)
+        assert result == "42"
+        assert isinstance(result, str)
+        # Actual int: exact match on int — not coerced to str
+        result = _recursive_cast(42, str | int | None)
+        assert result == 42
+        assert isinstance(result, int)
+        # None stays None
+        assert _recursive_cast(None, str | int | None) is None
