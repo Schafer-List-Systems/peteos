@@ -428,7 +428,7 @@ class TestRunnerStepToolCalls:
         assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
 
     async def test_tool_denied_by_hook(self, chatbot_manager_mock):
-        """Auto-approved tool denied by hook → step returns CONTINUE (tool_use-only response)."""
+        """Auto-approved tool denied by before_tool_execution hook → record denied."""
         role = MagicMock()
         role.name = "test-role"
         role.model = "test-model"
@@ -452,6 +452,7 @@ class TestRunnerStepToolCalls:
         session.auto_approve_tools = list(role.auto_approve_tools)
         session.tool_failure_policy = "abort"
         session.active_context = ctx
+        session._invocation_hooks = {}
 
         chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
 
@@ -460,13 +461,24 @@ class TestRunnerStepToolCalls:
         agent._tool_manager = tm
         agent.role = role
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
-        runner.execution_environment.register_hook("before_tool_execution", lambda tc: (False, "denied by hook"))
+
+        def deny_hook(tool_call):
+            return (False, "denied by hook")
+
+        session._invocation_hooks["before_tool_execution"] = [deny_hook]
 
         status, _ = await runner.step()
         assert status is ExecStatus.CONTINUE
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
         assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
+        record = fg.records[0]
+
+        await runner._handle_tool_group()
+
+        assert record.execution_status == ToolExecutionStatus.EXECUTED
+        assert record.execution_result == "denied by hook"
+        tool_mock.execute.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -694,3 +706,159 @@ class TestRunnerOnToolCallHook:
         # The hook denies 'add', remaining tools in group should also be denied
         assert record_add.approval_status == ToolApprovalStatus.DENIED
         assert record_sub.approval_status == ToolApprovalStatus.DENIED
+
+
+# ---------------------------------------------------------------------------
+# Runner execute_and_inject
+# ---------------------------------------------------------------------------
+
+def _make_runner_with_exec_env(auto_approve_tools=None):
+    """Build a runner with execution environment for execute_and_inject tests."""
+    role = MagicMock()
+    role.name = "test-role"
+    role.model = "test-model"
+    role.behavior_policy = "responsive"
+    role.auto_approve_tools = auto_approve_tools or []
+    role.tool_filter = []
+
+    tm = MagicMock()
+    tool = MagicMock()
+    tool.name = "add"
+    tool.func = lambda a, b: a + b
+    tool.parameters = {"a": {"type": "int"}, "b": {"type": "int"}}
+    tool.execute = MagicMock(return_value=5)
+    tm.get_tool.return_value = tool
+
+    ctx = MagicMock()
+    ctx.messages = []
+
+    session = MagicMock()
+    session.role = role
+    session.tool_manager = tm
+    session.auto_approve_tools = list(role.auto_approve_tools)
+    session.tool_failure_policy = "abort"
+    session.active_context = ctx
+    session._invocation_hooks = {}
+
+    agent = MagicMock()
+    agent.get_session.return_value = session
+    agent._tool_manager = tm
+    agent.role = role
+
+    chatbot = _make_mock_chatbot(content=[{"type": "text", "content": "done"}])
+    runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+    runner._execution_environment = ExecutionEnvironment(
+        tool_manager=tm, role=role, auto_approve_tools=list(role.auto_approve_tools),
+        tool_failure_policy="abort",
+    )
+    return runner, tm, tool
+
+
+class TestRunnerExecuteAndInject:
+    """Test execute_and_inject via runner's execution environment."""
+
+    async def test_execute_and_inject_creates_result_message(self):
+        """execute_and_inject creates result message with correct content."""
+        runner, tm, tool = _make_runner_with_exec_env()
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        result_str, success = await runner.execution_environment.execute_and_inject(
+            ContentPart.create_tool_use("tc1", "add", "{}"), runner
+        )
+        assert success is True
+        assert result_str == "5"
+        fg = runner.execution_environment.get_foreground_group()
+        assert fg.result_message is not None
+        cp = fg.result_message.raw_dict["content"][0]
+        assert cp["type"] == "tool_result"
+        assert cp["call_id"] == "tc1"
+        assert cp["name"] == "add"
+        assert cp["content"] == "5"
+
+    async def test_execute_and_inject_appends_multiple_results(self):
+        """execute_and_inject appends results for multiple tool calls."""
+        runner, tm, tool = _make_runner_with_exec_env()
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"))
+        tool.execute = MagicMock(side_effect=[5, 10])
+
+        for tc_id in ["tc1", "tc2"]:
+            await runner.execution_environment.execute_and_inject(
+                ContentPart.create_tool_use(tc_id, "add", "{}"), runner
+            )
+
+        fg = runner.execution_environment.get_foreground_group()
+        assert len(fg.result_message.raw_dict["content"]) == 2
+        assert fg.result_message.raw_dict["content"][0]["call_id"] == "tc1"
+        assert fg.result_message.raw_dict["content"][1]["call_id"] == "tc2"
+
+    async def test_execute_and_inject_fails_gracefully(self):
+        """execute_and_inject catches tool exceptions and returns error."""
+        runner, tm, tool = _make_runner_with_exec_env()
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        tool.execute = MagicMock(side_effect=RuntimeError("kaboom"))
+        result_str, success = await runner.execution_environment.execute_and_inject(
+            ContentPart.create_tool_use("tc1", "add", "{}"), runner
+        )
+        assert success is False
+        assert "RuntimeError" in result_str
+        fg = runner.execution_environment.get_foreground_group()
+        assert len(fg.result_message.raw_dict["content"]) == 1
+
+    async def test_execute_and_inject_tool_not_found(self):
+        """execute_and_inject returns error for unknown tool."""
+        tm = MagicMock()
+        tm.get_tool.return_value = None
+        role = MagicMock()
+        role.name = "test-role"
+        role.model = "test-model"
+        role.behavior_policy = "responsive"
+        role.auto_approve_tools = []
+        role.tool_filter = []
+        session = MagicMock()
+        session.role = role
+        session._invocation_hooks = {}
+        agent = MagicMock()
+        agent.get_session.return_value = session
+        agent._tool_manager = tm
+        agent.role = role
+        chatbot = _make_mock_chatbot(content=[{"type": "text", "content": "done"}])
+        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner._execution_environment = ExecutionEnvironment(
+            tool_manager=tm, role=role, auto_approve_tools=[], tool_failure_policy="abort"
+        )
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "nonexistent", "{}"))
+        result_str, success = await runner.execution_environment.execute_and_inject(
+            ContentPart.create_tool_use("tc1", "nonexistent", "{}"), runner
+        )
+        assert success is False
+        assert "not found" in result_str
+
+    async def test_execute_and_inject_no_foreground_group(self):
+        """execute_and_inject raises if no foreground group exists."""
+        role = MagicMock()
+        role.name = "test-role"
+        role.model = "test-model"
+        role.behavior_policy = "responsive"
+        role.auto_approve_tools = []
+        role.tool_filter = []
+        tm = MagicMock()
+        session = MagicMock()
+        session.role = role
+        session._invocation_hooks = {}
+        agent = MagicMock()
+        agent.get_session.return_value = session
+        agent._tool_manager = tm
+        agent.role = role
+        chatbot = _make_mock_chatbot(content=[{"type": "text", "content": "done"}])
+        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner._execution_environment = ExecutionEnvironment(
+            tool_manager=tm, role=role, auto_approve_tools=[], tool_failure_policy="abort"
+        )
+        with pytest.raises(RuntimeError, match="No foreground tool call group"):
+            await runner.execution_environment.execute_and_inject(
+                ContentPart.create_tool_use("tc1", "add", "{}"), runner
+            )
