@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import uuid as _uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from peteos.conversation.session import SessionState
 from peteos.sandbox import Sandbox, SandboxBuilder
 from peteos.chatbot import ChatBot, ChatBotResponse, ChatBotManager, Message, ContentPart
 
 from peteos.utils.activeclass import ActiveClass
-from peteos.engine.exec_status import ExecStatus
+from peteos.engine.exec_status import ExecStatus, _merge_exec_status
 from peteos.engine.executionenvironment import (
     ApprovalEvent,
     ExecutionEnvironment,
@@ -236,18 +236,41 @@ class Runner(ActiveClass):
             channel.push_event(NotificationEvent(self.uuid, message))
 
     # ------------------------------------------------------------------ #
-    # Hook callbacks (delegated to execution environment)
+    # Hook callbacks
     # ------------------------------------------------------------------ #
 
+    async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
+        """Call all hooks for hook_point from the session's invocation_hooks, merging ExecStatus results."""
+        hooks = self._session._invocation_hooks
+        callbacks = hooks.get(hook_point, [])
+        merged: ExecStatus | None = None
+        for callback in callbacks:
+            result = callback(*args)
+            if asyncio.iscoroutine(result):
+                result = await result
+            if isinstance(result, ExecStatus):
+                merged = _merge_exec_status(merged, result)
+        return merged
+
+    async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
+        """Call hooks for hook_point, returning the first deny tuple (False, reason) if any."""
+        hooks = self._session._invocation_hooks
+        callbacks = hooks.get(hook_point, [])
+        for callback in callbacks:
+            result = callback(*args)
+            if asyncio.iscoroutine(result):
+                result = await result
+            if isinstance(result, tuple) and len(result) == 2 and result[0] is False:
+                return result
+        return None
+
     async def _call_after_message_append(self, message: Message) -> None:
-        """Delegate to execution environment's hook system."""
-        if self.execution_environment:
-            await self.execution_environment.call_hooks("after_message_append", self, message)
+        """Fire after_message_append hooks."""
+        await self.call_hooks("after_message_append", self, message)
 
     async def _call_before_notification_publish(self, message: Message) -> None:
-        """Delegate to execution environment's hook system."""
-        if self.execution_environment:
-            await self.execution_environment.call_hooks("before_notification_publish", self, message)
+        """Fire before_notification_publish hooks."""
+        await self.call_hooks("before_notification_publish", self, message)
 
     # ------------------------------------------------------------------ #
     # step() — the core reasoning iteration
@@ -279,7 +302,7 @@ class Runner(ActiveClass):
             "[runner] step(): Materialized context, tool_definitions_message has %d tools",
             tool_count,
         )
-        await self.execution_environment.call_hooks("before_send_to_chatbot", self, self._session.active_context)
+        await self.call_hooks("before_send_to_chatbot", self, self._session.active_context)
         response = await self._chatbot.send_context(self._session.active_context)
         async for _ in response:
             pass
@@ -407,7 +430,7 @@ class Runner(ActiveClass):
                 self._truncation_counter,
                 self._max_truncation_retries,
             )
-            await self.execution_environment.call_hooks(
+            await self.call_hooks(
                 "on_truncation_exhausted",
                 self._truncation_counter,
                 self._max_truncation_retries,
@@ -476,11 +499,11 @@ class Runner(ActiveClass):
                 _logger.debug("[runner] Tool %s not found", tool_name)
                 break
             if not success:
-                await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, result_str, False)
+                await self.call_hooks("after_tool_execution", self, tool_call, result_str, False)
                 foreground.deny_all_remaining(f"Tool '{tool_name}' execution failed")
                 _logger.debug("[runner] Tool %s failed", tool_name)
                 break
-            await self.execution_environment.call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
+            await self.call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
 
         if foreground.is_done():
@@ -551,7 +574,7 @@ class Runner(ActiveClass):
             # Send context to chatbot and get a response, already passing the tool calls
             try:
                 status, response_msg = await self.step()
-                hook_status = await self.execution_environment.call_hooks("after_step", status)
+                hook_status = await self.call_hooks("after_step", status)
                 hook_return = hook_status if hook_status is not None else status
                 _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
             except Exception as e:
