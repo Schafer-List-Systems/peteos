@@ -40,11 +40,8 @@ htmlcov/
 # Remember logs
 .remember/
 
-# Claude instructions
-CLAUDE.md
-
-# Claude Code
-.claude/
+# Agents
+.playwright
 tmp/
 memory/
 design/
