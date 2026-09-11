@@ -393,7 +393,7 @@ def _recursive_cast(data: Any, schema: type) -> Any:
             **{f.name: _recursive_cast(data[f.name], _resolve_type(f.type, ns)) for f in dataclasses.fields(schema)}
         )
 
-    # Union type (e.g. Node | None): extract non-None type and cast
+    # Union type (e.g. int | None): extract non-None type and cast
     is_union = origin is types.UnionType or (args and type(None) in args)
     if is_union:
         non_none = [t for t in args if t is not type(None)]
@@ -404,6 +404,29 @@ def _recursive_cast(data: Any, schema: type) -> Any:
                 if is_dataclass(t):
                     return _recursive_cast(data, t)
             return data
+        if non_none:
+            # Prefer exact type match (return as-is, no coercion) — but bool is
+            # not a subtype of int for our purposes, so exclude that case.
+            for t in non_none:
+                if t is int and isinstance(data, int) and not isinstance(data, bool):
+                    return data
+                if t is float and isinstance(data, float) and not isinstance(data, bool):
+                    return data
+                if t is bool and isinstance(data, bool):
+                    return data
+                if t is str and isinstance(data, str):
+                    return data
+                if t is list and isinstance(data, list):
+                    return data
+                if t is dict and isinstance(data, dict):
+                    return data
+            # No exact match — try coercion to each type
+            for t in non_none:
+                try:
+                    return _recursive_cast(data, t)
+                except ValueError:
+                    pass
+            raise ValueError(f"data {data!r} does not match any type in union")
         return data
 
     # Enum: match by value
