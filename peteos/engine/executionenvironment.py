@@ -299,8 +299,9 @@ class ExecutionEnvironment:
         """Execute a single tool call.
 
         Looks up the tool by name, casts arguments, fires the
-        ``before_tool_execution`` deny hook, executes the tool, fires
-        the ``after_tool_execution`` hook, and returns the result.
+        ``before_tool_execution`` deny hook, executes the tool, and returns
+        the result. The ``after_tool_execution`` hook fires in
+        ``runner._handle_tool_group`` after this returns.
 
         Returns (None, True) when the tool returns None (fire-and-forget),
         (result_string, True) for successful calls, and (error_msg, False)
@@ -339,11 +340,9 @@ class ExecutionEnvironment:
             if asyncio.iscoroutine(result):
                 result = await result
             if result is None:
-                await runner.call_hooks("after_tool_execution", tool_call, None, True)
                 _logger.debug("Tool %s returned None (fire-and-forget)", tool_name)
                 return None, True
             result_str = str(result)
-            await runner.call_hooks("after_tool_execution", tool_call, result_str, True)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
             return result_str, True
         except Exception as e:
