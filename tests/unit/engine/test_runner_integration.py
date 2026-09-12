@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid as _uuid
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -575,41 +575,6 @@ class TestHandleToolGroup:
 
 
 # ---------------------------------------------------------------------------
-# After-step hook modifying status
-# ---------------------------------------------------------------------------
-
-
-class TestAfterStepHook:
-    """Tests for after_step hook on status."""
-
-    @pytest.mark.asyncio
-    async def test_after_step_returns_error_stops_run(self):
-        """after_step hook returning ExecStatus.CRITICAL → run loop breaks."""
-        role = _make_role()
-        agent = MagicMock()
-        agent._tool_manager = role._tool_manager
-        agent.role = role
-
-        msg = _make_message("assistant", [ContentPart.create_text("hi")])
-        bot = SimpleMockChatBot([msg])
-        sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
-
-        runner.execution_environment.register_hook(
-            "after_step",
-            lambda status: ExecStatus.CRITICAL,
-        )
-
-        user_msg = _make_message("user", [ContentPart.create_text("hello")])
-        await runner.queue_message(user_msg)
-
-        # after_step hook returns ERROR → run loop breaks without setting idle
-        idle = await runner.wait_for_idle(timeout=2.0)
-        assert idle is False
-        await runner.stop()
-
-
-# ---------------------------------------------------------------------------
 # Channel notification publishing
 # ---------------------------------------------------------------------------
 
@@ -994,163 +959,6 @@ class TestToolCallRecordLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# ExecutionEnvironment — hook system
-# ---------------------------------------------------------------------------
-
-
-class TestEEHooks:
-    """Tests for ExecutionEnvironment hook registration and invocation."""
-
-    def test_register_hook_valid_point(self):
-        """register_hook succeeds for a valid hook point."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-        ee.register_hook("before_send_to_chatbot", lambda *a: None)
-
-    def test_register_hook_invalid_point_raises(self):
-        """register_hook raises for an unknown hook point."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-        with pytest.raises(ValueError, match="Unknown hook point"):
-            ee.register_hook("nonexistent", lambda *a: None)
-
-    def test_deregister_hook(self):
-        """deregister_hook removes the callback."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-
-        def callback(*a):
-            pass
-
-        ee.register_hook("before_send_to_chatbot", callback)
-        ee.deregister_hook("before_send_to_chatbot", callback)
-
-    def test_deregister_hook_not_found_raises(self):
-        """deregister_hook raises if callback not registered."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-
-        def callback(*a):
-            pass
-
-        with pytest.raises(ValueError, match="Callback not found"):
-            ee.deregister_hook("before_send_to_chatbot", callback)
-
-    def test_deregister_all_hooks(self):
-        """deregister_all_hooks clears all hooks for a point."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-
-        ee.register_hook("before_send_to_chatbot", lambda *a: None)
-        ee.register_hook("before_send_to_chatbot", lambda *a: None)
-        ee.deregister_all_hooks("before_send_to_chatbot")
-
-    @pytest.mark.asyncio
-    async def test_call_hooks_invokes_all(self):
-        """call_hooks invokes all registered callbacks in order."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-
-        calls = []
-        ee.register_hook("before_send_to_chatbot", lambda *a: calls.append(1))
-        ee.register_hook("before_send_to_chatbot", lambda *a: calls.append(2))
-
-        await ee.call_hooks("before_send_to_chatbot")
-        assert calls == [1, 2]
-
-    @pytest.mark.asyncio
-    async def test_call_hooks_with_async_callback(self):
-        """call_hooks awaits async callbacks."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-
-        result = []
-
-        async def async_callback(*a):
-            result.append("async")
-
-        ee.register_hook("before_send_to_chatbot", async_callback)
-        await ee.call_hooks("before_send_to_chatbot")
-        assert result == ["async"]
-
-    @pytest.mark.asyncio
-    async def test_call_hooks_merge_exec_status(self):
-        """call_hooks merges ExecStatus returns from hooks."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-
-        ee.register_hook("after_step", lambda *a: ExecStatus.CRITICAL)
-
-        merged = await ee.call_hooks("after_step")
-        assert merged is ExecStatus.CRITICAL
-
-    @pytest.mark.asyncio
-    async def test_call_hooks_deny(self):
-        """call_hooks_deny returns first deny result."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-
-        ee.register_hook("before_tool_execution", lambda *a: (True, "allow"))
-        ee.register_hook("before_tool_execution", lambda *a: (False, "deny"))
-        ee.register_hook("before_tool_execution", lambda *a: (True, "allow"))
-
-        result = await ee.call_hooks_deny("before_tool_execution")
-        assert result == (False, "deny")
-
-    @pytest.mark.asyncio
-    async def test_call_hooks_deny_no_deny(self):
-        """call_hooks_deny returns None when no hooks deny."""
-        tm = MagicMock()
-        role = _make_role()
-        ee = ExecutionEnvironment(
-            tool_manager=tm, role=role, auto_approve_tools=[],
-            tool_failure_policy="abort",
-        )
-
-        ee.register_hook("before_tool_execution", lambda *a: (True, "allow"))
-        ee.register_hook("before_tool_execution", lambda *a: (True, "also allow"))
-
-        result = await ee.call_hooks_deny("before_tool_execution")
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
 # ExecutionEnvironment — execute_tool
 # ---------------------------------------------------------------------------
 
@@ -1170,7 +978,9 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "nonexistent", "{}")
-        result, success = await ee.execute_tool(tc)
+        runner = MagicMock()
+        runner.call_hooks_deny = AsyncMock(return_value=None)
+        result, success = await ee.execute_tool(tc, runner=runner)
         assert success is False
         assert "not found" in result
 
@@ -1190,7 +1000,9 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
-        result, success = await ee.execute_tool(tc)
+        runner = MagicMock()
+        runner.call_hooks_deny = AsyncMock(return_value=None)
+        result, success = await ee.execute_tool(tc, runner=runner)
         assert success is True
         assert result == "42"
 
@@ -1210,7 +1022,9 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
-        result, success = await ee.execute_tool(tc)
+        runner = MagicMock()
+        runner.call_hooks_deny = AsyncMock(return_value=None)
+        result, success = await ee.execute_tool(tc, runner=runner)
         assert success is False
         assert "ValueError" in result
 
@@ -1230,7 +1044,9 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "notify", "{}")
-        result, success = await ee.execute_tool(tc)
+        runner = MagicMock()
+        runner.call_hooks_deny = AsyncMock(return_value=None)
+        result, success = await ee.execute_tool(tc, runner=runner)
         assert success is True
         assert result is None
 
@@ -1244,15 +1060,28 @@ class TestEEExecuteTool:
         tm.get_tool.return_value = tool
 
         role = _make_role()
+        agent = MagicMock()
+        agent._tool_manager = tm
+        agent.role = role
+
+        sid = _uuid.uuid4()
+        session = MagicMock()
+        session._invocation_hooks = {}
+        agent.get_session = MagicMock(return_value=session)
+
+        runner = Runner(agent=agent, session_uuid=sid, chatbot=MagicMock())
+
         ee = ExecutionEnvironment(
             tool_manager=tm, role=role, auto_approve_tools=[],
             tool_failure_policy="abort",
         )
 
-        ee.register_hook("before_tool_execution", lambda *a: (False, "not allowed"))
+        session._invocation_hooks["before_tool_execution"] = [
+            lambda *a: (False, "not allowed"),
+        ]
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
-        result, success = await ee.execute_tool(tc)
+        result, success = await ee.execute_tool(tc, runner=runner)
         assert success is False
         assert result == "not allowed"
         tool.execute.assert_not_called()
@@ -1276,7 +1105,9 @@ class TestEEExecuteTool:
         ee.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
-        result_str, success = await ee.execute_and_inject(tc)
+        runner = MagicMock()
+        runner.call_hooks_deny = AsyncMock(return_value=None)
+        result_str, success = await ee.execute_and_inject(tc, runner=runner)
 
         assert success is True
         assert result_str == "42"
@@ -1301,7 +1132,9 @@ class TestEEExecuteTool:
 
         ee.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "notify", "{}")
-        result_str, success = await ee.execute_and_inject(tc)
+        runner = MagicMock()
+        runner.call_hooks_deny = AsyncMock(return_value=None)
+        result_str, success = await ee.execute_and_inject(tc, runner=runner)
 
         assert success is True
         assert result_str is None
@@ -1319,8 +1152,10 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
+        runner = MagicMock()
+        runner.call_hooks_deny = AsyncMock(return_value=None)
         with pytest.raises(RuntimeError, match="No foreground"):
-            await ee.execute_and_inject(tc)
+            await ee.execute_and_inject(tc, runner=runner)
 
     @pytest.mark.asyncio
     async def test_execute_tool_async_result(self):
@@ -1342,7 +1177,9 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "async_tool", "{}")
-        result, success = await ee.execute_tool(tc)
+        runner = MagicMock()
+        runner.call_hooks_deny = AsyncMock(return_value=None)
+        result, success = await ee.execute_tool(tc, runner=runner)
         assert success is True
         assert result == "async_result"
 
