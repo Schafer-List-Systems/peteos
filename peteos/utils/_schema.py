@@ -420,6 +420,18 @@ def _recursive_cast(data: Any, schema: type) -> Any:
                     return data
                 if t is dict and isinstance(data, dict):
                     return data
+            # String-encoded JSON — parse and retry against each type
+            if isinstance(data, str):
+                try:
+                    parsed = json.loads(data)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                else:
+                    for t in non_none:
+                        try:
+                            return _recursive_cast(parsed, t)
+                        except ValueError:
+                            pass
             # No exact match — try coercion to each type
             for t in non_none:
                 try:

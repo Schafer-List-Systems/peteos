@@ -672,6 +672,18 @@ class TestTupleCast:
             _recursive_cast((1, "two", 3), tuple[int, ...])
 
 
+# ── Union scalar coercion tests ───────────────────────────────────────
+
+@dataclass
+class NestedInner:
+    value: int
+
+
+@dataclass
+class NestedOuter:
+    items: list[NestedInner]
+
+
 class TestUnionWithScalarCoercion:
     """Regression tests: union types with None coerce strings to the non-None
     type, but only when no exact type match is available. Exact match is
@@ -738,3 +750,44 @@ class TestUnionWithScalarCoercion:
         assert isinstance(result, int)
         # None stays None
         assert _recursive_cast(None, str | int | None) is None
+
+    def test_tuple_union_parses_json_string(self):
+        """LLM sends '[1400, 1000]' (string) for tuple[int, ...] | None."""
+        result = _recursive_cast("[1400, 1000]", tuple[int, ...] | None)
+        assert result == (1400, 1000)
+        assert isinstance(result, tuple)
+
+    def test_tuple_union_parses_nested_json_string(self):
+        """Nested tuples as JSON strings work."""
+        result = _recursive_cast("[[1, 2], [3, 4]]", tuple[tuple[int, ...], ...] | None)
+        assert result == ((1, 2), (3, 4))
+
+    def test_list_union_parses_json_string(self):
+        """list as JSON string is parsed and cast."""
+        result = _recursive_cast('[1, 2, 3]', list[int] | None)
+        assert result == [1, 2, 3]
+        assert isinstance(result, list)
+
+    def test_dataclass_union_parses_json_string(self):
+        """Dataclass inside union receives JSON string, not dict."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class Point:
+            x: int
+            y: int
+
+        result = _recursive_cast('{"x": 10, "y": 20}', Point | None)
+        assert isinstance(result, Point)
+        assert result.x == 10
+        assert result.y == 20
+
+    def test_nested_dataclass_union_parses_json_string(self):
+        """Nested dataclass as JSON string is parsed."""
+        result = _recursive_cast(
+            '{"items": [{"value": 1}, {"value": 2}]}',
+            NestedOuter | None,
+        )
+        assert isinstance(result, NestedOuter)
+        assert len(result.items) == 2
+        assert result.items[0].value == 1
