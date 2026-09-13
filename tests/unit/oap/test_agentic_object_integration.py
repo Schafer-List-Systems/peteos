@@ -110,4 +110,4 @@ class TestInvokeAgentEmptyChatBot:
         # First call returns text-only, after_step hook queues reminder.
         # Second call exhausts mock → HTTP 503 → RuntimeError raised.
         with pytest.raises(RuntimeError, match="HTTP 503"):
-            await obj.invoke_agent("hello")
+            await obj.invoke_agent("hello", output_schema=int)

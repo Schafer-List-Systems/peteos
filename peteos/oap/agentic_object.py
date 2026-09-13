@@ -694,10 +694,14 @@ class AgenticObject:
                     ))
                 return None
 
-            session._invocation_hooks.setdefault("after_step", []).append(
-                lambda status: _on_step_done(runner, status)
-            )
-            _logger.debug("invoke_agent[%s]: after_step hook registered", self.__class__.__name__)
+            if output_schema is not None and output_schema is not Any:
+                session._invocation_hooks.setdefault("after_step", []).append(
+                    lambda status: _on_step_done(runner, status)
+                )
+                _logger.debug(
+                    "invoke_agent[%s]: after_step hook registered (strict schema)",
+                    self.__class__.__name__,
+                )
 
             content: list[ContentPart] = [ContentPart.create_text(prompt)]
             if image is not None:
@@ -765,6 +769,39 @@ class AgenticObject:
                         elapsed,
                     )
                     raise TimeoutError(f"Agent did not produce output within {timeout}s timeout")
+
+                if output_schema is None or output_schema is Any:
+                    for msg in reversed(runner.session.active_context.messages):
+                        if msg.role == "assistant":
+                            text_parts = [cp.text for cp in msg.content if cp.type == "text"]
+                            if text_parts:
+                                final_result = "".join(text_parts)
+                                _logger.debug(
+                                    "invoke_agent[%s]: %s schema, returning text (iter %d)",
+                                    self.__class__.__name__,
+                                    output_schema,
+                                    iteration,
+                                )
+                                return final_result
+                    if output_schema is None:
+                        _logger.debug(
+                            "invoke_agent[%s]: no output schema, no text, returning None (iter %d)",
+                            self.__class__.__name__,
+                            iteration,
+                        )
+                        return None
+                    _logger.debug(
+                        "invoke_agent[%s]: Any schema, no assistant text, queuing reminder (iter %d)",
+                        self.__class__.__name__,
+                        iteration,
+                    )
+                    await runner.queue_message(Message.create(
+                        role="user",
+                        content_parts=[ContentPart.create_text(
+                            "I am still waiting for your final answer. Please provide your output."
+                        )],
+                    ))
+                    continue
 
                 _logger.debug("invoke_agent[%s]: queuing reminder (iter %d)", self.__class__.__name__, iteration)
                 await runner.queue_message(Message.create(
