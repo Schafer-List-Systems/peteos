@@ -402,6 +402,40 @@ class TestScalarValidation:
         with pytest.raises(ValueError):
             _recursive_cast("not-valid-json", list[int])
 
+    def test_list_comma_sep_parses(self):
+        """Comma-separated string fallback for bare list."""
+        result = _recursive_cast("1, 2, 3", list)
+        assert result == [1, 2, 3]
+        assert isinstance(result, list)
+
+    def test_list_typed_comma_sep_parses(self):
+        """Comma-separated string for typed list[int]."""
+        result = _recursive_cast("1, 2, 3", list[int])
+        assert result == [1, 2, 3]
+        assert isinstance(result, list)
+
+    def test_list_comma_sep_bad_raises(self):
+        """Comma-separated string that can't be coerced raises ValueError."""
+        with pytest.raises(ValueError):
+            _recursive_cast("a, b, c", list[int])
+
+    def test_list_parens_string_parses(self):
+        """Parentheses string: replaces () with [] then JSON-parses."""
+        result = _recursive_cast("(1, 2, 3)", list)
+        assert result == [1, 2, 3]
+        assert isinstance(result, list)
+
+    def test_list_typed_parens_string_parses(self):
+        """Typed list[int] with parentheses string."""
+        result = _recursive_cast("(1, 2, 3)", list[int])
+        assert result == [1, 2, 3]
+        assert isinstance(result, list)
+
+    def test_list_parens_string_bad_raises(self):
+        """Parentheses string that can't be coerced raises ValueError."""
+        with pytest.raises(ValueError):
+            _recursive_cast("(a, b, c)", list[int])
+
     def test_parse_dict_valid(self):
         assert parse_data('{"a": 1}', dict) == {"a": 1}
 
@@ -428,6 +462,47 @@ class TestScalarValidation:
         assert parse_data('"hello"', str | int | None) == "hello"
         assert parse_data("42", str | int | None) == 42
         assert parse_data("null", str | int | None) is None
+
+    def test_nothing_values_become_none_in_union(self):
+        """0.0, [], {} become None when type(None) is in union (no exact match available).
+
+        Note: '' matches str exactly (type matches), so '' in str | None returns ''.
+        And 0.0 matches float exactly, so 0.0 in int | float returns 0.0.
+        Nothing values only fall through to NoneType when no other member matches.
+        """
+        result = _recursive_cast(0.0, int | None)
+        assert result is None
+        result = _recursive_cast([], int | None)
+        assert result is None
+        result = _recursive_cast({}, int | None)
+        assert result is None
+        result = _recursive_cast([], str | None)
+        assert result is None
+
+    def test_type_none_accepts_nothing_values(self):
+        """Bare type(None) schema accepts nothing values as None."""
+        assert _recursive_cast("", type(None)) is None
+        assert _recursive_cast(0.0, type(None)) is None
+        assert _recursive_cast([], type(None)) is None
+        assert _recursive_cast({}, type(None)) is None
+
+    def test_nothing_values_error_in_non_none_unions(self):
+        """[], {} raise ValueError when union has no NoneType and no matching member."""
+        with pytest.raises(ValueError):
+            _recursive_cast([], int | float)
+        with pytest.raises(ValueError):
+            _recursive_cast({}, int | float)
+
+    def test_nothing_values_error_for_bare_primitives(self):
+        """Strings that are not valid JSON raise for typed schemas."""
+        with pytest.raises(ValueError):
+            _recursive_cast("", int)
+        with pytest.raises(ValueError):
+            _recursive_cast(0.0, int)
+        with pytest.raises(ValueError):
+            _recursive_cast("not-a-list", list[int])
+        with pytest.raises(ValueError):
+            _recursive_cast("not-a-dict", dict[str, int])
 
     def test_parse_list_int(self):
         """list[int] validates container and casts elements."""
@@ -678,6 +753,36 @@ class TestTupleCast:
         with pytest.raises(ValueError):
             _recursive_cast("not-valid-json", tuple[int, ...])
 
+    def test_tuple_comma_sep_parses(self):
+        """Comma-separated string fallback: wraps in brackets and JSON-parses."""
+        result = _recursive_cast("1, 2, 3", tuple[int, int, int])
+        assert result == (1, 2, 3)
+
+    def test_tuple_variable_comma_sep_parses(self):
+        """Variable-length tuple with comma-separated string."""
+        result = _recursive_cast("1, 2, 3, 4", tuple[int, ...])
+        assert result == (1, 2, 3, 4)
+
+    def test_tuple_comma_sep_bad_raises(self):
+        """Comma-separated string that can't be coerced raises ValueError."""
+        with pytest.raises(ValueError):
+            _recursive_cast("a, b, c", tuple[int, int])
+
+    def test_tuple_parens_string_parses(self):
+        """Parentheses string: replaces () with [] then JSON-parses."""
+        result = _recursive_cast("(1, 2, 3)", tuple[int, int, int])
+        assert result == (1, 2, 3)
+
+    def test_tuple_variable_parens_string_parses(self):
+        """Variable-length tuple with parentheses string."""
+        result = _recursive_cast("(1, 2, 3, 4)", tuple[int, ...])
+        assert result == (1, 2, 3, 4)
+
+    def test_tuple_parens_string_bad_raises(self):
+        """Parentheses string that can't be coerced raises ValueError."""
+        with pytest.raises(ValueError):
+            _recursive_cast("(a, b, c)", tuple[int, int])
+
     def test_parse_data_fixed_tuple(self):
         result = parse_data('["a", 42, 3.14]', tuple[str, int, float])
         assert result == ("a", 42, 3.14)
@@ -882,3 +987,21 @@ class TestUnionWithScalarCoercion:
         assert isinstance(result, NestedOuter)
         assert len(result.items) == 2
         assert result.items[0].value == 1
+
+    def test_dataclass_union_parses_comma_sep(self):
+        """Dataclass union with comma-separated string input (4-field dataclass)."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class Rect:
+            x: int
+            y: int
+            w: int
+            h: int
+
+        result = _recursive_cast("0,0,100,100", Rect | None)
+        assert isinstance(result, Rect)
+        assert result.x == 0
+        assert result.y == 0
+        assert result.w == 100
+        assert result.h == 100

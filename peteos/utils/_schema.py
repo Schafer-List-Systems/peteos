@@ -12,6 +12,48 @@ from typing import Any, get_args, get_origin
 import dataclasses
 
 
+def _try_parse_list_like(data: str):
+    """Try three JSON-parse fallbacks for list-like strings.
+
+    1. Parse as-is.
+    2. If string has parentheses, replace with brackets and parse.
+    3. If string doesn't start with '[', wrap in brackets and parse.
+
+    Returns parsed list or None if all fallbacks fail.
+    """
+    for attempt in (
+        data,
+        ("[" + data[1:-1] + "]") if data.startswith("(") and data.endswith(")") else None,
+        f"[{data}]" if not data.startswith("[") else None,
+    ):
+        if attempt is None:
+            continue
+        try:
+            parsed = json.loads(attempt)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(parsed, list):
+            return parsed
+    return None
+
+
+def _is_nothing_value(data: Any) -> bool:
+    """Return True for values that semantically represent 'nothing' or absence."""
+    if data is None:
+        return True
+    if data == "":
+        return True
+    if data == 0:
+        return True
+    if data == 0.0:
+        return True
+    if data == []:
+        return True
+    if data == {}:
+        return True
+    return False
+
+
 def relaxed_parse_data(raw: Any, schema: type | None) -> Any:
     """Try strict parsing first, then unwrap single-key dicts as a fallback.
 
@@ -367,9 +409,9 @@ def _recursive_cast(data: Any, schema: type) -> Any:
     if schema is Any:
         return data
 
-    # type(None): only None data is valid
+    # type(None): only None data is valid (including "nothing values")
     if schema is type(None):
-        if data is None:
+        if _is_nothing_value(data):
             return None
         raise ValueError(f"expected None, got {type(data).__name__}: {data!r}")
 
@@ -408,9 +450,8 @@ def _recursive_cast(data: Any, schema: type) -> Any:
             )
 
         if isinstance(data, str):
-            try:
-                parsed = json.loads(data)
-            except (json.JSONDecodeError, TypeError):
+            parsed = _try_parse_list_like(data)
+            if parsed is None:
                 raise ValueError(
                     f"expected {schema.__name__}, which expects a dict. "
                     f"Got an unparseable string: {data!r}"
@@ -462,11 +503,8 @@ def _recursive_cast(data: Any, schema: type) -> Any:
         # Accept both list (from JSON parsing) and tuple (direct tool calls)
         if not isinstance(data, (list, tuple)):
             if isinstance(data, str):
-                try:
-                    parsed = json.loads(data)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                else:
+                parsed = _try_parse_list_like(data)
+                if parsed is not None:
                     return _recursive_cast(parsed, schema)
             raise ValueError(f"expected tuple, got {type(data).__name__}")
         # Convert tuple to list for uniform processing
@@ -486,22 +524,16 @@ def _recursive_cast(data: Any, schema: type) -> Any:
     if schema is list:
         if not isinstance(data, list):
             if isinstance(data, str):
-                try:
-                    parsed = json.loads(data)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                else:
+                parsed = _try_parse_list_like(data)
+                if parsed is not None:
                     return _recursive_cast(parsed, schema)
             raise ValueError(f"expected list. Got instead: {type(data).__name__} {data!r}")
         return data
     if origin is list:
         if not isinstance(data, list):
             if isinstance(data, str):
-                try:
-                    parsed = json.loads(data)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                else:
+                parsed = _try_parse_list_like(data)
+                if parsed is not None:
                     return _recursive_cast(parsed, schema)
             raise ValueError(f"expected list, got {type(data).__name__}")
         return [_recursive_cast(item, args[0]) for item in data]
