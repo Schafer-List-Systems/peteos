@@ -656,6 +656,24 @@ class AgenticObject:
             async def _on_step_done(r: Runner, status: ExecStatus) -> ExecStatus | None:
                 produced = r.state.get("_oap_produced_data")
                 errored = r.state.get("_oap_error")
+
+                # Attempt to use assistant's text as structured output for non-tool-call LLMs.
+                # LLMs that cannot use tool calls may still provide valid JSON as text.
+                # We try to parse that text and inject it via _produce_output so the normal
+                # FINISHED check below can pick it up and return it to the caller.
+                if errored is None and produced is None:
+                    if self._oap_current_output_schema is not None and self._oap_current_output_schema is not Any:
+                        for msg in reversed(r.session.active_context.messages):
+                            if msg.role == "assistant":
+                                text_parts = [cp.text for cp in msg.content if cp.type == "text"]
+                                if text_parts:
+                                    text = "".join(text_parts)
+                                    _logger.debug(
+                                        "_on_step_done: attempting _produce_output with LLM text for non-tool-call LLM"
+                                    )
+                                    self._produce_output(text, runner=r)
+                                    break
+
                 if errored is not None:
                     _logger.debug("_on_step_done: error found, returning FINISHED")
                     return ExecStatus.FINISHED
@@ -775,13 +793,31 @@ class AgenticObject:
                         if msg.role == "assistant":
                             text_parts = [cp.text for cp in msg.content if cp.type == "text"]
                             if text_parts:
-                                final_result = "".join(text_parts)
-                                _logger.debug(
-                                    "invoke_agent[%s]: %s schema, returning text (iter %d)",
-                                    self.__class__.__name__,
-                                    output_schema,
-                                    iteration,
-                                )
+                                text = "".join(text_parts)
+                                if output_schema is Any:
+                                    try:
+                                        import json
+                                        final_result = json.loads(text)
+                                        _logger.debug(
+                                            "invoke_agent[%s]: Any schema, parsed JSON (iter %d)",
+                                            self.__class__.__name__,
+                                            iteration,
+                                        )
+                                    except json.JSONDecodeError:
+                                        final_result = text
+                                        _logger.debug(
+                                            "invoke_agent[%s]: Any schema, returning raw text (iter %d)",
+                                            self.__class__.__name__,
+                                            iteration,
+                                        )
+                                else:
+                                    final_result = text
+                                    _logger.debug(
+                                        "invoke_agent[%s]: %s schema, returning text (iter %d)",
+                                        self.__class__.__name__,
+                                        output_schema,
+                                        iteration,
+                                    )
                                 return final_result
                     if output_schema is None:
                         _logger.debug(
