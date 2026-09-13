@@ -364,9 +364,19 @@ class TestScalarValidation:
         assert parse_data("true", bool) is True
         assert parse_data("false", bool) is False
 
-    def test_parse_bool_not_int(self):
-        with pytest.raises(ValueError, match="expected bool. Got instead: int"):
-            parse_data("1", bool)
+    def test_parse_bool_string_one_parses(self):
+        """String \"1\" parses to True for bool schema (per Table 4)."""
+        assert parse_data("1", bool) is True
+
+    def test_bool_int_zero_one(self):
+        """bool schema accepts 0 and 1 as False and True."""
+        assert _recursive_cast(0, bool) is False
+        assert _recursive_cast(1, bool) is True
+
+    def test_bool_int_other_raises(self):
+        """int values other than 0 or 1 raise ValueError for bool schema."""
+        with pytest.raises(ValueError, match="expected bool"):
+            _recursive_cast(42, bool)
 
     def test_parse_list_valid(self):
         assert parse_data("[1, 2]", list) == [1, 2]
@@ -375,12 +385,44 @@ class TestScalarValidation:
         with pytest.raises(ValueError, match="expected list. Got instead: str"):
             parse_data('"not a list"', list)
 
+    def test_list_bare_parses_json_string(self):
+        """Bare list schema handles JSON-string input directly."""
+        result = _recursive_cast("[1, 2, 3]", list)
+        assert result == [1, 2, 3]
+        assert isinstance(result, list)
+
+    def test_list_typed_parses_json_string(self):
+        """Typed list[int] handles JSON-string input directly."""
+        result = _recursive_cast("[1, 2, 3]", list[int])
+        assert result == [1, 2, 3]
+        assert isinstance(result, list)
+
+    def test_list_bad_json_string_raises(self):
+        """Invalid JSON string for list raises ValueError."""
+        with pytest.raises(ValueError):
+            _recursive_cast("not-valid-json", list[int])
+
     def test_parse_dict_valid(self):
         assert parse_data('{"a": 1}', dict) == {"a": 1}
 
     def test_parse_dict_not_list(self):
         with pytest.raises(ValueError, match="expected dict. Got instead: list"):
             parse_data('[1, 2]', dict)
+
+    def test_dict_bare_parses_json_string(self):
+        """Bare dict schema handles JSON-string input directly."""
+        result = _recursive_cast('{"a": 1, "b": 2}', dict)
+        assert result == {"a": 1, "b": 2}
+
+    def test_dict_typed_parses_json_string(self):
+        """Typed dict[str, int] handles JSON-string input directly."""
+        result = _recursive_cast('{"x": 10, "y": 20}', dict[str, int])
+        assert result == {"x": 10, "y": 20}
+
+    def test_dict_bad_json_string_raises(self):
+        """Invalid JSON string for dict raises ValueError."""
+        with pytest.raises(ValueError):
+            _recursive_cast("not-valid-json", dict[str, int])
 
     def test_parse_union_type(self):
         assert parse_data('"hello"', str | int | None) == "hello"
@@ -620,6 +662,22 @@ class TestTupleCast:
         with pytest.raises(ValueError):
             _recursive_cast([1, "two", 3], tuple[int, ...])
 
+    def test_tuple_variable_parses_json_string(self):
+        """JSON-string is JSON-parsed then recursed — no union needed."""
+        result = _recursive_cast("[1, 2, 3]", tuple[int, ...])
+        assert result == (1, 2, 3)
+        assert isinstance(result, tuple)
+
+    def test_tuple_fixed_parses_json_string(self):
+        """Fixed-length tuple also handles JSON-string input directly."""
+        result = _recursive_cast('[1, 2]', tuple[int, int])
+        assert result == (1, 2)
+
+    def test_tuple_bad_json_string_raises(self):
+        """Invalid JSON string raises ValueError, not silently passes."""
+        with pytest.raises(ValueError):
+            _recursive_cast("not-valid-json", tuple[int, ...])
+
     def test_parse_data_fixed_tuple(self):
         result = parse_data('["a", 42, 3.14]', tuple[str, int, float])
         assert result == ("a", 42, 3.14)
@@ -751,6 +809,27 @@ class TestUnionWithScalarCoercion:
         # None stays None
         assert _recursive_cast(None, str | int | None) is None
 
+    def test_union_exact_match_int_first(self):
+        """int | str: actual int data is tested first (type(data) match)."""
+        result = _recursive_cast(42, int | str)
+        assert result == 42
+        assert isinstance(result, int)
+
+    def test_union_exact_match_str_first(self):
+        """int | str: actual str data is tested first (type(data) match)."""
+        result = _recursive_cast("hello", int | str)
+        assert result == "hello"
+        assert isinstance(result, str)
+
+    def test_union_type_in_args_reordering(self):
+        """type(data) is in args → tested first, before other members."""
+        result = _recursive_cast([1, 2], list[int] | tuple[int, ...])
+        assert result == [1, 2]
+        assert isinstance(result, list)
+        result = _recursive_cast((1, 2), list[int] | tuple[int, ...])
+        assert result == (1, 2)
+        assert isinstance(result, tuple)
+
     def test_tuple_union_parses_json_string(self):
         """LLM sends '[1400, 1000]' (string) for tuple[int, ...] | None."""
         result = _recursive_cast("[1400, 1000]", tuple[int, ...] | None)
@@ -761,6 +840,18 @@ class TestUnionWithScalarCoercion:
         """Nested tuples as JSON strings work."""
         result = _recursive_cast("[[1, 2], [3, 4]]", tuple[tuple[int, ...], ...] | None)
         assert result == ((1, 2), (3, 4))
+
+    def test_tuple_union_with_python_list(self):
+        """LLM passes actual Python list to tuple[int, ...] | None — no JSON parse."""
+        result = _recursive_cast([1516, 1012, 2516, 2012], tuple[int, ...] | None)
+        assert result == (1516, 1012, 2516, 2012)
+        assert isinstance(result, tuple)
+
+    def test_tuple_union_with_python_tuple(self):
+        """LLM passes actual Python tuple to tuple[int, ...] | None."""
+        result = _recursive_cast((42, 99), tuple[int, int] | None)
+        assert result == (42, 99)
+        assert isinstance(result, tuple)
 
     def test_list_union_parses_json_string(self):
         """list as JSON string is parsed and cast."""

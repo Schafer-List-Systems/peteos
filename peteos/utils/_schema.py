@@ -367,79 +367,84 @@ def _recursive_cast(data: Any, schema: type) -> Any:
     if schema is Any:
         return data
 
-    # type(None): pass through unchanged
+    # type(None): only None data is valid
     if schema is type(None):
-        return data
+        if data is None:
+            return None
+        raise ValueError(f"expected None, got {type(data).__name__}: {data!r}")
 
     # Compute origin/args once — reused by list and union branches below
     origin = get_origin(schema)
     args = get_args(schema)
 
-    # Dataclass: validate shape and cast each field
-    if is_dataclass(schema) and isinstance(data, dict):
-        declared = [f.name for f in dataclasses.fields(schema)]
-        for name in declared:
-            if name not in data:
-                raise ValueError(f"missing required field '{name}' in schema {schema.__name__}")
-        for key in data:
-            if key not in declared:
-                raise ValueError(
-                    f"unexpected key '{key}' in schema {schema.__name__}. "
-                    f"Expected fields: {', '.join(sorted(declared))}"
-                )
+    # Dataclass: dispatch on data type (dict, list/tuple, string, or error)
+    if is_dataclass(schema):
+        declared = [f for f in dataclasses.fields(schema)]
         ns = dict(sys.modules.get(schema.__module__, object()).__dict__)
         ns[schema.__name__] = schema
-        return schema(
-            **{f.name: _recursive_cast(data[f.name], _resolve_type(f.type, ns)) for f in dataclasses.fields(schema)}
+
+        if isinstance(data, dict):
+            for name in [f.name for f in declared]:
+                if name not in data:
+                    raise ValueError(f"missing required field '{name}' in schema {schema.__name__}")
+            for key in data:
+                if key not in [f.name for f in declared]:
+                    raise ValueError(
+                        f"unexpected key '{key}' in schema {schema.__name__}. "
+                        f"Expected fields: {', '.join(sorted(f.name for f in declared))}"
+                    )
+            return schema(
+                **{f.name: _recursive_cast(data[f.name], _resolve_type(f.type, ns)) for f in declared}
+            )
+
+        if isinstance(data, (list, tuple)):
+            if len(declared) != len(data):
+                raise ValueError(
+                    f"expected {len(declared)} values for schema {schema.__name__}, "
+                    f"got {len(data)}"
+                )
+            return schema(
+                **{declared[i].name: _recursive_cast(data[i], _resolve_type(declared[i].type, ns)) for i in range(len(declared))}
+            )
+
+        if isinstance(data, str):
+            try:
+                parsed = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                raise ValueError(
+                    f"expected {schema.__name__}, which expects a dict. "
+                    f"Got an unparseable string: {data!r}"
+                )
+            return _recursive_cast(parsed, schema)
+
+        raise ValueError(
+            f"expected {schema.__name__}, which expects a dict. "
+            f"Got instead: {type(data).__name__}: {data!r}"
         )
 
-    # Union type (e.g. int | None): extract non-None type and cast
+    # Union type: try each member in order.
+    # If type(data) is in args, test it first (exact match).
+    # On string data: if all fail, try JSON-parse once, then recurse with parsed.
     is_union = origin is types.UnionType or (args and type(None) in args)
     if is_union:
-        non_none = [t for t in args if t is not type(None)]
-        if data is None:
-            return None
-        if isinstance(data, dict) and non_none:
-            for t in non_none:
-                if is_dataclass(t):
-                    return _recursive_cast(data, t)
-            return data
-        if non_none:
-            # Prefer exact type match (return as-is, no coercion) — but bool is
-            # not a subtype of int for our purposes, so exclude that case.
-            for t in non_none:
-                if t is int and isinstance(data, int) and not isinstance(data, bool):
-                    return data
-                if t is float and isinstance(data, float) and not isinstance(data, bool):
-                    return data
-                if t is bool and isinstance(data, bool):
-                    return data
-                if t is str and isinstance(data, str):
-                    return data
-                if t is list and isinstance(data, list):
-                    return data
-                if t is dict and isinstance(data, dict):
-                    return data
-            # String-encoded JSON — parse and retry against each type
-            if isinstance(data, str):
-                try:
-                    parsed = json.loads(data)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                else:
-                    for t in non_none:
-                        try:
-                            return _recursive_cast(parsed, t)
-                        except ValueError:
-                            pass
-            # No exact match — try coercion to each type
-            for t in non_none:
-                try:
-                    return _recursive_cast(data, t)
-                except ValueError:
-                    pass
-            raise ValueError(f"data {data!r} does not match any type in union")
-        return data
+        data_type = type(data)
+        union_args = list(args)
+        if data_type in union_args:
+            union_args.remove(data_type)
+            union_args.insert(0, data_type)
+        for t in union_args:
+            try:
+                return _recursive_cast(data, t)
+            except ValueError:
+                pass
+        if isinstance(data, str):
+            try:
+                parsed = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            else:
+                return _recursive_cast(parsed, schema)
+        raise ValueError(f"data {data!r} does not match any type in union")
 
     # Enum: match by value
     if origin is None and isinstance(schema, type) and issubclass(schema, Enum):
@@ -456,6 +461,13 @@ def _recursive_cast(data: Any, schema: type) -> Any:
     if origin is tuple and args:
         # Accept both list (from JSON parsing) and tuple (direct tool calls)
         if not isinstance(data, (list, tuple)):
+            if isinstance(data, str):
+                try:
+                    parsed = json.loads(data)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                else:
+                    return _recursive_cast(parsed, schema)
             raise ValueError(f"expected tuple, got {type(data).__name__}")
         # Convert tuple to list for uniform processing
         if isinstance(data, tuple):
@@ -473,20 +485,48 @@ def _recursive_cast(data: Any, schema: type) -> Any:
     # Bare and typed list
     if schema is list:
         if not isinstance(data, list):
+            if isinstance(data, str):
+                try:
+                    parsed = json.loads(data)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                else:
+                    return _recursive_cast(parsed, schema)
             raise ValueError(f"expected list. Got instead: {type(data).__name__} {data!r}")
         return data
     if origin is list:
         if not isinstance(data, list):
+            if isinstance(data, str):
+                try:
+                    parsed = json.loads(data)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                else:
+                    return _recursive_cast(parsed, schema)
             raise ValueError(f"expected list, got {type(data).__name__}")
         return [_recursive_cast(item, args[0]) for item in data]
 
     # Bare and typed dict
     if schema is dict:
         if not isinstance(data, dict):
+            if isinstance(data, str):
+                try:
+                    parsed = json.loads(data)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                else:
+                    return _recursive_cast(parsed, schema)
             raise ValueError(f"expected dict. Got instead: {type(data).__name__} {data!r}")
         return data
     if origin is dict and args:
         if not isinstance(data, dict):
+            if isinstance(data, str):
+                try:
+                    parsed = json.loads(data)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                else:
+                    return _recursive_cast(parsed, schema)
             raise ValueError(f"expected dict, got {type(data).__name__}")
         val_schema = args[1]
         return {k: _recursive_cast(v, val_schema) for k, v in data.items()}
@@ -514,9 +554,16 @@ def _recursive_cast(data: Any, schema: type) -> Any:
             except ValueError:
                 raise ValueError(f"expected float. Got instead: {type(data).__name__}: {data!r}")
         raise ValueError(f"expected float. Got instead: {type(data).__name__} {data!r}")
+    # Scalar: strict type checks — bool accepts 0/1 as False/True
     if schema is bool:
         if isinstance(data, bool):
             return data
+        if isinstance(data, int):
+            if data == 0:
+                return False
+            if data == 1:
+                return True
+            raise ValueError(f"expected bool. Got instead: {type(data).__name__}: {data!r}")
         if isinstance(data, str):
             lower = data.strip().lower()
             if lower in ("true", "yes", "1"):
@@ -528,8 +575,6 @@ def _recursive_cast(data: Any, schema: type) -> Any:
     if schema is str:
         if not isinstance(data, str):
             raise ValueError(f"expected str. Got instead: {type(data).__name__} {data!r}")
-        return data
-    if schema is str | int | float | bool | list | dict | type(None):
         return data
 
     # No matching schema type
