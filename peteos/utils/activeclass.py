@@ -65,7 +65,20 @@ class ActiveClass:
         # When called from within the running task itself (e.g. exception unwind
         # in _main_loop), we can't await the current task — that's a deadlock.
         # Just clean up state and return.
-        if asyncio.current_task() is self._loop_task:
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            _logger.error(
+                "[%s] stop() called but no running event loop found — "
+                "invoke_agent was likely called from an external event loop "
+                "that was closed before this runner could finish. "
+                "Ensure the outer loop stays open until all invoke_agent calls complete.",
+                type(self).__name__,
+            )
+            self._running = False
+            self._loop_task = None
+            return
+        if current is self._loop_task:
             self._loop_task = None
             return
 
