@@ -9,4 +9,3 @@ lxml
 pytest
 pytest-asyncio
 setuptools
-cython>=3.0

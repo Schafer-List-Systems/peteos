@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "cython>=3.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "peteos"
-version = "0.3.2-post"
+version = "0.3.4"
 description = "Agentic application framework"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,9 +15,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "setuptools", "cython>=3.0"]
+dev = ["pytest", "pytest-asyncio", "setuptools"]
 camera = ["opencv-python>=4.8.0", "numpy>=1.24.0"]
 web = ["beautifulsoup4", "lxml"]
+
+[tool.setuptools.packages.find]
+include = ["peteos", "peteos.*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
