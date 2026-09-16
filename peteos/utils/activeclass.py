@@ -100,9 +100,22 @@ class ActiveClass:
         try:
             await self.run()
         except Exception as e:
-            _logger.error("[%s]: _main_loop: exception raised: %s: %r", type(self).__name__, type(e).__name__, e)
+            _logger.error(
+                "[%s]: _main_loop: exception raised: %s: %r",
+                type(self).__name__,
+                type(e).__name__,
+                e,
+            )
         finally:
-            await self.stop()
+            try:
+                await self.stop()
+            except Exception as stop_exc:
+                _logger.error(
+                    "[%s] _main_loop: stop() raised during cleanup: %s: %r",
+                    type(self).__name__,
+                    type(stop_exc).__name__,
+                    stop_exc,
+                )
 
     async def _wait_for_event(self, timeout: Optional[float] = None) -> bool:
         """Block until an event arrives in the queue.

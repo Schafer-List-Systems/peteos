@@ -878,9 +878,12 @@ class AgenticObject:
                 if session._autosave:
                     session.save()
                 _logger.debug("invoke_agent[%s]: cleared invocation hooks on session %s", self.__class__.__name__, session.uuid)
+            try:
+                await runner.stop()
+            except Exception:
+                pass
             if persistent_thread_id is None:
                 try:
-                    await runner.stop()
                     await self._oap_agent.destroy_session(session.uuid)
                 except Exception:
                     pass
