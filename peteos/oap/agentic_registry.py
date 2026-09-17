@@ -23,13 +23,13 @@ def _build_system_prompt(cls: type) -> str:
     """Build the system prompt for a concrete agentic object class.
 
     Collects docstrings from classes in the MRO that have _oap_config
-    (set by @agentic_object decorator), ordered from most-derived to base.
+    (set by @agentic_object decorator), ordered from base to most-derived.
     Prepends standard behaviour directives.
     """
     class_name = cls.__name__
 
     doc_parts: list[str] = []
-    for c in cls.__mro__:
+    for c in reversed(cls.__mro__):
         if not _is_oap_object(c):
             continue
         c_doc = (c.__doc__ or "").strip()

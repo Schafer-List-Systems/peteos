@@ -31,7 +31,7 @@ _AGENT_BASE_DIR = os.environ.get("PETEOS_AGENT_BASE_DIR", "/tmp/peteos")
 def _collect_oap_config(cls: type) -> dict[str, Any]:
     """Collect and merge OAP config from all classes in the MRO that directly inherit from AgenticObject.
 
-    Mirrors the MRO iteration pattern used in _build_system_prompt. Collects the union of
+    Mirrors the reverse-MRO iteration pattern used in _build_system_prompt. Collects the union of
     all imports, merges import_aliases, and ORs all boolean flags across the
     diamond hierarchy so that a class D(B, C) where both B and C define
     @agentic_object with different imports gets all of them combined.
