@@ -224,6 +224,48 @@ class AgenticObject:
                 _register(method_name, method)
         return members
 
+    def _describe_sandbox_methods(self) -> list[dict]:
+        """Build a structured catalog of all @tool/@sandbox member functions for documentation.
+
+        Returns a list of dicts, one per method, with name, parameters, return type, and docstring.
+        Suitable for use by a DocumentationProvider to render into a TextBuffer.
+        """
+        import inspect
+
+        members = self._gather_sandbox_members()
+        catalog: list[dict] = []
+        for name, method in members.items():
+            try:
+                sig = inspect.signature(method)
+            except (ValueError, TypeError):
+                sig = None
+            doc = (method.__doc__ or "").strip()
+            params: list[dict] = []
+            returns = "unknown"
+            if sig:
+                return_annotation = sig.return_annotation
+                if return_annotation is not inspect.Parameter.empty:
+                    returns = getattr(return_annotation, "__name__", str(return_annotation))
+                for param_name, param in sig.parameters.items():
+                    if param_name == "self":
+                        continue
+                    ptype: str = "any"
+                    if param.annotation is not inspect.Parameter.empty:
+                        ptype = getattr(param.annotation, "__name__", str(param.annotation))
+                    params.append({
+                        "name": param_name,
+                        "type": ptype,
+                        "required": param.default is inspect.Parameter.empty,
+                        "default": param.default if param.default is not inspect.Parameter.empty else None,
+                    })
+            catalog.append({
+                "name": name,
+                "parameters": params,
+                "returns": returns,
+                "doc": doc,
+            })
+        return catalog
+
     def _init_sandbox_builder(self, config: dict[str, Any]) -> SandboxBuilder:
         """Create and initialize a SandboxBuilder with builtins and imports.
 
