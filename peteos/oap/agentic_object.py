@@ -85,6 +85,7 @@ class AgenticObject:
     def __init__(self) -> None:
         super().__init__()
         self._oap_role: Role = AgenticObjectRegistry.create_role(self.__class__.__name__)
+        self._inject_code_exec_section()
         self._oap_lock: threading.Lock = threading.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
@@ -93,7 +94,6 @@ class AgenticObject:
         self._oap_auto_approve_tools: list[str] = []
         self._register_tools()
         self._register_output_schema_hook()
-        self._register_sandbox_hook()
         self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
         self._register_sandbox_tool()
         self._register_media_tool()
@@ -141,23 +141,28 @@ class AgenticObject:
         schema_block = format_schema_for_prompt(json_schema, doc_entries)
         return f"To finish your turn of the conversation, call the produce_output tool with the answer argument satisfying the following schema:\n{schema_block}"
 
-    def _register_sandbox_hook(self) -> None:
-        """Register the python_exec system prompt hook when code execution is enabled."""
+    def _inject_code_exec_section(self) -> None:
+        """Replace {python_exec_section} placeholder with the python_exec guidance.
+
+        Injects the content at init time so no deferred hook is needed.
+        """
         config = _collect_oap_config(self.__class__)
         if not config.get("allow_code_execution", False):
+            self._oap_role.system_prompt = self._oap_role.system_prompt.replace(
+                "{python_exec_section}", ""
+            )
             return
-        self._oap_system_prompt_hooks["python_exec"] = self._python_exec_system_prompt_hook
-
-    def _python_exec_system_prompt_hook(self) -> str:
-        """System prompt hook: instructs the agent on using the python_exec tool."""
-        imports = _collect_oap_config(self.__class__).get("imports")
+        imports = config.get("imports")
         imports_str = ""
         if imports:
             mods_list = ", ".join(
                 m.__name__ if hasattr(m, "__name__") else str(m) for m in imports
             )
             imports_str = f"\nAvailable modules: {mods_list}."
-        return prompts.PYTHON_EXEC_PROMPT.format(modules_section=imports_str)
+        exec_block = prompts.PYTHON_EXEC_PROMPT.format(modules_section=imports_str)
+        self._oap_role.system_prompt = self._oap_role.system_prompt.replace(
+            "{python_exec_section}", exec_block
+        )
 
     def _register_sandbox_tool(self) -> None:
         """Register python_exec tool when allow_code_execution is enabled on the class or any ancestor."""
