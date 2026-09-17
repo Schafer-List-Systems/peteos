@@ -137,7 +137,8 @@ class AgenticObject:
         output_schema = self._oap_current_output_schema
         desc = get_schema_description(output_schema)
         json_schema, doc_entries = desc
-        return format_schema_for_prompt(json_schema, doc_entries)
+        schema_block = format_schema_for_prompt(json_schema, doc_entries)
+        return f"Output schema for the produce_output tool (answer=):\n{schema_block}"
 
     def _register_sandbox_hook(self) -> None:
         """Register the python_exec system prompt hook when code execution is enabled."""
