@@ -74,10 +74,9 @@ from peteos.persona.agent import Agent
 
 
 class AgenticObject:
-    """Base class for all Object-Agentic Programming objects.
+    """ """
 
-    All subclasses are auto-registered in AgenticObjectRegistry.
-    """
+    __doc__ = prompts.AGENTIC_OBJECT_PROMPT
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
@@ -135,10 +134,12 @@ class AgenticObject:
     def _output_schema_hook(self) -> str:
         """System prompt hook: returns formatted output schema description."""
         output_schema = self._oap_current_output_schema
+        if output_schema is None or output_schema is Any:
+            return ""
         desc = get_schema_description(output_schema)
         json_schema, doc_entries = desc
         schema_block = format_schema_for_prompt(json_schema, doc_entries)
-        return f"Output schema for the produce_output tool (answer=):\n{schema_block}"
+        return f"To finish your turn of the conversation, call the produce_output tool with the answer argument satisfying the following schema:\n{schema_block}"
 
     def _register_sandbox_hook(self) -> None:
         """Register the python_exec system prompt hook when code execution is enabled."""

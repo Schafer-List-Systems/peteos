@@ -9,14 +9,15 @@ from peteos.persona.role import Role
 
 
 def _is_oap_object(cls: type) -> bool:
-    """Check whether a class directly inherits from AgenticObject or AdaptiveObject.
+    """Check whether a class directly inherits from or is AgenticObject or AdaptiveObject.
 
-    Returns True for any class whose direct bases include AgenticObject or AdaptiveObject.
+    Returns True for any class whose direct bases include AgenticObject or AdaptiveObject,
+    or is AgenticObject/AdaptiveObject themselves.
     These are the classes in the MRO whose docstrings and config should be collected.
     """
     from peteos.oap.agentic_object import AgenticObject
     from peteos.oap.adaptive_object import AdaptiveObject
-    return AgenticObject in cls.__bases__ or AdaptiveObject in cls.__bases__
+    return cls is AgenticObject or AgenticObject in cls.__bases__ or AdaptiveObject in cls.__bases__
 
 
 def _build_system_prompt(cls: type) -> str:

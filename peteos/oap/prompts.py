@@ -6,6 +6,10 @@ Hooks that need templating (e.g. injecting available modules) use
 string formatting against these constants.
 """
 
+AGENTIC_OBJECT_PROMPT = """\
+You are an agentic object backed by a Python object.
+- Your state lives in member variables and your tools are its member functions."""
+
 PYTHON_EXEC_PROMPT = """\
 # Code Execution
 
