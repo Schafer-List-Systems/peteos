@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
+import textwrap
 from typing import Any, Callable
 
 from peteos.oap.agentic_object import AgenticObject
@@ -95,11 +97,30 @@ class AdaptiveObject(AgenticObject):
             "code": code,
         }
 
-        # Build a proxy that closes over runner, so self.func_name(...) works.
-        def proxy(*args: Any, runner: Runner, **kwargs: Any) -> str:
+        # Build a proxy whose inspect.signature matches the user's declared parameters.
+        # runner is the last parameter — the harness injects it at call time.
+        sig_parts: list[str] = []
+        for pname, pinfo in parameters.items():
+            ptype = pinfo.get("type", "any")
+            default = pinfo.get("default")
+            decl = f"{pname}: {ptype}"
+            if default is not None:
+                decl += f" = {default!r}"
+            sig_parts.append(decl)
+        sig_parts.append("runner: Runner = None")
+
+        sig_code = f"def _sigholder({', '.join(sig_parts)}): pass"
+        ns: dict = {}
+        exec(compile(sig_code, "<dynamic>", "exec"), ns)
+        sigholder = ns["_sigholder"]
+
+        @functools.wraps(sigholder)
+        def proxy(*args, runner=None, **kwargs):
             return getattr(runner.sandbox, func_name)(*args, **kwargs)
 
+        proxy.__doc__ = docstring
         proxy._tool_name = func_name
+        proxy.__module__ = AdaptiveObject.__module__
         defined_tool = Tool(name=func_name, description=docstring, func=proxy, parameters=parameters)
         self.__dict__[func_name] = proxy
         self._oap_tool_manager.register_tool(defined_tool)
