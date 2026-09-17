@@ -67,7 +67,7 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
     }
 
 
-from peteos.utils._schema import _format_docs, get_schema_description, relaxed_parse_data
+from peteos.utils._schema import format_schema_for_prompt, get_schema_description, relaxed_parse_data
 
 
 from peteos.persona.agent import Agent
@@ -137,7 +137,7 @@ class AgenticObject:
         output_schema = self._oap_current_output_schema
         desc = get_schema_description(output_schema)
         json_schema, doc_entries = desc
-        return _format_docs(doc_entries)
+        return format_schema_for_prompt(json_schema, doc_entries)
 
     def _register_sandbox_hook(self) -> None:
         """Register the python_exec system prompt hook when code execution is enabled."""
@@ -383,10 +383,8 @@ class AgenticObject:
 
             desc = get_schema_description(output_schema)
             json_schema, doc_entries = desc
-            hint = f"Expected answer matching schema format: {json_schema}."
-            docstring = _format_docs(doc_entries)
-            if docstring:
-                hint += f"\nSchema description:\n{docstring}"
+            schema_block = format_schema_for_prompt(json_schema, doc_entries)
+            hint = f"Expected answer matching schema format:\n{schema_block}"
             return f"{e}\n{hint}"
 
         try:
@@ -696,14 +694,10 @@ class AgenticObject:
                     output_schema = self._oap_current_output_schema
                     desc = get_schema_description(output_schema)
                     json_schema, doc_entries = desc
-                    docstring = _format_docs(doc_entries)
-
-                    schema_desc = f"Provide your final answer with the `produce_output` tool and arguments matching the schema:\n{json_schema}"
-                    if docstring:
-                        schema_desc += f"\nSchema description:\n{docstring}"
+                    schema_block = format_schema_for_prompt(json_schema, doc_entries)
                     reminder = (
                         f"It looks like you finished a step without calling `produce_output` or `produce_error`. "
-                        f"If you have your final answer, call `produce_output` with arguments in the following schema: {schema_desc} "
+                        f"If you have your final answer, call `produce_output` with arguments in the following schema:\n{schema_block} "
                     )
 
                     await r.queue_message(Message.create(

@@ -158,20 +158,22 @@ def _type_name(schema: type, globalns: dict | None = None) -> str:
     return resolved.__name__
 
 
-def _format_docs(docs: list[tuple[str, str]]) -> str:
-    """Format a list of (type_name, docstring) tuples into a readable block.
+def format_schema_for_prompt(json_schema: str, doc_entries: list[tuple[str, str]]) -> str:
+    """Format a schema description for injection into a system prompt or message.
 
-    Each non-empty docstring gets a '# TypeName' header for clarity.
+    Prepends the type expression, then each docstring with a '# TypeName' header.
     """
-    if not docs:
-        return ""
-    lines = []
-    for type_name, doc in docs:
-        if doc:
-            lines.append(f"# {type_name}")
-            lines.append(doc)
-            lines.append("")
-    return "\n".join(lines).strip()
+    parts: list[str] = []
+    if json_schema:
+        parts.append(json_schema)
+    if doc_entries:
+        parts.append("Schema description:")
+        for type_name, doc in doc_entries:
+            if doc:
+                parts.append(f"# {type_name}")
+                parts.append(doc)
+                parts.append("")
+    return "\n".join(parts).strip()
 
 
 def get_schema_description(schema: type | None, _seen: set | None = None) -> tuple[str, list[tuple[str, str]]]:
