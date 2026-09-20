@@ -472,7 +472,10 @@ class SandboxBuilder:
                     )
                 token = Sandbox._calling_ns.set(caller_scope)
                 try:
-                    return compiled_function(self, *args, **kwargs) if has_unbound_self else compiled_function(*args, **kwargs)
+                    if has_unbound_self:
+                        return compiled_function(self, *args, **kwargs)
+                    else:
+                        return compiled_function(*args, **kwargs)
                 finally:
                     Sandbox._calling_ns.reset(token)
 

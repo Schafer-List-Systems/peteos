@@ -116,11 +116,19 @@ class AdaptiveObject(AgenticObject):
 
         @functools.wraps(sigholder)
         def proxy(*args, runner=None, **kwargs):
-            return getattr(runner.sandbox, func_name)(*args, **kwargs)
+            # HOTFIX: When called outside a session context (runner is None),
+            # route via the sandbox builder's sandbox to avoid crash.
+            # SEE ADR-001 for proper resolution: session pool ensures runner
+            # is always available; this fallback bypasses sandbox isolation.
+            if runner is not None:
+                return getattr(runner.sandbox, func_name)(*args, **kwargs)
+            sandbox = self._oap_sandbox_builder.get_sandbox()
+            return getattr(sandbox, func_name)(*args, **kwargs)
 
         proxy.__doc__ = docstring
         proxy._tool_name = func_name
         proxy.__module__ = AdaptiveObject.__module__
+        proxy._raw = self._oap_sandbox_builder._sandbox_namespace[func_name]
         defined_tool = Tool(name=func_name, description=docstring, func=proxy, parameters=parameters)
         self.__dict__[func_name] = proxy
         self._oap_tool_manager.register_tool(defined_tool)
