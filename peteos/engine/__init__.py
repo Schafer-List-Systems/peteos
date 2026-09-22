@@ -11,6 +11,7 @@ from peteos.utils.activeclass import ActiveClass
 from peteos.engine.executionenvironment import (
     ApprovalEvent,
     ExecutionEnvironment,
+    RespondHandle,
     ToolApprovalStatus,
     ToolCallRecord,
     ToolExecutionStatus,
@@ -30,6 +31,7 @@ __all__ = [
     "ExecStatus",
     "ExecutionEnvironment",
     "NotificationEvent",
+    "RespondHandle",
     "Runner",
     "SessionState",
     "ToolCallGroup",

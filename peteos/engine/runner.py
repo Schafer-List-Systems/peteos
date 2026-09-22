@@ -346,7 +346,7 @@ class Runner(ActiveClass):
             self._execution_environment.create_tool_group(group_id, anchor_name)
             for cp in content_parts:
                 if cp.type == "tool_use":
-                    self._execution_environment.add_tool_call(cp)
+                    self._execution_environment.add_tool_call(cp, runner=self)
             msg_index = self._session.active_context.get_anchor_msg_index("messages")
             self._session.active_context.add_anchor(anchor_name, msg_index, after_existing=False)
             result_msg = self._execution_environment.get_foreground_group().result_message
@@ -448,7 +448,7 @@ class Runner(ActiveClass):
     # ------------------------------------------------------------------ #
 
     async def _handle_tool_group(self) -> bool:
-        """Process all sequential approved tool calls.
+        """Process all sequential reviewed tool calls.
 
         Returns True if the foreground group is done and the result message
         was appended to the context. In that case the caller should not
@@ -466,13 +466,8 @@ class Runner(ActiveClass):
             tool_call = record.tool_call
             tool_name = tool_call.name
 
-            # Already denied (e.g., tool not found) — skip hooks and execution
-            if record.approval_status == ToolApprovalStatus.DENIED:
-                _logger.debug("[runner] Tool call %s already denied, skipping", tool_name)
-                break
-
-            # on_tool_call hooks only fire on APPROVED records
             _invocation_hooks = self._session._invocation_hooks or {}
+            hook_fired = False
             if "on_tool_call" in _invocation_hooks:
                 tool_args = json.loads(tool_call.arguments) if tool_call.arguments else {}
                 ctx = {
@@ -480,17 +475,41 @@ class Runner(ActiveClass):
                     "session": self._session,
                     "tool_name": tool_name,
                     "arguments": tool_args,
+                    "approval_status": record.approval_status,
+                    "respond": record.respond,
                 }
+                hook_fired = True
                 for hook in _invocation_hooks["on_tool_call"]:
                     result = hook(ctx)
-                    if result is not None:
+                    if result is False or isinstance(result, str):
                         record.approval_status = ToolApprovalStatus.DENIED
-                        record.denied_reason = result
-                        foreground.deny_all_remaining(result)
+                        record.denied_reason = result if isinstance(result, str) else "Denied by on_tool_call hook"
+                        foreground.deny_all_remaining(record.denied_reason)
+                        _logger.debug(
+                            "[runner] Tool call %s denied by on_tool_call hook: %s",
+                            tool_name, record.denied_reason,
+                        )
                         break
+                    if result is True:
+                        _logger.debug(
+                            "[runner] Tool call %s approved by on_tool_call hook",
+                            tool_name,
+                        )
 
                 if record.approval_status == ToolApprovalStatus.DENIED:
                     break
+
+            if record.approval_status == ToolApprovalStatus.DENIED:
+                _logger.debug("[runner] Tool call %s denied, skipping execution", tool_name)
+                break
+
+            if record.approval_status == ToolApprovalStatus.PENDING and hook_fired:
+                _logger.debug(
+                    "[runner] Tool call %s pending, hook returned None (async path), keeping pending",
+                    tool_name,
+                )
+                foreground.records.insert(0, record)
+                break
 
             result_str, success = await self._execution_environment.execute_and_inject(tool_call, runner=self)
             record.execution_status = ToolExecutionStatus.EXECUTED

@@ -47,6 +47,7 @@ class ToolCallRecord:
     execution_result: Optional[str] = None
     execution_success: Optional[bool] = None
     denied_reason: Optional[str] = None
+    respond: Optional[RespondHandle] = None
 
 
 @dataclass
@@ -115,6 +116,37 @@ class ToolCallGroup:
 
 
 @dataclass
+class RespondHandle:
+    """Injection handle for async tool call approval.
+
+    Returned in the on_tool_call hook context. Captures the runner
+    internally so the caller can approve or deny without a direct
+    runner reference.
+    """
+    tool_call_id: str
+    tool_call: ContentPart
+    _runner: "Runner" = field(repr=False)
+
+    def approve(self) -> None:
+        """Approve the tool call."""
+        from peteos.engine.executionenvironment import ApprovalEvent
+        self._runner.push_event(ApprovalEvent(
+            tool_call_id=self.tool_call_id,
+            tool_call=self.tool_call,
+            approved=True,
+        ))
+
+    def deny(self, reason: str | None = None) -> None:
+        """Deny the tool call with an optional reason."""
+        from peteos.engine.executionenvironment import ApprovalEvent
+        self._runner.push_event(ApprovalEvent(
+            tool_call_id=self.tool_call_id,
+            tool_call=self.tool_call,
+            approved=False,
+        ))
+
+
+@dataclass
 class ApprovalEvent:
     """Event pushed to Runner.event_queue to signal approval of a tool call."""
     tool_call_id: str = ""
@@ -180,7 +212,7 @@ class ExecutionEnvironment:
         self._groups.pop(self._foreground_group.id, None)
         self._foreground_group = None
 
-    def add_tool_call(self, tool_call: ContentPart) -> ToolCallRecord:
+    def add_tool_call(self, tool_call: ContentPart, runner: "Runner | None" = None) -> ToolCallRecord:
         """Add a tool call to the foreground group. Returns the created record."""
         group = self._foreground_group
         if group is None:
@@ -192,6 +224,14 @@ class ExecutionEnvironment:
 
         tool_name = tool_call.name
 
+        respond: RespondHandle | None = None
+        if runner is not None:
+            respond = RespondHandle(
+                tool_call_id=tc_id,
+                tool_call=tool_call,
+                _runner=runner,
+            )
+
         if not self._tool_manager or not self._tool_manager.get_tool(tool_name):
             record = ToolCallRecord(
                 tool_call_id=tc_id,
@@ -199,6 +239,7 @@ class ExecutionEnvironment:
                 approval_status=ToolApprovalStatus.DENIED,
                 execution_status=ToolExecutionStatus.DENIED,
                 denied_reason=f"Tool '{tool_name}' is not available for this agent",
+                respond=respond,
             )
         elif tool_name in self.auto_approve_tools:
             record = ToolCallRecord(
@@ -206,6 +247,7 @@ class ExecutionEnvironment:
                 tool_call=tool_call,
                 approval_status=ToolApprovalStatus.APPROVED,
                 execution_status=ToolExecutionStatus.EXECUTING,
+                respond=respond,
             )
         else:
             record = ToolCallRecord(
@@ -213,6 +255,7 @@ class ExecutionEnvironment:
                 tool_call=tool_call,
                 approval_status=ToolApprovalStatus.PENDING,
                 execution_status=ToolExecutionStatus.WAITING_FOR_APPROVAL,
+                respond=respond,
             )
         group.add_tool_call(record)
         return record
