@@ -28,20 +28,20 @@ class TestAgenticObjectInit:
 
     def test_system_prompt_default_no_docstring(self):
         obj = self._BaseTestAO()
-        assert "You are an agent working on a _BaseTestAO object" in obj.role.system_prompt
+        assert "You are an agentic object" in obj.role.system_prompt
 
     def test_system_prompt_from_class_docstring(self):
         class DocstringObj(AgenticObject):
             """You are a special analysis agent."""
         obj = DocstringObj()
-        assert obj.role.system_prompt == "You are a special analysis agent."
-        assert "You are an agent working on a DocstringObj object" not in obj.role.system_prompt
+        assert "You are a special analysis agent." in obj.role.system_prompt
+        assert "You are an agentic object" in obj.role.system_prompt
 
     def test_system_prompt_empty_docstring_falls_back(self):
         class EmptyDocstringObj(AgenticObject):
             """"""
         obj = EmptyDocstringObj()
-        assert "You are an agent working on a EmptyDocstringObj object" in obj.role.system_prompt
+        assert "You are an agentic object" in obj.role.system_prompt
 
     def test_system_prompt_strips_whitespace(self):
         class WhitespaceDocstringObj(AgenticObject):
@@ -51,7 +51,8 @@ class TestAgenticObjectInit:
 
             """
         obj = WhitespaceDocstringObj()
-        assert obj.role.system_prompt == "You are a whitespacey agent."
+        assert "You are a whitespacey agent." in obj.role.system_prompt
+        assert "You are an agentic object" in obj.role.system_prompt
 
 
 class TestToolRegistry:

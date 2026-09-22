@@ -43,14 +43,16 @@ class TestHookStorage:
         assert "python_exec" not in obj._oap_system_prompt_hooks
 
     def test_code_exec_has_python_exec_hook(self):
-        """With allow_code_execution, python_exec hook is stored."""
+        """With allow_code_execution, python_exec content is in system_prompt (not a hook)."""
         obj = CodeExecObj()
-        assert "python_exec" in obj._oap_system_prompt_hooks
+        assert "python_exec" not in obj._oap_system_prompt_hooks
+        assert "# Code Execution" in obj.role.system_prompt
 
     def test_code_exec_with_imports_has_python_exec_hook(self):
-        """Imports don't change hook registration."""
+        """Imports are reflected in system_prompt."""
         obj = CodeExecWithImportsObj()
-        assert "python_exec" in obj._oap_system_prompt_hooks
+        assert "python_exec" not in obj._oap_system_prompt_hooks
+        assert "# Code Execution" in obj.role.system_prompt
 
     def test_output_schema_hook_always_registered(self):
         """Output schema hook is always registered."""
@@ -67,34 +69,29 @@ class TestHookContent:
     """Verify hook callbacks return the expected text."""
 
     def test_python_exec_hook_content(self):
-        """python_exec hook returns code execution instructions."""
+        """python_exec content is injected into system_prompt at init time."""
         obj = CodeExecObj()
-        hook = obj._oap_system_prompt_hooks["python_exec"]
-        text = hook()
-        assert "# Code Execution" in text
-        assert "python_exec" in text
-        assert "Forbidden" in text
+        assert "python_exec" not in obj._oap_system_prompt_hooks
+        assert "# Code Execution" in obj.role.system_prompt
+        assert "python_exec" in obj.role.system_prompt
+        assert "Forbidden" in obj.role.system_prompt
 
     def test_python_exec_hook_includes_imports(self):
-        """python_exec hook includes available modules when imports are set."""
+        """Available modules appear in system_prompt when imports are set."""
         obj = CodeExecWithImportsObj()
-        hook = obj._oap_system_prompt_hooks["python_exec"]
-        text = hook()
-        assert "numpy" in text
+        assert "numpy" in obj.role.system_prompt
 
     def test_python_exec_hook_no_imports(self):
-        """python_exec hook has no modules list when imports are empty."""
+        """No modules list in system_prompt when imports are empty."""
         obj = CodeExecObj()
-        hook = obj._oap_system_prompt_hooks["python_exec"]
-        text = hook()
-        assert "Available modules:" not in text
+        assert "Available modules:" not in obj.role.system_prompt
 
     def test_output_schema_hook_content(self):
-        """output_schema hook returns default schema when no output_schema set."""
+        """output_schema hook returns empty string when no output_schema is set."""
         obj = PlainObj()
         hook = obj._oap_system_prompt_hooks["output_schema"]
         text = hook()
-        assert "# any" in text
+        assert text == ""
 
 
 # ---------------------------------------------------------------------------
@@ -115,15 +112,19 @@ class TestHooksOnSystemPromptMessage:
         return session
 
     def test_system_prompt_message_has_hook_ids(self):
-        """After registration, system prompt message has hook_ids."""
+        """After registration, system prompt message has hook_ids for registered hooks."""
         obj = CodeExecObj()
         session = self._make_session_with_hooks(obj)
         spm = session.active_context.system_prompt_message
-        assert len(spm.hook_ids) == 2
+        assert len(spm.hook_ids) == 1
 
     def test_materialize_resolves_hook_content(self):
-        """materialize() resolves hook outputs into content."""
+        """materialize() resolves hook outputs into content.
+
+        Code exec content is in role.system_prompt (injected at init).
+        """
         obj = CodeExecObj()
+        assert "# Code Execution" in obj.role.system_prompt
         session = self._make_session_with_hooks(obj)
 
         session.materialize()
@@ -133,19 +134,11 @@ class TestHooksOnSystemPromptMessage:
         text_parts = [p.text for p in content if p.type == "text"]
         combined = "\n".join(text_parts)
         assert "static prompt" in combined
-        assert "# Code Execution" in combined
 
     def test_materialize_includes_imports_in_content(self):
-        """materialize() resolves import info into system prompt."""
+        """Import modules appear in role.system_prompt."""
         obj = CodeExecWithImportsObj()
-        session = self._make_session_with_hooks(obj)
-
-        session.materialize()
-        spm = session.active_context.system_prompt_message
-        content = spm.content
-        text_parts = [p.text for p in content if p.type == "text"]
-        combined = "\n".join(text_parts)
-        assert "numpy" in combined
+        assert "numpy" in obj.role.system_prompt
 
     def test_no_hooks_on_plain_object(self):
         """Plain object only has output_schema hook."""
