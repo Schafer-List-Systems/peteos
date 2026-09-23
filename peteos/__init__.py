@@ -13,6 +13,7 @@ from peteos.oap import (
     tool,
 )
 from peteos.oap.decorators import sandbox
+from peteos.engine import ToolApprovalStatus
 
 __all__ = [
     "AgenticObject",
@@ -21,6 +22,7 @@ __all__ = [
     "agentic_object",
     "tool",
     "sandbox",
+    "ToolApprovalStatus",
 ]
 
 # Bootstrap backends and roles from peteos.json at import time.
