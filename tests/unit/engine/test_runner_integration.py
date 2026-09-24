@@ -25,6 +25,7 @@ from peteos.engine.executionenvironment import (
     ExecutionEnvironment,
     ToolApprovalStatus,
     ToolCallGroup,
+    ToolCallRecord,
     ToolExecutionStatus,
 )
 from peteos.engine.runner import Runner
@@ -703,7 +704,7 @@ class TestForegroundGroupStates:
         record = runner.execution_environment.add_tool_call(tc, runner=runner)
 
         assert record.approval_status == ToolApprovalStatus.APPROVED
-        assert record.execution_status == ToolExecutionStatus.EXECUTING
+        assert record.execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
     @pytest.mark.asyncio
     async def test_group_add_unknown_tool_denied(self):
@@ -1106,12 +1107,11 @@ class TestEEExecuteTool:
         add_runner._session = MagicMock()
         add_runner._session.invocation_hooks = {}
         add_runner.role = role
-        ee.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=add_runner)
-
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
+        record = ee.add_tool_call(tc, runner=add_runner)
         runner = MagicMock()
         runner.call_hooks_deny = AsyncMock(return_value=None)
-        result_str, success = await ee.execute_and_inject(tc, runner=runner)
+        result_str, success = await ee.execute_and_inject(record, runner=runner)
 
         assert success is True
         assert result_str == "42"
@@ -1135,10 +1135,15 @@ class TestEEExecuteTool:
         )
 
         ee.create_tool_group("g1", "g1:tool_result")
+        add_runner = MagicMock()
+        add_runner._session = MagicMock()
+        add_runner._session.invocation_hooks = {}
+        add_runner.role = role
         tc = ContentPart.create_tool_use("tc1", "notify", "{}")
+        record = ee.add_tool_call(tc, runner=add_runner)
         runner = MagicMock()
         runner.call_hooks_deny = AsyncMock(return_value=None)
-        result_str, success = await ee.execute_and_inject(tc, runner=runner)
+        result_str, success = await ee.execute_and_inject(record, runner=runner)
 
         assert success is True
         assert result_str is None
@@ -1156,10 +1161,20 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
+        record = ToolCallRecord(
+            tool_call_id="tc1",
+            tool_call=tc,
+            approval_status=ToolApprovalStatus.APPROVED,
+            execution_status=ToolExecutionStatus.WAITING_FOR_EXECUTION,
+            denied_reason=None,
+            decisions=[],
+            responded_count=0,
+            queued=False,
+        )
         runner = MagicMock()
         runner.call_hooks_deny = AsyncMock(return_value=None)
         with pytest.raises(RuntimeError, match="No foreground"):
-            await ee.execute_and_inject(tc, runner=runner)
+            await ee.execute_and_inject(record, runner=runner)
 
     @pytest.mark.asyncio
     async def test_execute_tool_async_result(self):
@@ -1294,7 +1309,7 @@ class TestRunnerFullCycle:
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
         assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
-        assert fg.records[0].execution_status == ToolExecutionStatus.EXECUTING
+        assert fg.records[0].execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
         # _handle_tool_group executes the auto-approved tool and closes the group
         await runner._handle_tool_group()

@@ -62,7 +62,7 @@ class TestExecutionEnvironmentAddToolCall:
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
         rec = env.add_tool_call(tc, runner=mock_runner)
         assert rec.approval_status == ToolApprovalStatus.APPROVED
-        assert rec.execution_status == ToolExecutionStatus.EXECUTING
+        assert rec.execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
     def test_add_tool_call_unknown_tool(self, mock_runner):
         mock_tm = MagicMock()

@@ -478,10 +478,8 @@ class Runner(ActiveClass):
                 foreground.records.insert(0, record)
                 break
 
-            result_str, success = await self._execution_environment.execute_and_inject(tool_call, runner=self)
-            record.execution_status = ToolExecutionStatus.EXECUTED
-            record.execution_result = result_str
-            if not success and result_str.startswith("Error: Tool '"):
+            result_str, success = await self._execution_environment.execute_and_inject(record, runner=self)
+            if not success and result_str and result_str.startswith("Error: Tool '"):
                 _logger.debug("[runner] Tool %s not found", tool_name)
                 break
             if not success:

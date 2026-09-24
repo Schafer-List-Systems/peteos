@@ -922,10 +922,8 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject creates result message with correct content."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
-        result_str, success = await runner.execution_environment.execute_and_inject(
-            ContentPart.create_tool_use("tc1", "add", "{}"), runner
-        )
+        record = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
+        result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is True
         assert result_str == "5"
         fg = runner.execution_environment.get_foreground_group()
@@ -940,14 +938,12 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject appends results for multiple tool calls."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"), runner=runner)
+        record1 = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
+        record2 = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"), runner=runner)
         tool.execute = MagicMock(side_effect=[5, 10])
 
-        for tc_id in ["tc1", "tc2"]:
-            await runner.execution_environment.execute_and_inject(
-                ContentPart.create_tool_use(tc_id, "add", "{}"), runner
-            )
+        for record in [record1, record2]:
+            await runner.execution_environment.execute_and_inject(record, runner)
 
         fg = runner.execution_environment.get_foreground_group()
         assert len(fg.result_message.raw_dict["content"]) == 2
@@ -958,11 +954,9 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject catches tool exceptions and returns error."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
+        record = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
         tool.execute = MagicMock(side_effect=RuntimeError("kaboom"))
-        result_str, success = await runner.execution_environment.execute_and_inject(
-            ContentPart.create_tool_use("tc1", "add", "{}"), runner
-        )
+        result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is False
         assert "RuntimeError" in result_str
         fg = runner.execution_environment.get_foreground_group()
@@ -991,10 +985,8 @@ class TestRunnerExecuteAndInject:
             tool_manager=tm, role=role, auto_approve_tools=[], tool_failure_policy="abort"
         )
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "nonexistent", "{}"), runner=runner)
-        result_str, success = await runner.execution_environment.execute_and_inject(
-            ContentPart.create_tool_use("tc1", "nonexistent", "{}"), runner
-        )
+        record = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "nonexistent", "{}"), runner=runner)
+        result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is False
         assert "not found" in result_str
 
