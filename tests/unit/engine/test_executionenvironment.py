@@ -18,33 +18,6 @@ from peteos.engine.executionenvironment import (
 from peteos.conversation.message import ContentPart
 
 
-@pytest.fixture
-def mock_role():
-    return MagicMock()
-
-
-@pytest.fixture
-def mock_tool_manager():
-    tm = MagicMock()
-    tool = MagicMock()
-    tool.func = lambda a, b: a + b
-    tool.func.__name__ = "add"
-    tool.parameters = {"a": {"type": "int"}, "b": {"type": "int"}}
-    tool.execute = MagicMock(return_value=5)
-    tm.get_tool.return_value = tool
-    return tm
-
-
-@pytest.fixture
-def env(mock_role, mock_tool_manager):
-    return ExecutionEnvironment(
-        tool_manager=mock_tool_manager,
-        role=mock_role,
-        auto_approve_tools=[],
-        tool_failure_policy="abort",
-    )
-
-
 class TestExecutionEnvironmentGroupCreation:
     """Test create_tool_group."""
 
@@ -67,11 +40,11 @@ class TestExecutionEnvironmentAddToolCall:
     def test_add_tool_call_pending(self, env):
         env.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
-        rec = env.add_tool_call(tc)
+        rec = env.add_tool_call(tc, runner=env._runner)
         assert rec.approval_status == ToolApprovalStatus.PENDING
         assert rec.execution_status == ToolExecutionStatus.WAITING_FOR_APPROVAL
 
-    def test_add_tool_call_auto_approved(self):
+    def test_add_tool_call_auto_approved(self, mock_runner):
         mock_tm = MagicMock()
         tool = MagicMock()
         tool.func = lambda a, b: a + b
@@ -81,25 +54,25 @@ class TestExecutionEnvironmentAddToolCall:
         mock_tm.get_tool.return_value = tool
         env = ExecutionEnvironment(
             tool_manager=mock_tm,
-            role=MagicMock(),
+            role=mock_runner.role,
             auto_approve_tools=["add"],
             tool_failure_policy="abort",
         )
         env.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
-        rec = env.add_tool_call(tc)
+        rec = env.add_tool_call(tc, runner=mock_runner)
         assert rec.approval_status == ToolApprovalStatus.APPROVED
         assert rec.execution_status == ToolExecutionStatus.EXECUTING
 
-    def test_add_tool_call_unknown_tool(self):
+    def test_add_tool_call_unknown_tool(self, mock_runner):
         mock_tm = MagicMock()
         mock_tm.get_tool.return_value = None
         env = ExecutionEnvironment(
-            tool_manager=mock_tm, role=MagicMock(), auto_approve_tools=[], tool_failure_policy="abort"
+            tool_manager=mock_tm, role=mock_runner.role, auto_approve_tools=[], tool_failure_policy="abort"
         )
         env.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "unknown", "{}")
-        rec = env.add_tool_call(tc)
+        rec = env.add_tool_call(tc, runner=mock_runner)
         assert rec.approval_status == ToolApprovalStatus.DENIED
 
 
@@ -109,39 +82,39 @@ class TestExecutionEnvironmentGroupQueries:
     def test_has_pending_tool_call(self, env):
         env.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
-        env.add_tool_call(tc)
+        env.add_tool_call(tc, runner=env._runner)
         fg = env.get_foreground_group()
         assert fg is not None
         assert fg.has_pending() is True
 
     def test_has_reviewed_tool_call_all_pending(self, env):
         env.create_tool_group("g1", "g1:tool_result")
-        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=env._runner)
         assert env.get_foreground_group().has_reviewed() is False
 
     def test_has_reviewed_tool_call_approved(self, env):
         env.create_tool_group("g1", "g1:tool_result")
-        rec = env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        rec = env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=env._runner)
         assert rec.approval_status == ToolApprovalStatus.PENDING
         rec.approval_status = ToolApprovalStatus.APPROVED
         assert env.get_foreground_group().has_reviewed() is True
 
     def test_has_unfinished_tool_call_executing(self, env):
         env.create_tool_group("g1", "g1:tool_result")
-        rec = env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        rec = env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=env._runner)
         rec.execution_status = ToolExecutionStatus.EXECUTING
         assert env.get_foreground_group().has_unfinished() is True
 
     def test_has_unfinished_tool_call_executed(self, env):
         env.create_tool_group("g1", "g1:tool_result")
-        rec = env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        rec = env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=env._runner)
         rec.execution_status = ToolExecutionStatus.EXECUTED
         assert env.get_foreground_group().has_unfinished() is False
 
     def test_get_tool_calls_in_group(self, env):
         env.create_tool_group("g1", "g1:tool_result")
-        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
-        env.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"))
+        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=env._runner)
+        env.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"), runner=env._runner)
         assert len(env.get_foreground_group().records) == 2
 
 
@@ -150,7 +123,7 @@ class TestExecutionEnvironmentApproval:
 
     def test_handle_approval_approved(self, env):
         env.create_tool_group("g1", "g1:tool_result")
-        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=env._runner)
         event = ApprovalEvent(tool_call_id="tc1", approved=True)
         approved, group_id = env._handle_approval(event)
         assert approved is True
@@ -160,7 +133,7 @@ class TestExecutionEnvironmentApproval:
 
     def test_handle_approval_denied(self, env):
         env.create_tool_group("g1", "g1:tool_result")
-        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=env._runner)
         event = ApprovalEvent(tool_call_id="tc1", approved=False)
         approved, group_id = env._handle_approval(event)
         assert approved is False
@@ -180,11 +153,10 @@ class TestExecutionEnvironmentPopPending:
 
     def test_pop_approved_from_mixed(self, env):
         env.create_tool_group("g1", "g1:tool_result")
-        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
-        env.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"))
+        env.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=env._runner)
+        env.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"), runner=env._runner)
         fg = env.get_foreground_group()
         fg.records[0].approval_status = ToolApprovalStatus.APPROVED
-        # tc2 still PENDING
         rec = fg.pop_first_reviewed()
         assert rec.tool_call_id == "tc1"
         assert len(fg.records) == 1

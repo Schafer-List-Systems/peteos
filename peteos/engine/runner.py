@@ -241,7 +241,7 @@ class Runner(ActiveClass):
 
     async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
         """Call all hooks for hook_point from the session's invocation_hooks, merging ExecStatus results."""
-        hooks = self._session._invocation_hooks
+        hooks = self._session.invocation_hooks
         callbacks = hooks.get(hook_point, [])
         merged: ExecStatus | None = None
         for callback in callbacks:
@@ -254,7 +254,7 @@ class Runner(ActiveClass):
 
     async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
         """Call hooks for hook_point, returning the first deny tuple (False, reason) if any."""
-        hooks = self._session._invocation_hooks
+        hooks = self._session.invocation_hooks
         callbacks = hooks.get(hook_point, [])
         for callback in callbacks:
             result = callback(*args)
@@ -466,46 +466,13 @@ class Runner(ActiveClass):
             tool_call = record.tool_call
             tool_name = tool_call.name
 
-            _invocation_hooks = self._session._invocation_hooks or {}
-            hook_fired = False
-            if "on_tool_call" in _invocation_hooks:
-                tool_args = json.loads(tool_call.arguments) if tool_call.arguments else {}
-                ctx = {
-                    "role": self._agent.role.name,
-                    "session": self._session,
-                    "tool_name": tool_name,
-                    "arguments": tool_args,
-                    "approval_status": record.approval_status,
-                    "respond": record.respond,
-                }
-                hook_fired = True
-                for hook in _invocation_hooks["on_tool_call"]:
-                    result = hook(ctx)
-                    if result is False or isinstance(result, str):
-                        record.approval_status = ToolApprovalStatus.DENIED
-                        record.denied_reason = result if isinstance(result, str) else "Denied by on_tool_call hook"
-                        foreground.deny_all_remaining(record.denied_reason)
-                        _logger.debug(
-                            "[runner] Tool call %s denied by on_tool_call hook: %s",
-                            tool_name, record.denied_reason,
-                        )
-                        break
-                    if result is True:
-                        _logger.debug(
-                            "[runner] Tool call %s approved by on_tool_call hook",
-                            tool_name,
-                        )
-
-                if record.approval_status == ToolApprovalStatus.DENIED:
-                    break
-
             if record.approval_status == ToolApprovalStatus.DENIED:
                 _logger.debug("[runner] Tool call %s denied, skipping execution", tool_name)
                 break
 
-            if record.approval_status == ToolApprovalStatus.PENDING and hook_fired:
+            if record.approval_status == ToolApprovalStatus.PENDING:
                 _logger.debug(
-                    "[runner] Tool call %s pending, hook returned None (async path), keeping pending",
+                    "[runner] Tool call %s pending, re-inserting for async resolution",
                     tool_name,
                 )
                 foreground.records.insert(0, record)
