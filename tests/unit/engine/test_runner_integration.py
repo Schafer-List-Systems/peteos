@@ -25,6 +25,7 @@ from peteos.engine.executionenvironment import (
     ExecutionEnvironment,
     ToolApprovalStatus,
     ToolCallGroup,
+    ToolCallRecord,
     ToolExecutionStatus,
 )
 from peteos.engine.runner import Runner
@@ -475,7 +476,7 @@ class TestHandleToolGroup:
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
@@ -499,7 +500,7 @@ class TestHandleToolGroup:
 
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         result_msg = fg.result_message
@@ -523,7 +524,7 @@ class TestHandleToolGroup:
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         # Make the tool return None (fire-and-forget)
         role._tool_manager.get_tool("add").execute = MagicMock(return_value=None)
@@ -562,7 +563,7 @@ class TestHandleToolGroup:
 
         tc = ContentPart.create_tool_use("tc1", "nonexistent", "{}")
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         fg.records[0].approval_status = ToolApprovalStatus.DENIED
@@ -679,7 +680,7 @@ class TestForegroundGroupStates:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
-        record = runner.execution_environment.add_tool_call(tc)
+        record = await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         assert record.approval_status == ToolApprovalStatus.PENDING
         assert record.execution_status == ToolExecutionStatus.WAITING_FOR_APPROVAL
@@ -700,10 +701,10 @@ class TestForegroundGroupStates:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
-        record = runner.execution_environment.add_tool_call(tc)
+        record = await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         assert record.approval_status == ToolApprovalStatus.APPROVED
-        assert record.execution_status == ToolExecutionStatus.EXECUTING
+        assert record.execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
     @pytest.mark.asyncio
     async def test_group_add_unknown_tool_denied(self):
@@ -720,7 +721,7 @@ class TestForegroundGroupStates:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", "{}")
-        record = runner.execution_environment.add_tool_call(tc)
+        record = await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         assert record.approval_status == ToolApprovalStatus.DENIED
         assert record.denied_reason is not None
@@ -741,8 +742,8 @@ class TestForegroundGroupStates:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc1 = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
         tc2 = ContentPart.create_tool_use("tc2", "search", '{"q":"y"}')
-        runner.execution_environment.add_tool_call(tc1)
-        runner.execution_environment.add_tool_call(tc2)
+        await runner.execution_environment.add_tool_call(tc1, runner=runner)
+        await runner.execution_environment.add_tool_call(tc2, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         fg.deny_all_remaining("user cancelled")
@@ -767,7 +768,7 @@ class TestForegroundGroupStates:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         fg.records[0].execution_status = ToolExecutionStatus.EXECUTED
@@ -788,7 +789,7 @@ class TestForegroundGroupStates:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         assert fg.is_done() is False
@@ -836,7 +837,7 @@ class TestToolCallRecordLifecycle:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         assert fg.records[0].approval_status == ToolApprovalStatus.PENDING
@@ -862,8 +863,8 @@ class TestToolCallRecordLifecycle:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc1 = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
         tc2 = ContentPart.create_tool_use("tc2", "search", '{"q":"y"}')
-        runner.execution_environment.add_tool_call(tc1)
-        runner.execution_environment.add_tool_call(tc2)
+        await runner.execution_environment.add_tool_call(tc1, runner=runner)
+        await runner.execution_environment.add_tool_call(tc2, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
 
@@ -889,7 +890,7 @@ class TestToolCallRecordLifecycle:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.find_pending_record("tc1")
         assert record is not None
@@ -910,7 +911,7 @@ class TestToolCallRecordLifecycle:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.find_pending_record("nonexistent")
         assert record is None
@@ -931,8 +932,8 @@ class TestToolCallRecordLifecycle:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc1 = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')  # auto-approved
         tc2 = ContentPart.create_tool_use("tc2", "other", '{"q":"y"}')  # not in auto-approve
-        runner.execution_environment.add_tool_call(tc1)
-        runner.execution_environment.add_tool_call(tc2)
+        await runner.execution_environment.add_tool_call(tc1, runner=runner)
+        await runner.execution_environment.add_tool_call(tc2, runner=runner)
 
         pending = runner.execution_environment.get_pending_tool_calls()
         assert len(pending) == 1
@@ -955,7 +956,7 @@ class TestToolCallRecordLifecycle:
         tc = ContentPart({"type": "tool_use", "name": "search", "arguments": "{}"})
 
         with pytest.raises(ValueError, match="call_id"):
-            runner.execution_environment.add_tool_call(tc)
+            await runner.execution_environment.add_tool_call(tc, runner=runner)
 
 
 # ---------------------------------------------------------------------------
@@ -1066,7 +1067,7 @@ class TestEEExecuteTool:
 
         sid = _uuid.uuid4()
         session = MagicMock()
-        session._invocation_hooks = {}
+        session.invocation_hooks = {}
         agent.get_session = MagicMock(return_value=session)
 
         runner = Runner(agent=agent, session_uuid=sid, chatbot=MagicMock())
@@ -1076,7 +1077,7 @@ class TestEEExecuteTool:
             tool_failure_policy="abort",
         )
 
-        session._invocation_hooks["before_tool_execution"] = [
+        session.invocation_hooks["before_tool_execution"] = [
             lambda *a: (False, "not allowed"),
         ]
 
@@ -1102,12 +1103,15 @@ class TestEEExecuteTool:
         )
 
         ee.create_tool_group("g1", "g1:tool_result")
-        ee.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
-
+        add_runner = MagicMock()
+        add_runner._session = MagicMock()
+        add_runner._session.invocation_hooks = {}
+        add_runner.role = role
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
+        record = await ee.add_tool_call(tc, runner=add_runner)
         runner = MagicMock()
         runner.call_hooks_deny = AsyncMock(return_value=None)
-        result_str, success = await ee.execute_and_inject(tc, runner=runner)
+        result_str, success = await ee.execute_and_inject(record, runner=runner)
 
         assert success is True
         assert result_str == "42"
@@ -1131,10 +1135,15 @@ class TestEEExecuteTool:
         )
 
         ee.create_tool_group("g1", "g1:tool_result")
+        add_runner = MagicMock()
+        add_runner._session = MagicMock()
+        add_runner._session.invocation_hooks = {}
+        add_runner.role = role
         tc = ContentPart.create_tool_use("tc1", "notify", "{}")
+        record = await ee.add_tool_call(tc, runner=add_runner)
         runner = MagicMock()
         runner.call_hooks_deny = AsyncMock(return_value=None)
-        result_str, success = await ee.execute_and_inject(tc, runner=runner)
+        result_str, success = await ee.execute_and_inject(record, runner=runner)
 
         assert success is True
         assert result_str is None
@@ -1152,10 +1161,20 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
+        record = ToolCallRecord(
+            tool_call_id="tc1",
+            tool_call=tc,
+            approval_status=ToolApprovalStatus.APPROVED,
+            execution_status=ToolExecutionStatus.WAITING_FOR_EXECUTION,
+            denied_reason=None,
+            decisions=[],
+            responded_count=0,
+            queued=False,
+        )
         runner = MagicMock()
         runner.call_hooks_deny = AsyncMock(return_value=None)
         with pytest.raises(RuntimeError, match="No foreground"):
-            await ee.execute_and_inject(tc, runner=runner)
+            await ee.execute_and_inject(record, runner=runner)
 
     @pytest.mark.asyncio
     async def test_execute_tool_async_result(self):
@@ -1234,7 +1253,7 @@ class TestRunnerFullCycle:
         def deny_add(ctx):
             return "denied by hook"
 
-        runner._session._invocation_hooks = {"on_tool_call": [deny_add]}
+        runner._session.invocation_hooks = {"on_tool_call": [deny_add]}
 
         user_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.queue_message(user_msg)
@@ -1258,7 +1277,7 @@ class TestRunnerFullCycle:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         status, resp = await runner.step()
         assert status is ExecStatus.PENDING
@@ -1290,7 +1309,7 @@ class TestRunnerFullCycle:
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
         assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
-        assert fg.records[0].execution_status == ToolExecutionStatus.EXECUTING
+        assert fg.records[0].execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
         # _handle_tool_group executes the auto-approved tool and closes the group
         await runner._handle_tool_group()

@@ -167,6 +167,7 @@ def _make_mock_session(
     session.tool_failure_policy = tool_failure_policy
     session.active_context = ctx
     session.state = SessionState()
+    session.invocation_hooks = {}
     return session
 
 
@@ -324,8 +325,8 @@ class TestRunnerStepToolCalls:
 
         # Pre-setup: create group and a PENDING tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}")
+        await runner.execution_environment.add_tool_call(
+            ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner
         )
 
         # Make chatbot return text output
@@ -452,7 +453,7 @@ class TestRunnerStepToolCalls:
         session.auto_approve_tools = list(role.auto_approve_tools)
         session.tool_failure_policy = "abort"
         session.active_context = ctx
-        session._invocation_hooks = {}
+        session.invocation_hooks = {}
 
         chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
 
@@ -465,7 +466,7 @@ class TestRunnerStepToolCalls:
         def deny_hook(tool_call):
             return (False, "denied by hook")
 
-        session._invocation_hooks["before_tool_execution"] = [deny_hook]
+        session.invocation_hooks["before_tool_execution"] = [deny_hook]
 
         status, _ = await runner.step()
         assert status is ExecStatus.CONTINUE
@@ -502,8 +503,8 @@ class TestRunnerEventHandling:
 
         # Create a group with a pending tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(
-            ContentPart.create_tool_use("tc1", "add", "{}")
+        await runner.execution_environment.add_tool_call(
+            ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner
         )
 
         evt = ApprovalEvent(tool_call_id="tc1", approved=True)
@@ -582,7 +583,7 @@ class TestRunnerOnToolCallHook:
         session.auto_approve_tools = list(role.auto_approve_tools)
         session.tool_failure_policy = "abort"
         session.active_context = ctx
-        session._invocation_hooks = invocation_hooks or {}
+        session.invocation_hooks = invocation_hooks or {}
 
         agent = MagicMock()
         agent.get_session.return_value = session
@@ -598,7 +599,7 @@ class TestRunnerOnToolCallHook:
         return session, runner, role, tm, tool_mock
 
     async def test_on_tool_call_denies_with_string(self):
-        """on_tool_call hook returning a string denies the tool."""
+        """on_tool_call hook returning a string denies the tool at registration."""
         session, runner, role, tm, tool_mock = self._build_env()
 
         def deny_hook(ctx):
@@ -608,104 +609,264 @@ class TestRunnerOnToolCallHook:
             assert ctx["session"] is session
             return "Hook says no"
 
-        session._invocation_hooks["on_tool_call"] = [deny_hook]
+        session.invocation_hooks["on_tool_call"] = [deny_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1, "b": 2}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
-        fg.records[0].approval_status = ToolApprovalStatus.APPROVED
         record = fg.records[0]
-
-        await runner._handle_tool_group()
 
         assert record.approval_status == ToolApprovalStatus.DENIED
         assert record.denied_reason == "Hook says no"
 
     async def test_on_tool_call_allows_with_none(self):
-        """on_tool_call hook returning None allows execution."""
+        """on_tool_call hook returning None keeps pending status."""
         session, runner, role, tm, tool_mock = self._build_env()
+        runner.execution_environment.auto_approve_tools = []
 
         def allow_hook(ctx):
             assert ctx["tool_name"] == "add"
             return None
 
-        session._invocation_hooks["on_tool_call"] = [allow_hook]
+        session.invocation_hooks["on_tool_call"] = [allow_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1, "b": 2}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
-        fg.records[0].approval_status = ToolApprovalStatus.APPROVED
         record = fg.records[0]
 
-        await runner._handle_tool_group()
+        assert record.approval_status == ToolApprovalStatus.PENDING
+        assert record.denied_reason is None
 
-        assert record.execution_status == ToolExecutionStatus.EXECUTED
-
-    async def test_on_tool_call_first_denier_stops_subsequent(self):
-        """When first hook denies, second hook doesn't fire."""
+    async def test_on_tool_call_broadcast_calls_all_hooks(self):
+        """All on_tool_call hooks fire — broadcast, not short-circuit."""
         session, runner, role, tm, tool_mock = self._build_env()
 
         call_order = []
 
         def deny_hook(ctx):
-            call_order.append("deny")
-            return "Denied"
+            call_order.append("first")
+            return "first denied"
 
-        def no_op_hook(ctx):
-            call_order.append("noop")
+        def second_hook(ctx):
+            call_order.append("second")
             return None
 
-        session._invocation_hooks["on_tool_call"] = [deny_hook, no_op_hook]
+        session.invocation_hooks["on_tool_call"] = [deny_hook, second_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
-        fg.records[0].approval_status = ToolApprovalStatus.APPROVED
         record = fg.records[0]
 
-        await runner._handle_tool_group()
-
         assert record.approval_status == ToolApprovalStatus.DENIED
-        assert call_order == ["deny"]
+        assert call_order == ["first", "second"]
+        assert "first denied" in record.denied_reason
 
-    async def test_on_tool_call_denial_breaks_remaining_in_group(self):
-        """When hook denies, remaining tools in group are not executed."""
-        session, runner, role, tm, tool_mock = self._build_env(auto_approve_tools=["add", "sub"])
+    async def test_on_tool_call_multiple_denied_reasons_joined(self):
+        """Multiple denying hooks have reasons joined with newlines."""
+        session, runner, role, tm, tool_mock = self._build_env()
 
-        sub_mock = MagicMock()
-        sub_mock.name = "sub"
-        sub_mock.func = MagicMock(return_value=1)
-        sub_mock.execute = MagicMock(return_value=1)
-        tm.get_tool.side_effect = lambda n: tool_mock if n == "add" else sub_mock
+        def deny1(ctx):
+            return "reason one"
 
-        def deny_add(ctx):
-            return "No add"
+        def deny2(ctx):
+            return "reason two"
 
-        session._invocation_hooks["on_tool_call"] = [deny_add]
+        session.invocation_hooks["on_tool_call"] = [deny1, deny2]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        tc1 = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc1)
-        tc2 = ContentPart.create_tool_use("tc2", "sub", '{}')
-        runner.execution_environment.add_tool_call(tc2)
+        tc = ContentPart.create_tool_use("tc1", "add", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
-        fg = runner.execution_environment.get_foreground_group()
-        fg.records[0].approval_status = ToolApprovalStatus.APPROVED
-        fg.records[1].approval_status = ToolApprovalStatus.APPROVED
-        record_add = fg.records[0]
-        record_sub = fg.records[1]
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.DENIED
+        assert "reason one" in record.denied_reason
+        assert "reason two" in record.denied_reason
 
-        await runner._handle_tool_group()
+    async def test_on_tool_call_ctx_denied_reason_accumulates(self):
+        """Each hook sees ctx['denied_reason'] with all prior denial reasons."""
+        session, runner, role, tm, tool_mock = self._build_env()
 
-        # The hook denies 'add', remaining tools in group should also be denied
-        assert record_add.approval_status == ToolApprovalStatus.DENIED
-        assert record_sub.approval_status == ToolApprovalStatus.DENIED
+        reasons_seen = []
+
+        def hook1(ctx):
+            reasons_seen.append(("h1", ctx.get("denied_reason")))
+            return "first"
+
+        def hook2(ctx):
+            reasons_seen.append(("h2", ctx.get("denied_reason")))
+            return None
+
+        session.invocation_hooks["on_tool_call"] = [hook1, hook2]
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "add", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        assert reasons_seen[0] == ("h1", None)
+        assert "first" in (reasons_seen[1][1] or "")
+
+    async def test_on_tool_call_true_approves_pending_at_registration(self):
+        """on_tool_call hook returning True upgrades PENDING to APPROVED immediately."""
+        session, runner, role, tm, tool_mock = self._build_env()
+        runner.execution_environment.auto_approve_tools = []
+
+        def approve_hook(ctx):
+            assert ctx["approval_status"] == ToolApprovalStatus.PENDING
+            return True
+
+        session.invocation_hooks["on_tool_call"] = [approve_hook]
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.APPROVED
+        assert record.denied_reason is None
+
+    async def test_on_tool_call_true_on_approved_stays_approved(self):
+        """True on already APPROVED stays APPROVED (True cannot escalate APPROVED)."""
+        session, runner, role, tm, tool_mock = self._build_env()
+
+        def no_op(ctx):
+            return True
+
+        session.invocation_hooks["on_tool_call"] = [no_op]
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "add", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.APPROVED
+
+    async def test_on_tool_call_true_on_denied_stays_denied(self):
+        """True on DENIED stays DENIED (True cannot escalate DENIED)."""
+        session, runner, role, tm, tool_mock = self._build_env()
+        tm.get_tool.return_value = None
+
+        def approve_hook(ctx):
+            return True
+
+        session.invocation_hooks["on_tool_call"] = [approve_hook]
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.DENIED
+
+    async def test_on_tool_call_false_denies_approved(self):
+        """False on APPROVED downgrades to DENIED."""
+        session, runner, role, tm, tool_mock = self._build_env()
+
+        def deny_hook(ctx):
+            return False
+
+        session.invocation_hooks["on_tool_call"] = [deny_hook]
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "add", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.DENIED
+
+    async def test_on_tool_call_false_denies_pending(self):
+        """False on PENDING becomes DENIED."""
+        session, runner, role, tm, tool_mock = self._build_env()
+        runner.execution_environment.auto_approve_tools = []
+
+        def deny_hook(ctx):
+            return False
+
+        session.invocation_hooks["on_tool_call"] = [deny_hook]
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "add", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.DENIED
+
+    async def test_on_tool_call_tool_not_found_still_fires_hooks(self):
+        """Tool not found creates DENIED, but hooks still fire and can add reasons."""
+        session, runner, role, tm, tool_mock = self._build_env()
+        tm.get_tool.return_value = None
+
+        def enrich_hook(ctx):
+            return "hook adds context"
+
+        session.invocation_hooks["on_tool_call"] = [enrich_hook]
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.DENIED
+        assert "not available" in record.denied_reason
+        assert "hook adds context" in record.denied_reason
+
+    async def test_on_tool_call_tool_not_found_no_hooks(self):
+        """Tool not found with no hooks: DENIED with initial reason only."""
+        session, runner, role, tm, tool_mock = self._build_env()
+        tm.get_tool.return_value = None
+        session.invocation_hooks = {}
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.DENIED
+        assert "not available" in record.denied_reason
+        assert "\n" not in record.denied_reason
+
+    async def test_on_tool_call_empty_hooks_list(self):
+        """Empty hooks list: status unchanged from initial."""
+        session, runner, role, tm, tool_mock = self._build_env()
+        session.invocation_hooks = {}
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "add", '{}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        record = runner.execution_environment.get_foreground_group().records[0]
+        assert record.approval_status == ToolApprovalStatus.APPROVED
+
+    async def test_on_tool_call_ctx_has_required_fields(self):
+        """on_tool_call ctx contains all required fields."""
+        session, runner, role, tm, tool_mock = self._build_env()
+
+        captured_ctx = {}
+
+        def capture_hook(ctx):
+            captured_ctx.update(ctx)
+            return None
+
+        session.invocation_hooks["on_tool_call"] = [capture_hook]
+
+        runner.execution_environment.create_tool_group("g1", "g1:tool_result")
+        tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1}')
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        assert captured_ctx["role"] == "test-role"
+        assert captured_ctx["session"] is session
+        assert captured_ctx["tool_name"] == "add"
+        assert captured_ctx["arguments"] == {"a": 1}
+        assert "approval_status" in captured_ctx
+        assert "respond" in captured_ctx
+        assert "denied_reason" in captured_ctx
 
 
 # ---------------------------------------------------------------------------
@@ -738,7 +899,7 @@ def _make_runner_with_exec_env(auto_approve_tools=None):
     session.auto_approve_tools = list(role.auto_approve_tools)
     session.tool_failure_policy = "abort"
     session.active_context = ctx
-    session._invocation_hooks = {}
+    session.invocation_hooks = {}
 
     agent = MagicMock()
     agent.get_session.return_value = session
@@ -761,10 +922,8 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject creates result message with correct content."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
-        result_str, success = await runner.execution_environment.execute_and_inject(
-            ContentPart.create_tool_use("tc1", "add", "{}"), runner
-        )
+        record = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
+        result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is True
         assert result_str == "5"
         fg = runner.execution_environment.get_foreground_group()
@@ -779,14 +938,12 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject appends results for multiple tool calls."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"))
+        record1 = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
+        record2 = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"), runner=runner)
         tool.execute = MagicMock(side_effect=[5, 10])
 
-        for tc_id in ["tc1", "tc2"]:
-            await runner.execution_environment.execute_and_inject(
-                ContentPart.create_tool_use(tc_id, "add", "{}"), runner
-            )
+        for record in [record1, record2]:
+            await runner.execution_environment.execute_and_inject(record, runner)
 
         fg = runner.execution_environment.get_foreground_group()
         assert len(fg.result_message.raw_dict["content"]) == 2
@@ -797,11 +954,9 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject catches tool exceptions and returns error."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"))
+        record = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
         tool.execute = MagicMock(side_effect=RuntimeError("kaboom"))
-        result_str, success = await runner.execution_environment.execute_and_inject(
-            ContentPart.create_tool_use("tc1", "add", "{}"), runner
-        )
+        result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is False
         assert "RuntimeError" in result_str
         fg = runner.execution_environment.get_foreground_group()
@@ -819,7 +974,7 @@ class TestRunnerExecuteAndInject:
         role.tool_filter = []
         session = MagicMock()
         session.role = role
-        session._invocation_hooks = {}
+        session.invocation_hooks = {}
         agent = MagicMock()
         agent.get_session.return_value = session
         agent._tool_manager = tm
@@ -830,10 +985,8 @@ class TestRunnerExecuteAndInject:
             tool_manager=tm, role=role, auto_approve_tools=[], tool_failure_policy="abort"
         )
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "nonexistent", "{}"))
-        result_str, success = await runner.execution_environment.execute_and_inject(
-            ContentPart.create_tool_use("tc1", "nonexistent", "{}"), runner
-        )
+        record = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "nonexistent", "{}"), runner=runner)
+        result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is False
         assert "not found" in result_str
 
@@ -848,7 +1001,7 @@ class TestRunnerExecuteAndInject:
         tm = MagicMock()
         session = MagicMock()
         session.role = role
-        session._invocation_hooks = {}
+        session.invocation_hooks = {}
         agent = MagicMock()
         agent.get_session.return_value = session
         agent._tool_manager = tm

@@ -160,6 +160,10 @@ class ContentPart:
         """Return the result content string (for tool_result parts)."""
         return self._json_dict.get("content")
 
+    def set_tool_result_content(self, content: str) -> None:
+        """Set the result content for a tool_result part."""
+        self._json_dict["content"] = content
+
     @property
     def description(self) -> str | None:
         """Return the tool description (for tool definition parts)."""

@@ -241,7 +241,7 @@ class Runner(ActiveClass):
 
     async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
         """Call all hooks for hook_point from the session's invocation_hooks, merging ExecStatus results."""
-        hooks = self._session._invocation_hooks
+        hooks = self._session.invocation_hooks
         callbacks = hooks.get(hook_point, [])
         merged: ExecStatus | None = None
         for callback in callbacks:
@@ -254,7 +254,7 @@ class Runner(ActiveClass):
 
     async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
         """Call hooks for hook_point, returning the first deny tuple (False, reason) if any."""
-        hooks = self._session._invocation_hooks
+        hooks = self._session.invocation_hooks
         callbacks = hooks.get(hook_point, [])
         for callback in callbacks:
             result = callback(*args)
@@ -346,7 +346,7 @@ class Runner(ActiveClass):
             self._execution_environment.create_tool_group(group_id, anchor_name)
             for cp in content_parts:
                 if cp.type == "tool_use":
-                    self._execution_environment.add_tool_call(cp, runner=self)
+                    await self._execution_environment.add_tool_call(cp, runner=self)
             msg_index = self._session.active_context.get_anchor_msg_index("messages")
             self._session.active_context.add_anchor(anchor_name, msg_index, after_existing=False)
             result_msg = self._execution_environment.get_foreground_group().result_message
@@ -466,55 +466,20 @@ class Runner(ActiveClass):
             tool_call = record.tool_call
             tool_name = tool_call.name
 
-            _invocation_hooks = self._session._invocation_hooks or {}
-            hook_fired = False
-            if "on_tool_call" in _invocation_hooks:
-                tool_args = json.loads(tool_call.arguments) if tool_call.arguments else {}
-                ctx = {
-                    "role": self._agent.role.name,
-                    "session": self._session,
-                    "tool_name": tool_name,
-                    "arguments": tool_args,
-                    "approval_status": record.approval_status,
-                    "respond": record.respond,
-                }
-                hook_fired = True
-                for hook in _invocation_hooks["on_tool_call"]:
-                    result = hook(ctx)
-                    if result is False or isinstance(result, str):
-                        record.approval_status = ToolApprovalStatus.DENIED
-                        record.denied_reason = result if isinstance(result, str) else "Denied by on_tool_call hook"
-                        foreground.deny_all_remaining(record.denied_reason)
-                        _logger.debug(
-                            "[runner] Tool call %s denied by on_tool_call hook: %s",
-                            tool_name, record.denied_reason,
-                        )
-                        break
-                    if result is True:
-                        _logger.debug(
-                            "[runner] Tool call %s approved by on_tool_call hook",
-                            tool_name,
-                        )
-
-                if record.approval_status == ToolApprovalStatus.DENIED:
-                    break
-
             if record.approval_status == ToolApprovalStatus.DENIED:
                 _logger.debug("[runner] Tool call %s denied, skipping execution", tool_name)
                 break
 
-            if record.approval_status == ToolApprovalStatus.PENDING and hook_fired:
+            if record.approval_status == ToolApprovalStatus.PENDING:
                 _logger.debug(
-                    "[runner] Tool call %s pending, hook returned None (async path), keeping pending",
+                    "[runner] Tool call %s pending, re-inserting for async resolution",
                     tool_name,
                 )
                 foreground.records.insert(0, record)
                 break
 
-            result_str, success = await self._execution_environment.execute_and_inject(tool_call, runner=self)
-            record.execution_status = ToolExecutionStatus.EXECUTED
-            record.execution_result = result_str
-            if not success and result_str.startswith("Error: Tool '"):
+            result_str, success = await self._execution_environment.execute_and_inject(record, runner=self)
+            if not success and result_str and result_str.startswith("Error: Tool '"):
                 _logger.debug("[runner] Tool %s not found", tool_name)
                 break
             if not success:
