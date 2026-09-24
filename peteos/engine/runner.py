@@ -527,10 +527,13 @@ class Runner(ActiveClass):
 
             # Drain the event queue
             if not have_new_message and not self.has_event() and (not foreground or not foreground.has_reviewed()):
-                self._idle.set()
+                waiting_due_to_pending = foreground is not None and foreground.has_pending()
+                if not waiting_due_to_pending:
+                    self._idle.set()
                 if not await self._wait_for_event():
                     continue
-                self._idle.clear()
+                if not waiting_due_to_pending:
+                    self._idle.clear()
 
             # drain event queue
             events_processed = 0
