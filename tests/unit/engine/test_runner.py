@@ -1015,3 +1015,92 @@ class TestRunnerExecuteAndInject:
             await runner.execution_environment.execute_and_inject(
                 ContentPart.create_tool_use("tc1", "add", "{}"), runner
             )
+
+
+# ---------------------------------------------------------------------------
+# Runner after_receive_from_chatbot hook
+# ---------------------------------------------------------------------------
+
+class TestRunnerAfterReceiveFromChatbot:
+    def _build_env(self, invocation_hooks=None):
+        role = MagicMock()
+        role.name = "test-role"
+        role.model = "test-model"
+        role.behavior_policy = "responsive"
+        role.auto_approve_tools = []
+        role.tool_filter = []
+
+        tm = MagicMock()
+        session = MagicMock()
+        session.role = role
+        session.invocation_hooks = invocation_hooks or {}
+
+        agent = MagicMock()
+        agent.get_session.return_value = session
+        agent._tool_manager = tm
+        agent.role = role
+
+        chatbot = _make_mock_chatbot()
+        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        return session, runner
+
+    @pytest.mark.asyncio
+    async def test_after_receive_from_chatbot_receives_message(self):
+        """Hook is called with the chatbot's response message."""
+        session, runner = self._build_env()
+        captured_message = []
+
+        def capture_hook(msg):
+            captured_message.append(msg)
+            return None
+
+        session.invocation_hooks["after_receive_from_chatbot"] = [capture_hook]
+
+        bot_response = Message.create(
+            role="assistant",
+            content_parts=[ContentPart.create_text("hello")],
+        )
+        await runner.call_hooks("after_receive_from_chatbot", bot_response)
+
+        assert len(captured_message) == 1
+        assert captured_message[0] is bot_response
+        assert captured_message[0].content[0].text == "hello"
+
+    @pytest.mark.asyncio
+    async def test_after_receive_from_chatbot_multiple_hooks(self):
+        """All registered hooks are called in order."""
+        session, runner = self._build_env()
+        call_order = []
+
+        def first_hook(msg):
+            call_order.append("first")
+            return None
+
+        def second_hook(msg):
+            call_order.append("second")
+            return None
+
+        session.invocation_hooks["after_receive_from_chatbot"] = [first_hook, second_hook]
+
+        bot_response = Message.create(role="assistant", content_parts=[])
+        await runner.call_hooks("after_receive_from_chatbot", bot_response)
+
+        assert call_order == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_after_receive_from_chatbot_async_hook(self):
+        """Async hooks are awaited and their result is collected."""
+        session, runner = self._build_env()
+        captured = []
+
+        async def async_hook(msg):
+            captured.append(msg)
+            return None
+
+        session.invocation_hooks["after_receive_from_chatbot"] = [async_hook]
+
+        bot_response = Message.create(role="assistant", content_parts=[])
+        await runner.call_hooks("after_receive_from_chatbot", bot_response)
+
+        assert len(captured) == 1
+        assert captured[0] is bot_response

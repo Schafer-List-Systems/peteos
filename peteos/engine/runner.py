@@ -307,6 +307,8 @@ class Runner(ActiveClass):
         async for _ in response:
             pass
 
+        await self.call_hooks("after_receive_from_chatbot", response.message)
+
         # --- Phase 1.5: Debug output ---
         _logger.debug(
             "[runner] step(): Chatbot response — has_text=%s, content_parts=%d, message_id=%s",
