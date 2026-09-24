@@ -346,7 +346,7 @@ class Runner(ActiveClass):
             self._execution_environment.create_tool_group(group_id, anchor_name)
             for cp in content_parts:
                 if cp.type == "tool_use":
-                    self._execution_environment.add_tool_call(cp, runner=self)
+                    await self._execution_environment.add_tool_call(cp, runner=self)
             msg_index = self._session.active_context.get_anchor_msg_index("messages")
             self._session.active_context.add_anchor(anchor_name, msg_index, after_existing=False)
             result_msg = self._execution_environment.get_foreground_group().result_message

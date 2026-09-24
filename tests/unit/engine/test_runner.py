@@ -325,7 +325,7 @@ class TestRunnerStepToolCalls:
 
         # Pre-setup: create group and a PENDING tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(
+        await runner.execution_environment.add_tool_call(
             ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner
         )
 
@@ -503,7 +503,7 @@ class TestRunnerEventHandling:
 
         # Create a group with a pending tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        runner.execution_environment.add_tool_call(
+        await runner.execution_environment.add_tool_call(
             ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner
         )
 
@@ -613,7 +613,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1, "b": 2}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         record = fg.records[0]
@@ -634,7 +634,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1, "b": 2}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         record = fg.records[0]
@@ -660,7 +660,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
         record = fg.records[0]
@@ -683,7 +683,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.DENIED
@@ -708,7 +708,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         assert reasons_seen[0] == ("h1", None)
         assert "first" in (reasons_seen[1][1] or "")
@@ -726,7 +726,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.APPROVED
@@ -743,7 +743,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.APPROVED
@@ -760,7 +760,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.DENIED
@@ -776,7 +776,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.DENIED
@@ -793,7 +793,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.DENIED
@@ -810,7 +810,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.DENIED
@@ -825,7 +825,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.DENIED
@@ -839,7 +839,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.approval_status == ToolApprovalStatus.APPROVED
@@ -858,7 +858,7 @@ class TestRunnerOnToolCallHook:
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1}')
-        runner.execution_environment.add_tool_call(tc, runner=runner)
+        await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         assert captured_ctx["role"] == "test-role"
         assert captured_ctx["session"] is session
@@ -922,7 +922,7 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject creates result message with correct content."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        record = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
+        record = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
         result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is True
         assert result_str == "5"
@@ -938,8 +938,8 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject appends results for multiple tool calls."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        record1 = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
-        record2 = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"), runner=runner)
+        record1 = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
+        record2 = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc2", "add", "{}"), runner=runner)
         tool.execute = MagicMock(side_effect=[5, 10])
 
         for record in [record1, record2]:
@@ -954,7 +954,7 @@ class TestRunnerExecuteAndInject:
         """execute_and_inject catches tool exceptions and returns error."""
         runner, tm, tool = _make_runner_with_exec_env()
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        record = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
+        record = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "add", "{}"), runner=runner)
         tool.execute = MagicMock(side_effect=RuntimeError("kaboom"))
         result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is False
@@ -985,7 +985,7 @@ class TestRunnerExecuteAndInject:
             tool_manager=tm, role=role, auto_approve_tools=[], tool_failure_policy="abort"
         )
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
-        record = runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "nonexistent", "{}"), runner=runner)
+        record = await runner.execution_environment.add_tool_call(ContentPart.create_tool_use("tc1", "nonexistent", "{}"), runner=runner)
         result_str, success = await runner.execution_environment.execute_and_inject(record, runner)
         assert success is False
         assert "not found" in result_str

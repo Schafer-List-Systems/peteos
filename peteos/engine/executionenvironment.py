@@ -210,7 +210,7 @@ def _merge_all_decisions(
     return current, denied_reason
 
 
-def _call_on_tool_call_hooks(
+async def _call_on_tool_call_hooks(
     hooks: list,
     record: "ToolCallRecord",
     runner: "Runner",
@@ -240,6 +240,8 @@ def _call_on_tool_call_hooks(
             "respond": respond,
         }
         result = hook(ctx)
+        if inspect.isawaitable(result):
+            result = await result
         new_status, new_reason, did_increment = _merge_approval_status(merged_status, result)
         if did_increment:
             record.decisions[i] = (new_status, new_reason, True)
@@ -390,7 +392,7 @@ class ExecutionEnvironment:
         self._groups.pop(self._foreground_group.id, None)
         self._foreground_group = None
 
-    def add_tool_call(self, tool_call: ContentPart, runner: "Runner") -> ToolCallRecord:
+    async def add_tool_call(self, tool_call: ContentPart, runner: "Runner") -> ToolCallRecord:
         """Add a tool call to the foreground group. Returns the created record."""
         group = self._foreground_group
         if group is None:
@@ -434,7 +436,7 @@ class ExecutionEnvironment:
             queued=False,
         )
 
-        _call_on_tool_call_hooks(hooks, record, runner, runner.role.name)
+        await _call_on_tool_call_hooks(hooks, record, runner, runner.role.name)
 
         if record.responded_count == len(record.decisions):
             final_status, final_reason = _merge_all_decisions(record.decisions)
