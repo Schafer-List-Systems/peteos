@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from peteos.utils import get_logger
 from peteos.utils import json
+from peteos.utils.serialization import serialize
 
 from peteos.conversation.message import ContentPart, Message
 from peteos.persona.role import Role
@@ -603,7 +604,7 @@ class ExecutionEnvironment:
             if result is None:
                 _logger.debug("Tool %s returned None (fire-and-forget)", tool_name)
                 return None, True
-            result_str = str(result)
+            result_str = serialize(result)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
             return result_str, True
         except Exception as e:
