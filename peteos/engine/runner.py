@@ -389,6 +389,19 @@ class Runner(ActiveClass):
             return None
 
         self._truncation_counter += 1
+
+        estimated_max_context = (
+            self._session.active_context.total_token_count()
+            + self._chatbot._config.max_tokens
+        )
+        prev = self._chatbot._config.max_context_size
+        if estimated_max_context < prev:
+            self._chatbot._config.max_context_size = estimated_max_context
+            _logger.debug(
+                "[runner] _handle_truncation: max_context_size %d -> %d (tightened from truncation)",
+                prev,
+                estimated_max_context,
+            )
         _logger.warning(
             "[runner] step(): Response truncated (max_tokens). "
             "Truncation #%d of %d.",
@@ -426,14 +439,16 @@ class Runner(ActiveClass):
         await self._call_after_message_append(note_msg)
         await self.publish_notification(note_msg)
 
+        await self.call_hooks(
+            "on_truncation",
+            self,
+            self._truncation_counter,
+            self._max_truncation_retries,
+        )
+
         if self._truncation_counter >= self._max_truncation_retries:
             _logger.warning(
                 "[runner] step(): Truncation counter exhausted (%d/%d).",
-                self._truncation_counter,
-                self._max_truncation_retries,
-            )
-            await self.call_hooks(
-                "on_truncation_exhausted",
                 self._truncation_counter,
                 self._max_truncation_retries,
             )

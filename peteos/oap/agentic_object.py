@@ -11,6 +11,7 @@ from dataclasses import is_dataclass
 from typing import Any, Callable
 
 from peteos.conversation import ContentPart, Message
+from peteos.conversation.context import Context
 from peteos.conversation.session import Session
 from peteos.engine import ExecStatus, Runner
 from peteos.persona.role import Role
@@ -73,6 +74,68 @@ from peteos.utils._schema import format_schema_for_prompt, get_schema_descriptio
 from peteos.persona.agent import Agent
 
 
+def _try_context_reduction(
+    context: Context,
+    max_context: float,
+    max_output: int,
+    reserve: int,
+) -> Context | None:
+    """Attempt context reduction: strip_thinking() first, then rolling_token_window.
+
+    Returns the reduced Context, or None if no reduction is needed or possible.
+    """
+    budget = int(max_context - reserve - max_output)
+    if budget < 0:
+        return None
+
+    reduced = context.strip_thinking()
+    if reduced.total_token_count() + max_output <= max_context - reserve:
+        return reduced
+
+    return context.rolling_token_window(budget)
+
+
+def _context_reduction_hook(runner, context: Context) -> None:
+    """Proactively reduce context before sending to the chatbot if it would exceed the model's limits."""
+    cfg = runner._chatbot._config
+    max_context = cfg.max_context_size
+    if max_context == float("inf"):
+        return
+
+    context_size = context.total_token_count()
+    max_output = cfg.max_tokens
+    reserve = cfg.context_reduction_reserve
+
+    if context_size + max_output <= max_context - reserve:
+        return
+
+    reduced = _try_context_reduction(context, max_context, max_output, reserve)
+    if reduced is not None:
+        runner.session.set_active_context(reduced)
+
+
+def _on_truncation_hook(runner, counter: int, max_retries: int) -> None:
+    """Reactively reduce context when the LLM returns a truncated response.
+
+    Fires on every truncation. Uses the calibrated max_context to attempt
+    reduction before the next retry. Does not act on the counter — retry
+    control remains with the runner.
+    """
+    cfg = runner._chatbot._config
+    max_context = cfg.max_context_size
+    if max_context == float("inf"):
+        return
+
+    reduced = _try_context_reduction(
+        runner._session.active_context,
+        max_context,
+        cfg.max_tokens,
+        cfg.context_reduction_reserve,
+    )
+    if reduced is not None:
+        runner.session.set_active_context(reduced)
+
+
 class AgenticObject:
     """ """
 
@@ -92,7 +155,10 @@ class AgenticObject:
         self._oap_system_prompt_hooks: dict[str, Callable[[], str]] = {}
         self._oap_thread_store: dict[str, str] = {}
         self._oap_auto_approve_tools: list[str] = []
-        self._oap_local_hooks: dict[str, list[Callable]] = {}
+        self._oap_local_hooks: dict[str, list[Callable]] = {
+            "before_send_to_chatbot": [_context_reduction_hook],
+            "on_truncation": [_on_truncation_hook],
+        }
         self._register_tools()
         self._register_output_schema_hook()
         self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))

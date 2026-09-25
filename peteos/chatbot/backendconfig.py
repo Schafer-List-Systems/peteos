@@ -19,7 +19,9 @@ class BackendConfig:
         chat_endpoint: Custom chat endpoint (default: API-specific).
         models_endpoint: Custom models endpoint (default: API-specific).
         streaming: Use streaming mode by default.
-        max_tokens: Maximum tokens to generate.
+        max_tokens: Maximum tokens to generate (output budget).
+        max_context_size: LLM's total context window size. Used for context reduction. Defaults to infinity (no proactive reduction until configured).
+        context_reduction_reserve: Safety margin in tokens subtracted from max_context_size before the reduction check. Default 0.
     """
 
     name: str
@@ -29,6 +31,8 @@ class BackendConfig:
     models_endpoint: Optional[str] = None
     streaming: bool = False
     max_tokens: int = 4096
+    max_context_size: float = float("inf")
+    context_reduction_reserve: int = 0
     retry_delays: Optional[list[float]] = None
     api_key: Optional[str] = None
     model_priorities: Optional[Dict[str, int]] = None
