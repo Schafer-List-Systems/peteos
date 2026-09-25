@@ -138,6 +138,14 @@ class Session:
         self._transitive_invocation_hooks = hooks
 
     @property
+    def transitive_invocation_hooks(self) -> dict[str, list[Callable]]:
+        """Return the raw transitive invocation hooks (not merged with local hooks).
+
+        Used by sub-agents to inherit only the transitive hooks from the parent.
+        """
+        return self._transitive_invocation_hooks
+
+    @property
     def session_dir(self) -> Path:
         """Return the session directory path (parent_dir / uuid)."""
         return Path(self._parent_dir) / self.uuid
