@@ -110,19 +110,32 @@ class Session:
         self._message_hooks: dict[str, Callable[[], str]] = {}
         self._active_context: Context | None = None
         self._state: SessionState = SessionState(self._json_dict.setdefault("state_data", {}))
-        self._invocation_hooks: dict[str, list[Callable]] = {}
+        self._transitive_invocation_hooks: dict[str, list[Callable]] = {}
+        self._local_invocation_hooks: dict[str, list[Callable]] = {}
 
     @property
     def invocation_hooks(self) -> dict[str, list[Callable]]:
-        """Return the current invocation hooks."""
-        return self._invocation_hooks
+        """Return the merged transitive and local invocation hooks.
+
+        The transitive hooks are those provided by the caller and forwarded to
+        sub-agents. The local hooks are internal to this invocation and not
+        forwarded. Both lists are concatenated; local hooks execute before
+        transitive hooks (local has priority).
+        """
+        result: dict[str, list[Callable]] = {}
+        for key in set(self._transitive_invocation_hooks) | set(self._local_invocation_hooks):
+            result[key] = [
+                *self._transitive_invocation_hooks.get(key, []),
+                *self._local_invocation_hooks.get(key, []),
+            ]
+        return result
 
     @invocation_hooks.setter
     def invocation_hooks(self, hooks: dict[str, list[Callable]]) -> None:
-        """Set the invocation hooks for this session."""
-        if self._invocation_hooks:
+        """Set the invocation hooks for this session. Routes into transitive hooks."""
+        if self._transitive_invocation_hooks:
             raise ValueError("Invocation hooks are already set for this session")
-        self._invocation_hooks = hooks
+        self._transitive_invocation_hooks = hooks
 
     @property
     def session_dir(self) -> Path:

@@ -411,7 +411,7 @@ class ExecutionEnvironment:
         tool_args = json.loads(tool_call.arguments) if tool_call.arguments else {}
 
         # gather all hooks: prepended existence + auto_approve closures, then user hooks
-        user_hooks = list(runner._session.invocation_hooks.get("on_tool_call", []))
+        user_hooks = list(runner.session.invocation_hooks.get("on_tool_call", []))
 
         def _existence_check(ctx):
             if not self._tool_manager or not self._tool_manager.get_tool(tool_name):
