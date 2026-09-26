@@ -85,13 +85,14 @@ def _register_tool_policy_for(
     policies.setdefault(tool_name, {})["_nested"] = policy_func
 
 
-def _tool_policy_dispatcher(agent, ctx: dict) -> bool | None:
+async def _tool_policy_dispatcher(agent, ctx: dict) -> bool | None:
     """Policy-executor hook for on_tool_call.
 
     Looks up ctx["tool_name"] in agent._oap_tool_policies and evaluates each
-    policy in order, short-circuiting on the first DENIED vote. Returns
-    True/False/None (merged by the outer hook chain) or None if no policies
-    are registered (IGNORED).
+    policy in order, short-circuiting on the first DENIED vote. Supports
+    async policies — awaitable results are resolved before evaluating the vote.
+    Returns True/False/None (merged by the outer hook chain) or None if no
+    policies are registered (IGNORED).
     """
     # No tool name means no policy can apply — this hook declines
     tool_name = ctx.get("tool_name")
@@ -135,6 +136,10 @@ def _tool_policy_dispatcher(agent, ctx: dict) -> bool | None:
             else:
                 # External policy: called with (agent, tool_name, arguments)
                 result = policy_func(agent, tool_name, ctx.get("arguments", {}))
+
+            # Async policies may await internally — resolve the coroutine here
+            if inspect.isawaitable(result):
+                result = await result
         except Exception as exc:
             # Log the error and continue to the next policy
             _logger.error(

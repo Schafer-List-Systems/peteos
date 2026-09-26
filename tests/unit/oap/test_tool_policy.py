@@ -273,7 +273,8 @@ class TestAgenticObjectToolPolicyRegistration:
         with pytest.raises(KeyError, match="not found"):
             obj.deregister_tool_policy("exec", "does-not-exist")
 
-    def test_external_policy_receives_agent_tool_name_and_arguments(self):
+    @pytest.mark.asyncio
+    async def test_external_policy_receives_agent_tool_name_and_arguments(self):
         captured = {}
 
         def ext_policy(agent, tool_name, arguments):
@@ -285,7 +286,7 @@ class TestAgenticObjectToolPolicyRegistration:
         obj = self._WithNestedPolicy()
         obj.register_tool_policy("exec", ext_policy)
         ctx = {"tool_name": "exec", "arguments": {"cmd": "echo hello"}}
-        _tool_policy_dispatcher(obj, ctx)
+        await _tool_policy_dispatcher(obj, ctx)
 
         assert captured["agent"] is obj
         assert captured["tool_name"] == "exec"
@@ -317,50 +318,59 @@ class TestToolPolicyDispatcher:
     class _EmptyAO(AgenticObject):
         pass
 
-    def test_approved_command_returns_true(self):
+    @pytest.mark.asyncio
+    async def test_approved_command_returns_true(self):
         obj = self._BashLike()
         ctx = {"tool_name": "bash_exec", "arguments": {"command": "ls -la"}}
-        assert _tool_policy_dispatcher(obj, ctx) is True
+        assert await _tool_policy_dispatcher(obj, ctx) is True
 
-    def test_denied_command_returns_false(self):
+    @pytest.mark.asyncio
+    async def test_denied_command_returns_false(self):
         obj = self._BashLike()
         ctx = {"tool_name": "bash_exec", "arguments": {"command": "rm -rf /"}}
-        assert _tool_policy_dispatcher(obj, ctx) is False
+        assert await _tool_policy_dispatcher(obj, ctx) is False
 
-    def test_pwd_is_approved(self):
+    @pytest.mark.asyncio
+    async def test_pwd_is_approved(self):
         obj = self._BashLike()
         ctx = {"tool_name": "bash_exec", "arguments": {"command": "pwd"}}
-        assert _tool_policy_dispatcher(obj, ctx) is True
+        assert await _tool_policy_dispatcher(obj, ctx) is True
 
-    def test_short_circuit_on_deny(self):
+    @pytest.mark.asyncio
+    async def test_short_circuit_on_deny(self):
         obj = self._BashLike()
         ctx = {"tool_name": "restricted", "arguments": {"key": "dangerous"}}
-        assert _tool_policy_dispatcher(obj, ctx) is False
+        assert await _tool_policy_dispatcher(obj, ctx) is False
 
-    def test_approved_key(self):
+    @pytest.mark.asyncio
+    async def test_approved_key(self):
         obj = self._BashLike()
         ctx = {"tool_name": "restricted", "arguments": {"key": "safe"}}
-        assert _tool_policy_dispatcher(obj, ctx) is True
+        assert await _tool_policy_dispatcher(obj, ctx) is True
 
-    def test_no_policy_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_no_policy_returns_none(self):
         obj = self._BashLike()
         ctx = {"tool_name": "no_policy_tool", "arguments": {"x": "whatever"}}
-        assert _tool_policy_dispatcher(obj, ctx) is None
+        assert await _tool_policy_dispatcher(obj, ctx) is None
 
-    def test_unknown_tool_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_unknown_tool_returns_none(self):
         obj = self._BashLike()
         ctx = {"tool_name": "does_not_exist", "arguments": {}}
-        assert _tool_policy_dispatcher(obj, ctx) is None
+        assert await _tool_policy_dispatcher(obj, ctx) is None
 
-    def test_empty_tool_name_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_empty_tool_name_returns_none(self):
         obj = self._BashLike()
         ctx = {"tool_name": "", "arguments": {}}
-        assert _tool_policy_dispatcher(obj, ctx) is None
+        assert await _tool_policy_dispatcher(obj, ctx) is None
 
-    def test_no_tool_policies_on_empty_ao(self):
+    @pytest.mark.asyncio
+    async def test_no_tool_policies_on_empty_ao(self):
         obj = self._EmptyAO()
         ctx = {"tool_name": "anything", "arguments": {}}
-        assert _tool_policy_dispatcher(obj, ctx) is None
+        assert await _tool_policy_dispatcher(obj, ctx) is None
 
     def test_dispatcher_is_registered_in_local_hooks(self):
         obj = self._BashLike()
@@ -368,7 +378,8 @@ class TestToolPolicyDispatcher:
         assert len(on_tool_hooks) >= 1
         assert all(callable(h) for h in on_tool_hooks)
 
-    def test_policy_uses_outer_scope_local_const(self):
+    @pytest.mark.asyncio
+    async def test_policy_uses_outer_scope_local_const(self):
         """A policy that reads a local const defined outside the policy but in the method body.
 
         This tests the fallback path in _build_policy_cell: when a freevar is not in
@@ -389,31 +400,33 @@ class TestToolPolicyDispatcher:
 
         obj = _ConstPolicy()
         ctx_ok = {"tool_name": "path_check", "arguments": {"path": "/home/user/file.txt"}}
-        assert _tool_policy_dispatcher(obj, ctx_ok) is True
+        assert await _tool_policy_dispatcher(obj, ctx_ok) is True
 
         ctx_blocked = {"tool_name": "path_check", "arguments": {"path": "/private/secret"}}
-        assert _tool_policy_dispatcher(obj, ctx_blocked) is False
+        assert await _tool_policy_dispatcher(obj, ctx_blocked) is False
 
-    def test_closure_injection_is_per_call_isolated(self):
+    @pytest.mark.asyncio
+    async def test_closure_injection_is_per_call_isolated(self):
         """Two concurrent-like calls must not share or clobber closure state."""
         obj = self._BashLike()
 
         ctx_a = {"tool_name": "bash_exec", "arguments": {"command": "ls"}}
         ctx_b = {"tool_name": "bash_exec", "arguments": {"command": "rm -rf /"}}
 
-        result_a = _tool_policy_dispatcher(obj, ctx_a)
-        result_b = _tool_policy_dispatcher(obj, ctx_b)
+        result_a = await _tool_policy_dispatcher(obj, ctx_a)
+        result_b = await _tool_policy_dispatcher(obj, ctx_b)
 
         assert result_a is True
         assert result_b is False
 
-    def test_consecutive_calls_are_independent(self):
+    @pytest.mark.asyncio
+    async def test_consecutive_calls_are_independent(self):
         """Rapid sequential calls must not carry over state from prior invocations."""
         obj = self._BashLike()
 
         results = []
         for cmd in ["ls", "cat /etc/passwd", "curl http://evil", "pwd", "rm -rf /"]:
             ctx = {"tool_name": "bash_exec", "arguments": {"command": cmd}}
-            results.append(_tool_policy_dispatcher(obj, ctx))
+            results.append(await _tool_policy_dispatcher(obj, ctx))
 
         assert results == [True, True, False, True, False]
