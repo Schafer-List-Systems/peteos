@@ -133,6 +133,51 @@ class TestSessionHooks:
         expected = hashlib.sha256("test_name".encode("utf-8")).hexdigest()
         assert hook_id == expected
 
+    def test_merged_hooks_local_runs_before_transitive(self):
+        session = Session.create("/some/path")
+        call_order: list = []
+
+        def local_hook():
+            call_order.append("local")
+            return None
+
+        def transitive_hook():
+            call_order.append("transitive")
+            return None
+
+        session._local_invocation_hooks["test_key"] = [local_hook]
+        session._transitive_invocation_hooks["test_key"] = [transitive_hook]
+
+        merged = session.invocation_hooks
+        assert merged["test_key"] == [local_hook, transitive_hook]
+
+    def test_merged_hooks_multiple_per_key(self):
+        session = Session.create("/some/path")
+        call_order: list = []
+
+        def local_a():
+            call_order.append("local_a")
+            return None
+
+        def local_b():
+            call_order.append("local_b")
+            return None
+
+        def transitive_x():
+            call_order.append("transitive_x")
+            return None
+
+        def transitive_y():
+            call_order.append("transitive_y")
+            return None
+
+        session._local_invocation_hooks["key"] = [local_a, local_b]
+        session._transitive_invocation_hooks["key"] = [transitive_x, transitive_y]
+
+        merged = session.invocation_hooks["key"]
+        # local hooks always first, then transitive
+        assert merged == [local_a, local_b, transitive_x, transitive_y]
+
 
 class TestSessionMaterialize:
     """Tests for Session.materialize()."""

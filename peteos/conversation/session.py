@@ -122,11 +122,13 @@ class Session:
         forwarded. Both lists are concatenated; local hooks execute before
         transitive hooks (local has priority).
         """
+        # Merge transitive and local hooks; local hooks run FIRST so they can
+        # short-circuit or set context before transitive hooks execute
         result: dict[str, list[Callable]] = {}
         for key in set(self._transitive_invocation_hooks) | set(self._local_invocation_hooks):
             result[key] = [
-                *self._transitive_invocation_hooks.get(key, []),
                 *self._local_invocation_hooks.get(key, []),
+                *self._transitive_invocation_hooks.get(key, []),
             ]
         return result
 
