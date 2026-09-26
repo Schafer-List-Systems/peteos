@@ -16,12 +16,13 @@ def _make_dummy_closure(n: int) -> tuple:
     return tuple(result)
 
 
-def _find_tool_policy(func: Callable) -> tuple[Callable, tuple[str, ...]] | None:
-    """Find a nested tool_policy function inside func and return (policy_fn, freevar_names).
+def _find_tool_policy(func: Callable) -> Callable | None:
+    """Find a nested tool_policy function inside func.
 
     Inspects func's code object constants to find the code object by name,
     then wraps it in a FunctionType with func's globals and a dummy closure
-    so it is callable. Returns None if no tool_policy is defined.
+    so it is callable. Sets _tool_policy_freevars on the returned function.
+    Returns None if no tool_policy is defined.
     """
     code = func.__code__
     for const in code.co_consts:
@@ -29,7 +30,8 @@ def _find_tool_policy(func: Callable) -> tuple[Callable, tuple[str, ...]] | None
             freevar_names = const.co_freevars
             closure = _make_dummy_closure(len(freevar_names))
             policy_fn = types.FunctionType(const, func.__globals__, const.co_name, (), closure)
-            return (policy_fn, freevar_names)
+            policy_fn._tool_policy_freevars = freevar_names
+            return policy_fn
     return None
 
 
@@ -45,11 +47,18 @@ def tool(
     local variables directly. Returns True/False/None (or ApprovalDecision values).
     """
     def apply(func: Callable) -> Callable:
-        policy_info = _find_tool_policy(func)
+        # Scan for a nested tool_policy; if found, attach it to the method
+        policy_fn = _find_tool_policy(func)
+
+        # Resolve tool name: explicit string, or fallback to method __name__
         func._tool_name = name if isinstance(name, str) else func.__name__
+
+        # Resolve description: explicit string, or method docstring, or empty
         func._tool_description = description or (func.__doc__ or "").strip()
-        if policy_info:
-            func._tool_policy, func._tool_policy_freevars = policy_info
+        
+        # Attach the policy directly on the method; the freevars live on the policy func itself
+        if policy_fn is not None:
+            func._tool_policy = policy_fn
         return func
 
     # Handle @tool (no parentheses) — func passed as first positional arg

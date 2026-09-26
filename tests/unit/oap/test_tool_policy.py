@@ -25,8 +25,8 @@ class TestFindToolPolicy:
             return "ok"
 
         assert hasattr(my_tool, "_tool_policy")
-        assert hasattr(my_tool, "_tool_policy_freevars")
-        assert my_tool._tool_policy_freevars == ("command",)
+        assert hasattr(my_tool._tool_policy, "_tool_policy_freevars")
+        assert my_tool._tool_policy._tool_policy_freevars == ("command",)
         assert callable(my_tool._tool_policy)
 
     def test_returns_none_when_no_policy(self):
@@ -47,7 +47,7 @@ class TestFindToolPolicy:
                 return command.split()[0] in SAFE
             return "ok"
 
-        assert set(with_local_const._tool_policy_freevars) == {"command", "SAFE"}
+        assert set(with_local_const._tool_policy._tool_policy_freevars) == {"command", "SAFE"}
 
     def test_policy_is_callable_without_outer_scope(self):
         @tool
@@ -158,9 +158,10 @@ class TestRegisterToolPolicyFor:
         _register_tool_policy_for(policies, "my_tool", my_tool)
 
         assert "my_tool" in policies
-        entry = policies["my_tool"][0]
-        assert callable(entry[0])
-        assert entry[1] == ("cmd",)
+        policy_fn = policies["my_tool"][0]
+        assert callable(policy_fn)
+        assert hasattr(policy_fn, "_tool_policy_freevars")
+        assert policy_fn._tool_policy_freevars == ("cmd",)
 
     def test_no_policy_stored_when_absent(self):
         def plain_tool(self):

@@ -69,19 +69,15 @@ def _build_policy_cell(name: str, args: dict, policy_func: Callable) -> Any:
 
 
 def _register_tool_policy_for(
-    policies: dict[str, list[tuple[Callable, tuple[str, ...]]]],
+    policies: dict[str, list[Callable]],
     tool_name: str,
     method: Callable,
 ) -> None:
     """Capture a tool_policy from a @tool method and store it if present."""
-    # No policy on this method — nothing to register
     policy_func = getattr(method, "_tool_policy", None)
     if policy_func is None:
         return
-    # freevars are the names of the outer-scope variables the policy reads;
-    # needed at invocation time to pre-populate the fresh closure cells
-    freevars = getattr(method, "_tool_policy_freevars", ())
-    policies.setdefault(tool_name, []).append((policy_func, freevars))
+    policies.setdefault(tool_name, []).append(policy_func)
 
 
 def _tool_policy_dispatcher(policies: dict, ctx: dict) -> bool | None:
@@ -103,23 +99,31 @@ def _tool_policy_dispatcher(policies: dict, ctx: dict) -> bool | None:
 
     # Evaluate each policy in order; short-circuit on first DENIED
     vote = None
-    for policy_func, freevar_names in tool_policies:
-        # Pre-populate each freevar cell from the tool-call arguments
-        args = ctx.get("arguments", {})
-        cells = tuple(
-            _build_policy_cell(name, args, policy_func)
-            for name in freevar_names
-        )
+    for policy_func in tool_policies:
+        if hasattr(policy_func, "_tool_policy_freevars"):
+            # Nested policy: read freevars from policy function, pre-populate closure
+            freevar_names = policy_func._tool_policy_freevars
+            args = ctx.get("arguments", {})
+            cells = tuple(
+                _build_policy_cell(name, args, policy_func)
+                for name in freevar_names
+            )
 
-        # Reconstruct a callable with the pre-populated closure
-        policy_fn = types.FunctionType(
-            policy_func.__code__,
-            policy_func.__globals__,
-            policy_func.__name__,
-            policy_func.__defaults__,
-            cells,
-        )
-        result = policy_fn()
+            # Reconstruct a callable with the pre-populated closure
+            policy_fn = types.FunctionType(
+                policy_func.__code__,
+                policy_func.__globals__,
+                policy_func.__name__,
+                policy_func.__defaults__,
+                cells,
+            )
+            result = policy_fn()
+        else:
+            # External policy: plain signature (agent, tool_name, arguments)
+            agent = ctx.get("self")
+            tool_name_arg = ctx.get("tool_name")
+            arguments = ctx.get("arguments", {})
+            result = policy_func(agent, tool_name_arg, arguments)
 
         # DENIED short-circuits immediately — a single denial is conclusive
         if result is False:
@@ -257,10 +261,13 @@ class AgenticObject:
             "before_send_to_chatbot": [_context_reduction_hook],
             "on_truncation": [_on_truncation_hook],
         }
-        self._oap_tool_policies: dict[str, list[tuple[Callable, tuple[str, ...]]]] = {}
+        self._oap_tool_policies: dict[str, list[Callable]] = {}
         self._register_tools()
         self._oap_local_hooks.setdefault("on_tool_call", []).append(
-            lambda ctx: _tool_policy_dispatcher(self._oap_tool_policies, ctx)
+            lambda ctx: _tool_policy_dispatcher(self._oap_tool_policies, {
+                **ctx,
+                "arguments": {**ctx.get("arguments", {}), "self": self},
+            })
         )
         self._register_output_schema_hook()
         self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
