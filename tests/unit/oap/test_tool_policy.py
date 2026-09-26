@@ -253,6 +253,16 @@ class TestAgenticObjectToolPolicyRegistration:
         assert "exec" in obj._oap_tool_policies
         assert handle not in obj._oap_tool_policies["exec"]
 
+    def test_register_non_callable_raises(self):
+        obj = self._WithNestedPolicy()
+        with pytest.raises(TypeError, match="must be callable"):
+            obj.register_tool_policy("exec", "not a callable")
+
+    def test_register_wrong_signature_raises(self):
+        obj = self._WithNestedPolicy()
+        with pytest.raises(TypeError, match="must have parameters agent, tool_name, and arguments"):
+            obj.register_tool_policy("exec", lambda x: x)
+
     def test_deregister_nested_raises(self):
         obj = self._WithNestedPolicy()
         with pytest.raises(KeyError, match="cannot deregister the nested policy"):

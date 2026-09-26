@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import inspect
 import os
 import threading
 import time
@@ -103,30 +104,56 @@ def _tool_policy_dispatcher(agent, ctx: dict) -> bool | None:
         return None
 
     # Evaluate each policy in order; short-circuit on first DENIED
+    agent_name = agent.__class__.__name__
     vote = None
-    for policy_func in tool_policies.values():
-        if hasattr(policy_func, "_tool_policy_freevars"):
-            # Nested policy: read freevars from policy function, pre-populate closure
-            freevar_names = policy_func._tool_policy_freevars
-            args = ctx.get("arguments", {})
-            cells = tuple(
-                _build_policy_cell(name, args, policy_func, agent)
-                for name in freevar_names
+    for handle, policy_func in tool_policies.items():
+        try:
+            _logger.debug(
+                "[tool_policy] agent=%s policy=%s handle=%s tool=%s arguments=%s",
+                agent_name,
+                "nested" if hasattr(policy_func, "_tool_policy_freevars") else "external",
+                handle,
+                tool_name,
+                ctx.get("arguments", {}),
             )
-
-            # Reconstruct a callable with the pre-populated closure
-            policy_fn = types.FunctionType(
-                policy_func.__code__,
-                policy_func.__globals__,
-                policy_func.__name__,
-                policy_func.__defaults__,
-                cells,
+            if hasattr(policy_func, "_tool_policy_freevars"):
+                # Nested policy: read freevars from policy function, pre-populate closure
+                freevar_names = policy_func._tool_policy_freevars
+                args = ctx.get("arguments", {})
+                cells = tuple(
+                    _build_policy_cell(name, args, policy_func, agent)
+                    for name in freevar_names
+                )
+                policy_fn = types.FunctionType(
+                    policy_func.__code__,
+                    policy_func.__globals__,
+                    policy_func.__name__,
+                    policy_func.__defaults__,
+                    cells,
+                )
+                result = policy_fn()
+            else:
+                # External policy: called with (agent, tool_name, arguments)
+                result = policy_func(agent, tool_name, ctx.get("arguments", {}))
+        except Exception as exc:
+            # Log the error and continue to the next policy
+            _logger.error(
+                "tool_policy agent=%s handle=%s tool=%s raised %s: %s",
+                agent_name,
+                handle,
+                tool_name,
+                type(exc).__name__,
+                exc,
             )
-            result = policy_fn()
-        else:
-            # External policy: called with (agent, tool_name, arguments)
-            result = policy_func(agent, tool_name, ctx.get("arguments", {}))
+            continue
 
+        _logger.debug(
+            "[tool_policy] agent=%s handle=%s tool=%s result=%s",
+            agent_name,
+            handle,
+            tool_name,
+            result,
+        )
         # DENIED short-circuits immediately — a single denial is conclusive
         if result is False:
             return False
@@ -305,6 +332,26 @@ class AgenticObject:
     def register_tool_policy(
         self, tool_name: str, policy: Callable, handle: str | None = None
     ) -> str:
+        # Validate the policy is a callable with the required signature (agent, tool_name, arguments)
+        if not callable(policy):
+            raise TypeError(f"policy for '{tool_name}' must be callable, got {type(policy).__name__}")
+        try:
+            sig = inspect.signature(policy)
+        except (TypeError, ValueError):
+            raise TypeError(f"policy for '{tool_name}' must be a callable with signature (agent, tool_name, arguments)")
+        required_params = ["agent", "tool_name", "arguments"]
+        params = list(sig.parameters.keys())
+        if len(params) < 3 or any(
+            p not in sig.parameters
+            or sig.parameters[p].kind
+            in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+            for p in required_params
+        ):
+            raise TypeError(
+                f"policy for '{tool_name}' must have parameters agent, tool_name, and "
+                f"arguments (positional or keyword, not *args or **kwargs)"
+            )
+
         # Resolve the policy dict for this tool, creating an empty one if absent
         policies = self._oap_tool_policies.setdefault(tool_name, {})
         # Resolve the handle: user-provided, or generate a unique one via loop
