@@ -7,6 +7,7 @@ import concurrent.futures
 import os
 import threading
 import time
+import types
 from dataclasses import is_dataclass
 from typing import Any, Callable
 
@@ -14,19 +15,122 @@ from peteos.conversation import ContentPart, Message
 from peteos.conversation.context import Context
 from peteos.conversation.session import Session
 from peteos.engine import ExecStatus, Runner
-from peteos.persona.role import Role
-from peteos.persona.toolmanager import Tool, ToolManager
-from peteos.utils import get_logger
+from peteos.oap.agentic_registry import AgenticObjectRegistry
+from peteos.oap.decorators import tool
 from peteos.oap.error import Error
 from peteos.oap import prompts
+from peteos.persona.agent import Agent
+from peteos.persona.role import Role
+from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.sandbox import SandboxBuilder
+from peteos.utils import get_logger
+from peteos.utils._schema import format_schema_for_prompt, get_schema_description, relaxed_parse_data
 
-from peteos.oap.decorators import tool
-from peteos.oap.agentic_registry import AgenticObjectRegistry
 
 _logger = get_logger(__name__)
 
 _AGENT_BASE_DIR = os.environ.get("PETEOS_AGENT_BASE_DIR", "/tmp/peteos")
+
+
+def _find_outer_binding(name: str, policy_func: Callable) -> Any:
+    """Resolve one freevar name from policy_func's enclosing scope to its live value.
+
+    Used at dispatch time when a freevar is not in the tool-call arguments
+    (e.g. 'self' or a local constant). Walks the policy's original __closure__
+    to find what the variable was bound to when the policy was captured.
+    """
+    # No closure means no outer bindings at all — nothing to look up
+    if not hasattr(policy_func, "__closure__") or not policy_func.__closure__:
+        return None
+    # Build name -> live_value mapping from the policy's closure cells
+    outer = dict(zip(
+        policy_func.__code__.co_freevars,
+        (c.cell_contents for c in policy_func.__closure__),
+    ))
+    return outer.get(name)
+
+
+def _make_cell(value: Any) -> Any:
+    """Create a closure cell holding value (Python 3.10+ compatible)."""
+    # Capture value in a trivial lambda, then steal its pre-built cell.
+    # No types.CellType needed — avoids the 3.12+ only API.
+    return (lambda _: value).__closure__[0]
+
+
+def _build_policy_cell(name: str, args: dict, policy_func: Callable) -> Any:
+    """Build a closure cell pre-populated with the named argument value."""
+    # First priority: the dispatcher already put the tool-call args in args
+    if name in args:
+        value = args[name]
+    else:
+        # Fall back to the policy's original enclosing scope (e.g. 'self')
+        value = _find_outer_binding(name, policy_func)
+    return _make_cell(value)
+
+
+def _register_tool_policy_for(
+    policies: dict[str, list[tuple[Callable, tuple[str, ...]]]],
+    tool_name: str,
+    method: Callable,
+) -> None:
+    """Capture a tool_policy from a @tool method and store it if present."""
+    # No policy on this method — nothing to register
+    policy_func = getattr(method, "_tool_policy", None)
+    if policy_func is None:
+        return
+    # freevars are the names of the outer-scope variables the policy reads;
+    # needed at invocation time to pre-populate the fresh closure cells
+    freevars = getattr(method, "_tool_policy_freevars", ())
+    policies.setdefault(tool_name, []).append((policy_func, freevars))
+
+
+def _tool_policy_dispatcher(policies: dict, ctx: dict) -> bool | None:
+    """Policy-executor hook for on_tool_call.
+
+    Looks up ctx["tool_name"] in policies and evaluates each policy in order,
+    short-circuiting on the first DENIED vote. Returns True/False/None (merged
+    by the outer hook chain) or None if no policies are registered (IGNORED).
+    """
+    # No tool name means no policy can apply — this hook declines
+    tool_name = ctx.get("tool_name")
+    if not tool_name:
+        return None
+
+    # No policy registered for this tool — IGNORED, outer chain decides
+    tool_policies = policies.get(tool_name)
+    if not tool_policies:
+        return None
+
+    # Evaluate each policy in order; short-circuit on first DENIED
+    vote = None
+    for policy_func, freevar_names in tool_policies:
+        # Pre-populate each freevar cell from the tool-call arguments
+        args = ctx.get("arguments", {})
+        cells = tuple(
+            _build_policy_cell(name, args, policy_func)
+            for name in freevar_names
+        )
+
+        # Reconstruct a callable with the pre-populated closure
+        policy_fn = types.FunctionType(
+            policy_func.__code__,
+            policy_func.__globals__,
+            policy_func.__name__,
+            policy_func.__defaults__,
+            cells,
+        )
+        result = policy_fn()
+
+        # DENIED short-circuits immediately — a single denial is conclusive
+        if result is False:
+            return False
+
+        # Approved — record the vote, keep checking remaining policies
+        if result is True:
+            vote = True
+
+    # No policy voted False; return the recorded vote (True or None)
+    return vote
 
 
 def _collect_oap_config(cls: type) -> dict[str, Any]:
@@ -66,12 +170,6 @@ def _collect_oap_config(cls: type) -> dict[str, Any]:
         "imports": list(imports),
         "import_aliases": import_aliases,
     }
-
-
-from peteos.utils._schema import format_schema_for_prompt, get_schema_description, relaxed_parse_data
-
-
-from peteos.persona.agent import Agent
 
 
 def _try_context_reduction(
@@ -159,7 +257,11 @@ class AgenticObject:
             "before_send_to_chatbot": [_context_reduction_hook],
             "on_truncation": [_on_truncation_hook],
         }
+        self._oap_tool_policies: dict[str, list[tuple[Callable, tuple[str, ...]]]] = {}
         self._register_tools()
+        self._oap_local_hooks.setdefault("on_tool_call", []).append(
+            lambda ctx: _tool_policy_dispatcher(self._oap_tool_policies, ctx)
+        )
         self._register_output_schema_hook()
         self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
         self._register_sandbox_tool()
@@ -193,6 +295,7 @@ class AgenticObject:
                             func=getattr(self, name),
                         )
                         self._oap_tool_manager.register_tool(t)
+                        _register_tool_policy_for(self._oap_tool_policies, tool_name, method)
 
     def _register_output_schema_hook(self) -> None:
         """Register the output schema system prompt hook."""

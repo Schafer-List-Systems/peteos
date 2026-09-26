@@ -2,7 +2,35 @@
 
 from __future__ import annotations
 
+import types
 from typing import Callable
+
+
+def _make_dummy_closure(n: int) -> tuple:
+    """Create n dummy cell objects for FunctionType closure injection."""
+    result = []
+    for _ in range(n):
+        _sentinel = object()
+        fn = (lambda: _sentinel)
+        result.append(fn.__closure__[0])
+    return tuple(result)
+
+
+def _find_tool_policy(func: Callable) -> tuple[Callable, tuple[str, ...]] | None:
+    """Find a nested tool_policy function inside func and return (policy_fn, freevar_names).
+
+    Inspects func's code object constants to find the code object by name,
+    then wraps it in a FunctionType with func's globals and a dummy closure
+    so it is callable. Returns None if no tool_policy is defined.
+    """
+    code = func.__code__
+    for const in code.co_consts:
+        if isinstance(const, type(code)) and const.co_name == "tool_policy":
+            freevar_names = const.co_freevars
+            closure = _make_dummy_closure(len(freevar_names))
+            policy_fn = types.FunctionType(const, func.__globals__, const.co_name, (), closure)
+            return (policy_fn, freevar_names)
+    return None
 
 
 def tool(
@@ -12,10 +40,16 @@ def tool(
     """Mark a method on an AgenticObject subclass as callable by agents.
 
     Supports both @tool and @tool(name="custom_name").
+    Optionally contains a nested tool_policy() function for per-call argument-based
+    approval decisions. The policy has no parameters and reads the enclosing method's
+    local variables directly. Returns True/False/None (or ApprovalDecision values).
     """
     def apply(func: Callable) -> Callable:
+        policy_info = _find_tool_policy(func)
         func._tool_name = name if isinstance(name, str) else func.__name__
         func._tool_description = description or (func.__doc__ or "").strip()
+        if policy_info:
+            func._tool_policy, func._tool_policy_freevars = policy_info
         return func
 
     # Handle @tool (no parentheses) — func passed as first positional arg

@@ -8,9 +8,9 @@ from typing import Dict, Optional
 from peteos.utils import get_logger, json
 
 from peteos.conversation.system_prompt_message import SystemPromptMessage
-from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 from peteos.conversation.session import Session
-from peteos.conversation.message import ContentPart
+from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
+
 
 from .role import Role
 from .toolmanager import ToolManager
@@ -148,21 +148,3 @@ class Agent:
             return True
         return False
 
-    def _on_before_tool_execution(
-        self,
-        session: Session,
-        tool_call: ContentPart
-    ) -> tuple:
-        """Hook callback fired before each tool execution.
-
-        Auto-approves tools listed in the session's auto_approve_tools.
-
-        Returns:
-            Tuple (allow: bool | None, message: str | None) - Returns
-            (True, None) for auto-approved tools, ("pending", None) otherwise.
-        """
-        tool_name = tool_call.name
-        if tool_name in session.auto_approve_tools:
-            return (True, None)
-
-        return ("pending", None)

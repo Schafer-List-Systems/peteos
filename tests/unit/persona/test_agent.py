@@ -11,7 +11,7 @@ from peteos.utils import json
 from peteos.persona.agent import Agent
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
-from peteos.conversation.message import ContentPart
+
 
 
 @pytest.fixture
@@ -147,35 +147,6 @@ class TestAgentHooks:
         # The Session should have hooks registered for tool list and tool filter
         # These are registered on the tool_definitions_message
         assert len(session._message_hooks) > 0
-
-    @pytest.mark.asyncio
-    async def test_on_before_tool_execution_pending(self, agent_with_sessions):
-        session = await agent_with_sessions.create_session()
-        tool_call = ContentPart.create_tool_use("tc1", "test_tool", '{"param": "value"}')
-        result = agent_with_sessions._on_before_tool_execution(session, tool_call)
-        assert result == ("pending", None)
-
-    @pytest.mark.asyncio
-    async def test_on_before_tool_execution_auto_approve(self, agent_with_auto_approve):
-        session = await agent_with_auto_approve.create_session()
-        tool_call = ContentPart.create_tool_use("tc1", "web_fetch", "{}")
-        result = agent_with_auto_approve._on_before_tool_execution(session, tool_call)
-        # session.auto_approve_tools starts empty — role's list not yet wired in
-        assert result == ("pending", None)
-
-    @pytest.mark.asyncio
-    async def test_on_before_tool_execution_non_approved_still_pending(self, agent_with_auto_approve):
-        session = await agent_with_auto_approve.create_session()
-        tool_call = ContentPart.create_tool_use("tc1", "other_tool", "{}")
-        result = agent_with_auto_approve._on_before_tool_execution(session, tool_call)
-        assert result == ("pending", None)
-
-    @pytest.mark.asyncio
-    async def test_on_before_tool_execution_empty_auto_approve(self, agent_with_sessions):
-        session = await agent_with_sessions.create_session()
-        tool_call = ContentPart.create_tool_use("tc1", "test_tool", '{"param": "value"}')
-        result = agent_with_sessions._on_before_tool_execution(session, tool_call)
-        assert result == ("pending", None)
 
     @pytest.mark.asyncio
     async def test_on_before_notification_publish_not_implemented(self, agent_with_sessions):
