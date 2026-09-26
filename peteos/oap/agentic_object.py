@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import types
+import uuid
 from dataclasses import is_dataclass
 from typing import Any, Callable
 
@@ -57,35 +58,39 @@ def _make_cell(value: Any) -> Any:
     return (lambda _: value).__closure__[0]
 
 
-def _build_policy_cell(name: str, args: dict, policy_func: Callable) -> Any:
+def _build_policy_cell(name: str, args: dict, policy_func: Callable, agent=None) -> Any:
     """Build a closure cell pre-populated with the named argument value."""
-    # First priority: the dispatcher already put the tool-call args in args
+    # The 'self' freevar is a special case: use the current agent instance, not the stale binding from decoration time
+    if name == "self" and agent is not None:
+        return _make_cell(agent)
+    # For other names: prefer the tool-call argument value
     if name in args:
         value = args[name]
     else:
-        # Fall back to the policy's original enclosing scope (e.g. 'self')
+        # Fall back to the policy's original enclosing scope
         value = _find_outer_binding(name, policy_func)
     return _make_cell(value)
 
 
 def _register_tool_policy_for(
-    policies: dict[str, list[Callable]],
+    policies: dict[str, dict[str, Callable]],
     tool_name: str,
     method: Callable,
 ) -> None:
-    """Capture a tool_policy from a @tool method and store it if present."""
+    # Capture the nested tool_policy from the @tool method, if present
     policy_func = getattr(method, "_tool_policy", None)
     if policy_func is None:
         return
-    policies.setdefault(tool_name, []).append(policy_func)
+    policies.setdefault(tool_name, {})["_nested"] = policy_func
 
 
-def _tool_policy_dispatcher(policies: dict, ctx: dict) -> bool | None:
+def _tool_policy_dispatcher(agent, ctx: dict) -> bool | None:
     """Policy-executor hook for on_tool_call.
 
-    Looks up ctx["tool_name"] in policies and evaluates each policy in order,
-    short-circuiting on the first DENIED vote. Returns True/False/None (merged
-    by the outer hook chain) or None if no policies are registered (IGNORED).
+    Looks up ctx["tool_name"] in agent._oap_tool_policies and evaluates each
+    policy in order, short-circuiting on the first DENIED vote. Returns
+    True/False/None (merged by the outer hook chain) or None if no policies
+    are registered (IGNORED).
     """
     # No tool name means no policy can apply — this hook declines
     tool_name = ctx.get("tool_name")
@@ -93,19 +98,19 @@ def _tool_policy_dispatcher(policies: dict, ctx: dict) -> bool | None:
         return None
 
     # No policy registered for this tool — IGNORED, outer chain decides
-    tool_policies = policies.get(tool_name)
+    tool_policies = agent._oap_tool_policies.get(tool_name)
     if not tool_policies:
         return None
 
     # Evaluate each policy in order; short-circuit on first DENIED
     vote = None
-    for policy_func in tool_policies:
+    for policy_func in tool_policies.values():
         if hasattr(policy_func, "_tool_policy_freevars"):
             # Nested policy: read freevars from policy function, pre-populate closure
             freevar_names = policy_func._tool_policy_freevars
             args = ctx.get("arguments", {})
             cells = tuple(
-                _build_policy_cell(name, args, policy_func)
+                _build_policy_cell(name, args, policy_func, agent)
                 for name in freevar_names
             )
 
@@ -119,11 +124,8 @@ def _tool_policy_dispatcher(policies: dict, ctx: dict) -> bool | None:
             )
             result = policy_fn()
         else:
-            # External policy: plain signature (agent, tool_name, arguments)
-            agent = ctx.get("self")
-            tool_name_arg = ctx.get("tool_name")
-            arguments = ctx.get("arguments", {})
-            result = policy_func(agent, tool_name_arg, arguments)
+            # External policy: called with (agent, tool_name, arguments)
+            result = policy_func(agent, tool_name, ctx.get("arguments", {}))
 
         # DENIED short-circuits immediately — a single denial is conclusive
         if result is False:
@@ -133,7 +135,6 @@ def _tool_policy_dispatcher(policies: dict, ctx: dict) -> bool | None:
         if result is True:
             vote = True
 
-    # No policy voted False; return the recorded vote (True or None)
     return vote
 
 
@@ -261,13 +262,10 @@ class AgenticObject:
             "before_send_to_chatbot": [_context_reduction_hook],
             "on_truncation": [_on_truncation_hook],
         }
-        self._oap_tool_policies: dict[str, list[Callable]] = {}
+        self._oap_tool_policies: dict[str, dict[str, Callable]] = {}
         self._register_tools()
         self._oap_local_hooks.setdefault("on_tool_call", []).append(
-            lambda ctx: _tool_policy_dispatcher(self._oap_tool_policies, {
-                **ctx,
-                "arguments": {**ctx.get("arguments", {}), "self": self},
-            })
+            lambda ctx: _tool_policy_dispatcher(self, ctx)
         )
         self._register_output_schema_hook()
         self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
@@ -303,6 +301,31 @@ class AgenticObject:
                         )
                         self._oap_tool_manager.register_tool(t)
                         _register_tool_policy_for(self._oap_tool_policies, tool_name, method)
+
+    def register_tool_policy(
+        self, tool_name: str, policy: Callable, handle: str | None = None
+    ) -> str:
+        # Resolve the policy dict for this tool, creating an empty one if absent
+        policies = self._oap_tool_policies.setdefault(tool_name, {})
+        # Resolve the handle: user-provided, or generate a unique one via loop
+        if handle is None:
+            while True:
+                handle = str(uuid.uuid4())
+                if handle not in policies:
+                    break
+        elif handle in policies:
+            raise KeyError(f"handle '{handle}' already registered for tool '{tool_name}'")
+        policies[handle] = policy
+        return handle
+
+    def deregister_tool_policy(self, tool_name: str, handle: str) -> None:
+        # Remove the policy registered under handle for tool_name
+        if handle == "_nested":
+            raise KeyError("cannot deregister the nested policy for a tool; remove the policy from the @tool decorator instead")
+        policies = self._oap_tool_policies.get(tool_name)
+        if policies is None or handle not in policies:
+            raise KeyError(f"handle '{handle}' not found for tool '{tool_name}'")
+        del policies[handle]
 
     def _register_output_schema_hook(self) -> None:
         """Register the output schema system prompt hook."""

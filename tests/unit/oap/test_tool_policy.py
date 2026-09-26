@@ -158,7 +158,7 @@ class TestRegisterToolPolicyFor:
         _register_tool_policy_for(policies, "my_tool", my_tool)
 
         assert "my_tool" in policies
-        policy_fn = policies["my_tool"][0]
+        policy_fn = policies["my_tool"]["_nested"]
         assert callable(policy_fn)
         assert hasattr(policy_fn, "_tool_policy_freevars")
         assert policy_fn._tool_policy_freevars == ("cmd",)
@@ -172,6 +172,7 @@ class TestRegisterToolPolicyFor:
         assert policies == {}
 
     def test_multiple_policies_same_tool(self):
+        # A given tool has exactly one nested policy — the last one registered wins
         @tool
         def tool_a(self, x: str, runner=None):
             def tool_policy():
@@ -188,7 +189,97 @@ class TestRegisterToolPolicyFor:
         _register_tool_policy_for(policies, "multi_tool", tool_a)
         _register_tool_policy_for(policies, "multi_tool", tool_b)
 
-        assert len(policies["multi_tool"]) == 2
+        # Second registration overwrites the first — one policy per tool
+        assert len(policies["multi_tool"]) == 1
+        assert policies["multi_tool"]["_nested"] is tool_b._tool_policy
+
+
+class TestAgenticObjectToolPolicyRegistration:
+    """Tests for AgenticObject.register_tool_policy / deregister_tool_policy."""
+
+    @agentic_object()
+    class _WithNestedPolicy(AgenticObject):
+        @tool()
+        def exec(self, cmd: str, runner=None):
+            def tool_policy():
+                # Defer on 'echo' so the external policy can run; deny 'rm'
+                if cmd.split()[0] == "echo":
+                    return None
+                return cmd.split()[0] in {"ls", "pwd"}
+            return "ok"
+
+    def test_register_external_policy(self):
+        obj = self._WithNestedPolicy()
+
+        def ext_policy(agent, tool_name, arguments):
+            return arguments.get("cmd", "").startswith("echo ")
+
+        handle = obj.register_tool_policy("exec", ext_policy)
+        assert handle is not None
+        assert "exec" in obj._oap_tool_policies
+        assert handle in obj._oap_tool_policies["exec"]
+
+    def test_register_with_provided_handle(self):
+        obj = self._WithNestedPolicy()
+
+        def ext_policy(agent, tool_name, arguments):
+            return True
+
+        handle = obj.register_tool_policy("exec", ext_policy, handle="my-policy")
+        assert handle == "my-policy"
+        assert "my-policy" in obj._oap_tool_policies["exec"]
+
+    def test_register_duplicate_handle_raises(self):
+        obj = self._WithNestedPolicy()
+
+        def p1(agent, tool_name, arguments):
+            return True
+
+        def p2(agent, tool_name, arguments):
+            return False
+
+        obj.register_tool_policy("exec", p1, handle="dup")
+        with pytest.raises(KeyError, match="already registered"):
+            obj.register_tool_policy("exec", p2, handle="dup")
+
+    def test_deregister_by_handle(self):
+        obj = self._WithNestedPolicy()
+
+        def ext_policy(agent, tool_name, arguments):
+            return True
+
+        handle = obj.register_tool_policy("exec", ext_policy)
+        obj.deregister_tool_policy("exec", handle)
+        assert "exec" in obj._oap_tool_policies
+        assert handle not in obj._oap_tool_policies["exec"]
+
+    def test_deregister_nested_raises(self):
+        obj = self._WithNestedPolicy()
+        with pytest.raises(KeyError, match="cannot deregister the nested policy"):
+            obj.deregister_tool_policy("exec", "_nested")
+
+    def test_deregister_unknown_handle_raises(self):
+        obj = self._WithNestedPolicy()
+        with pytest.raises(KeyError, match="not found"):
+            obj.deregister_tool_policy("exec", "does-not-exist")
+
+    def test_external_policy_receives_agent_tool_name_and_arguments(self):
+        captured = {}
+
+        def ext_policy(agent, tool_name, arguments):
+            captured["agent"] = agent
+            captured["tool_name"] = tool_name
+            captured["arguments"] = arguments
+            return True
+
+        obj = self._WithNestedPolicy()
+        obj.register_tool_policy("exec", ext_policy)
+        ctx = {"tool_name": "exec", "arguments": {"cmd": "echo hello"}}
+        _tool_policy_dispatcher(obj, ctx)
+
+        assert captured["agent"] is obj
+        assert captured["tool_name"] == "exec"
+        assert captured["arguments"] == {"cmd": "echo hello"}
 
 
 class TestToolPolicyDispatcher:
@@ -219,47 +310,47 @@ class TestToolPolicyDispatcher:
     def test_approved_command_returns_true(self):
         obj = self._BashLike()
         ctx = {"tool_name": "bash_exec", "arguments": {"command": "ls -la"}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is True
+        assert _tool_policy_dispatcher(obj, ctx) is True
 
     def test_denied_command_returns_false(self):
         obj = self._BashLike()
         ctx = {"tool_name": "bash_exec", "arguments": {"command": "rm -rf /"}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is False
+        assert _tool_policy_dispatcher(obj, ctx) is False
 
     def test_pwd_is_approved(self):
         obj = self._BashLike()
         ctx = {"tool_name": "bash_exec", "arguments": {"command": "pwd"}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is True
+        assert _tool_policy_dispatcher(obj, ctx) is True
 
     def test_short_circuit_on_deny(self):
         obj = self._BashLike()
         ctx = {"tool_name": "restricted", "arguments": {"key": "dangerous"}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is False
+        assert _tool_policy_dispatcher(obj, ctx) is False
 
     def test_approved_key(self):
         obj = self._BashLike()
         ctx = {"tool_name": "restricted", "arguments": {"key": "safe"}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is True
+        assert _tool_policy_dispatcher(obj, ctx) is True
 
     def test_no_policy_returns_none(self):
         obj = self._BashLike()
         ctx = {"tool_name": "no_policy_tool", "arguments": {"x": "whatever"}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is None
+        assert _tool_policy_dispatcher(obj, ctx) is None
 
     def test_unknown_tool_returns_none(self):
         obj = self._BashLike()
         ctx = {"tool_name": "does_not_exist", "arguments": {}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is None
+        assert _tool_policy_dispatcher(obj, ctx) is None
 
     def test_empty_tool_name_returns_none(self):
         obj = self._BashLike()
         ctx = {"tool_name": "", "arguments": {}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is None
+        assert _tool_policy_dispatcher(obj, ctx) is None
 
     def test_no_tool_policies_on_empty_ao(self):
         obj = self._EmptyAO()
         ctx = {"tool_name": "anything", "arguments": {}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx) is None
+        assert _tool_policy_dispatcher(obj, ctx) is None
 
     def test_dispatcher_is_registered_in_local_hooks(self):
         obj = self._BashLike()
@@ -288,10 +379,10 @@ class TestToolPolicyDispatcher:
 
         obj = _ConstPolicy()
         ctx_ok = {"tool_name": "path_check", "arguments": {"path": "/home/user/file.txt"}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx_ok) is True
+        assert _tool_policy_dispatcher(obj, ctx_ok) is True
 
         ctx_blocked = {"tool_name": "path_check", "arguments": {"path": "/private/secret"}}
-        assert _tool_policy_dispatcher(obj._oap_tool_policies, ctx_blocked) is False
+        assert _tool_policy_dispatcher(obj, ctx_blocked) is False
 
     def test_closure_injection_is_per_call_isolated(self):
         """Two concurrent-like calls must not share or clobber closure state."""
@@ -300,8 +391,8 @@ class TestToolPolicyDispatcher:
         ctx_a = {"tool_name": "bash_exec", "arguments": {"command": "ls"}}
         ctx_b = {"tool_name": "bash_exec", "arguments": {"command": "rm -rf /"}}
 
-        result_a = _tool_policy_dispatcher(obj._oap_tool_policies, ctx_a)
-        result_b = _tool_policy_dispatcher(obj._oap_tool_policies, ctx_b)
+        result_a = _tool_policy_dispatcher(obj, ctx_a)
+        result_b = _tool_policy_dispatcher(obj, ctx_b)
 
         assert result_a is True
         assert result_b is False
@@ -313,6 +404,6 @@ class TestToolPolicyDispatcher:
         results = []
         for cmd in ["ls", "cat /etc/passwd", "curl http://evil", "pwd", "rm -rf /"]:
             ctx = {"tool_name": "bash_exec", "arguments": {"command": cmd}}
-            results.append(_tool_policy_dispatcher(obj._oap_tool_policies, ctx))
+            results.append(_tool_policy_dispatcher(obj, ctx))
 
         assert results == [True, True, False, True, False]
