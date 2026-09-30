@@ -58,16 +58,27 @@ def _coerce_to_approval_decision(
     result: Any,
 ) -> tuple[ApprovalDecision, str | None]:
     """Coerce any hook return value to an ApprovalDecision and optional denied_reason."""
+    # If result is None, return IGNORED with no reason.
     if result is None:
         return ApprovalDecision.IGNORED, None
+
+    # If result is True, return APPROVED with no reason.
     if result is True:
         return ApprovalDecision.APPROVED, None
+
+    # If result is False, return DENIED with no reason.
     if result is False:
         return ApprovalDecision.DENIED, None
+        
+    # If result is already an ApprovalDecision, return it as-is.
     if isinstance(result, ApprovalDecision):
         return result, None
+
+    # If result is a string, treat it as DENIED with the string as reason.
     if isinstance(result, str):
         return ApprovalDecision.DENIED, result
+
+    # If result is a 2-tuple, unpack it and handle by type.
     if isinstance(result, tuple) and len(result) == 2:
         decision, denied_reason = result
         if isinstance(decision, ApprovalDecision):
@@ -77,6 +88,8 @@ def _coerce_to_approval_decision(
         if decision is False or decision is None:
             return ApprovalDecision.DENIED, denied_reason
         return ApprovalDecision.DENIED, str(decision)
+
+    # Fallback: coerce anything else to a string and return DENIED.
     return ApprovalDecision.DENIED, str(result)
 
 
@@ -90,22 +103,28 @@ def _merge_approval_status(
     - did_increment_count is True for APPROVED, DENIED, IGNORED
     - did_increment_count is False for PENDING (defer — hook will respond later)
     """
+    # Coerce the hook result to an ApprovalDecision and optional denied_reason.
     decision, denied_reason = _coerce_to_approval_decision(hook_result)
 
+    # If IGNORED, return current status with did_increment_count=True.
     if decision == ApprovalDecision.IGNORED:
         return current, None, True
 
+    # If APPROVED, promote to APPROVED if still PENDING, else keep current; always increment.
     if decision == ApprovalDecision.APPROVED:
         if current == ToolApprovalStatus.PENDING:
             return ToolApprovalStatus.APPROVED, None, True
         return current, None, True
 
+    # If DENIED, return DENIED with reason and increment.
     if decision == ApprovalDecision.DENIED:
         return ToolApprovalStatus.DENIED, denied_reason, True
 
+    # If PENDING, keep current and do NOT increment (defer — hook will respond later).
     if decision == ApprovalDecision.PENDING:
         return current, None, False
 
+    # Fallback: return current with increment (defensive, should be unreachable).
     return current, None, True
 
 
@@ -148,9 +167,18 @@ class ToolCallGroup:
         self._any_real_result = True
 
     def add_tool_call(self, record: ToolCallRecord) -> None:
+        """Add a tool call record to this group and inject a result placeholder."""
+        # Register record in the group's list.
         self.records.append(record)
+
+        # Create an empty result placeholder so the LLM can see a slot for the result.
         cp = ContentPart.create_tool_result(record.tool_call_id, "")
         cp.raw_dict["name"] = record.tool_call.name
+        
+        # Mark as pending so recovery can detect unexecuted tools after a crash or forced stop.
+        cp.raw_dict["pending"] = True
+        
+        # Inject the placeholder into the result message the LLM will receive.
         self.result_message.raw_dict["content"].append(cp.raw_dict)
 
     def has_pending(self) -> bool:
@@ -183,30 +211,48 @@ class ToolCallGroup:
         return None
 
     def deny_all_remaining(self, reason: str) -> None:
-        """Deny all records that haven't executed yet."""
+        """Deny all records in this group that have not yet executed."""
+        # Iterate over all tool call records in the group.
         for r in self.records:
-            if r.execution_status != ToolExecutionStatus.EXECUTED:
-                r.approval_status = ToolApprovalStatus.DENIED
-                r.execution_status = ToolExecutionStatus.DENIED
-                r.denied_reason = f"Tool group denied: {reason}"
+            if r.execution_status == ToolExecutionStatus.EXECUTED:
+                continue
+
+            # Mark each remaining record as denied, recording the reason.
+            r.approval_status = ToolApprovalStatus.DENIED
+            r.execution_status = ToolExecutionStatus.DENIED
+            r.denied_reason = f"Tool group denied: {reason}"
+
+            # Find the matching result placeholder in the result message.
+            for cp_raw in self.result_message.raw_dict["content"]:
+                if cp_raw.get("type") == "tool_result" and cp_raw.get("call_id") == r.tool_call_id:
+                    # Clear the pending marker so the session reflects the denied state.
+                    cp_raw.pop("pending", None)
+                    break
 
 
 def _merge_all_decisions(
     decisions: list[tuple[ToolApprovalStatus, str | None, bool]],
 ) -> tuple[ToolApprovalStatus, str | None]:
     """Merge all decisions into a final approval status and denied reason."""
+    # Start with PENDING as default final status and an empty reasons list.
     current = ToolApprovalStatus.PENDING
     reasons: list[str] = []
     for status, reason, responded in decisions:
         if not responded:
             continue
+
+        # Promote to DENIED and collect the reason.
         if status == ToolApprovalStatus.DENIED:
             current = ToolApprovalStatus.DENIED
             if reason:
                 reasons.append(reason)
+
+        # Promote to APPROVED only if still PENDING.
         elif status == ToolApprovalStatus.APPROVED:
             if current == ToolApprovalStatus.PENDING:
                 current = ToolApprovalStatus.APPROVED
+
+    # Join all reasons with newlines for the final denied reason.
     denied_reason = "\n".join(reasons) if reasons else None
     return current, denied_reason
 
@@ -231,6 +277,7 @@ async def _call_on_tool_call_hooks(
             _record=record,
             hook_index=i,
         )
+
         # give each hook the accumulated decision so far so it can see prior votes
         merged_status, merged_reason = _merge_all_decisions(record.decisions)
         ctx = {
@@ -242,10 +289,12 @@ async def _call_on_tool_call_hooks(
             "denied_reason": merged_reason,
             "respond": respond,
         }
+
         # sync or async: await if hook returned a coroutine
         result = hook(ctx)
         if inspect.isawaitable(result):
             result = await result
+            
         # record the vote; only increment count for votes that actually voted
         new_status, new_reason, did_increment = _merge_approval_status(merged_status, result)
         if did_increment:
@@ -274,15 +323,21 @@ class RespondHandle:
 
     def approve(self) -> None:
         """Respond to this hook slot with approval."""
+        # Return early if record is unbound (no-op).
         if self._record is None:
             return
+
         status, reason, responded = self._record.decisions[self.hook_index]
         if responded:
             raise RuntimeError(
                 f"Hook at index {self.hook_index} already responded with {status.value}"
             )
+
+        # Record the APPROVED vote in this hook's decision slot.
         self._record.decisions[self.hook_index] = (ToolApprovalStatus.APPROVED, None, True)
         self._record.responded_count += 1
+
+        # If all hooks have responded and the record is queued, finalize.
         if (
             self._record.responded_count == len(self._record.decisions)
             and self._record.queued
@@ -292,6 +347,8 @@ class RespondHandle:
             self._record.denied_reason = final_reason
             if final_status == ToolApprovalStatus.APPROVED:
                 self._record.execution_status = ToolExecutionStatus.WAITING_FOR_EXECUTION
+
+            # Push an ApprovalEvent to the runner so it can process the approval.
             from peteos.engine.executionenvironment import ApprovalEvent
             self._runner.push_event(ApprovalEvent(
                 tool_call_id=self.tool_call_id,
@@ -302,16 +359,22 @@ class RespondHandle:
 
     def deny(self, reason: str | None = None) -> None:
         """Respond to this hook slot with denial."""
+        # Return early if record is unbound (no-op).
         if self._record is None:
             return
+
         status, _, responded = self._record.decisions[self.hook_index]
         if responded:
             raise RuntimeError(
                 f"Hook at index {self.hook_index} already responded with {status.value}"
             )
+
+        # Record the DENIED vote in this hook's decision slot.
         msg = reason or "Denied by on_tool_call hook"
         self._record.decisions[self.hook_index] = (ToolApprovalStatus.DENIED, msg, True)
         self._record.responded_count += 1
+
+        # If all hooks have responded and the record is queued, finalize.
         if (
             self._record.responded_count == len(self._record.decisions)
             and self._record.queued
@@ -321,6 +384,8 @@ class RespondHandle:
             self._record.denied_reason = final_reason
             if final_status == ToolApprovalStatus.DENIED:
                 self._record.execution_status = ToolExecutionStatus.DENIED
+
+            # Push an ApprovalEvent to the runner so it can process the denial.
             from peteos.engine.executionenvironment import ApprovalEvent
             self._runner.push_event(ApprovalEvent(
                 tool_call_id=self.tool_call_id,
@@ -499,6 +564,7 @@ class ExecutionEnvironment:
                     record.approval_status = ToolApprovalStatus.APPROVED
                     record.denied_reason = event.denied_reason
                     return True, group.id
+
                 # denied: update record, inject reason into placeholder, cascade denial
                 else:
                     record.approval_status = ToolApprovalStatus.DENIED
@@ -506,6 +572,7 @@ class ExecutionEnvironment:
                     for cp in group.result_message.content:
                         if cp.type == "tool_result" and cp.call_id == event.tool_call_id:
                             cp.set_tool_result_content(f"[DENIED] {event.denied_reason}")
+                            cp.raw_dict.pop("pending", None)
                             break
                     group.deny_all_remaining(f"Denied as consequence of '{record.tool_call.name}' being denied in the same response.")
                     return False, group.id
@@ -548,6 +615,7 @@ class ExecutionEnvironment:
         for cp_raw in result_msg.raw_dict["content"]:
             if cp_raw.get("type") == "tool_result" and cp_raw.get("call_id") == record.tool_call.call_id:
                 cp_raw["content"] = result_str
+                cp_raw.pop("pending", None)
                 break
 
         group.mark_real_result()
@@ -575,21 +643,26 @@ class ExecutionEnvironment:
         Returns:
             Tuple of (result_string_or_None, success_bool).
         """
+        # Extract tool name and parse JSON arguments from the tool call.
         tool_name = tool_call.name
         args = json.loads(tool_call.arguments or "{}")
 
         _logger.debug("Attempting to execute tool: %s(%s)", tool_name, args)
 
+        # Look up the tool in the tool manager; return error if not found.
         tool = self._tool_manager.get_tool(tool_name)
         if not tool:
             _logger.warning("Tool '%s' not found", tool_name)
             return f"Error: Tool '{tool_name}' not found", False
 
+        # Try to cast the arguments to the tool's parameter types; return error on failure.
         try:
             casted_args = _cast_args_to_types(tool.func, args)
         except ValueError as e:
             _logger.debug("Tool %s argument coercion failed: %s", tool_name, e)
             return f"Error: {e}", False
+
+        # Call the before_tool_execution deny hook; return error if denied.
         hook_result = await runner.call_hooks_deny("before_tool_execution", tool_call)
         if hook_result is not None:
             allow, message = hook_result
@@ -597,16 +670,22 @@ class ExecutionEnvironment:
                 _logger.debug("Tool %s denied by hook: %s", tool_name, message)
                 return message, False
 
+        # Execute the tool; if the result is a coroutine, await it.
         try:
             result = tool.execute(**casted_args, runner=runner)
             if asyncio.iscoroutine(result):
                 result = await result
+
+            # If result is None, return (None, True) for fire-and-forget.
             if result is None:
                 _logger.debug("Tool %s returned None (fire-and-forget)", tool_name)
                 return None, True
+
+            # Serialize the result and return it with success.
             result_str = serialize(result)
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
             return result_str, True
+
         except Exception as e:
             _logger.debug("Tool %s raised an exception: %s", tool_name, str(e))
             return f"Error: {type(e).__name__}: {str(e)}", False
@@ -623,13 +702,18 @@ def _cast_args_to_types(func: Callable, args: Dict[str, Any]) -> Dict[str, Any]:
     Only casts values for parameters the LLM included in its call.
     Does not inject defaults or hallucinate missing arguments.
     """
+    # Import the recursive cast and type resolver utilities.
     from peteos.utils._schema import _recursive_cast, _resolve_type
 
+    # Inspect the function signature to get parameter metadata.
     signature = inspect.signature(func)
+    # Build a namespace dict from the function's module for type resolution.
     globalns = dict(sys.modules[func.__module__].__dict__)
     casted_args: Dict[str, Any] = {}
 
+    # Iterate over each (param_name, value) pair from the JSON args.
     for param_name, value in args.items():
+        # If the param is not in the signature, pass it through unchanged.
         if param_name not in signature.parameters:
             casted_args[param_name] = value
             continue
@@ -637,12 +721,15 @@ def _cast_args_to_types(func: Callable, args: Dict[str, Any]) -> Dict[str, Any]:
         param = signature.parameters[param_name]
         raw_annotation = param.annotation
 
+        # If no annotation or Any, pass it through unchanged.
         if raw_annotation == inspect.Parameter.empty or raw_annotation == Any:
             casted_args[param_name] = value
             continue
 
+        # Resolve the raw annotation to an actual type using the namespace.
         annotation = _resolve_type(raw_annotation, globalns)
 
+        # Try to recursively cast the value to the resolved annotation.
         try:
             casted_args[param_name] = _recursive_cast(value, annotation)
         except ValueError as e:
