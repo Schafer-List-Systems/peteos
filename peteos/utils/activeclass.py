@@ -87,6 +87,8 @@ class ActiveClass:
         # before _wait() has a chance to drain the queue.
         self.event_queue.put_nowait(None)
         self._event_trigger.set()
+        # TODO: we have to somehow tell the agent to stop (set some variable or so),
+        #       then await asyncio.sleep(0). otherwise it will always be a CancelledException there
 
         if self._loop_task:
             self._loop_task.cancel()

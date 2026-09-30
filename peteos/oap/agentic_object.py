@@ -6,7 +6,6 @@ import asyncio
 import concurrent.futures
 import inspect
 import os
-import threading
 import time
 import types
 import uuid
@@ -284,7 +283,7 @@ class AgenticObject:
         super().__init__()
         self._oap_role: Role = AgenticObjectRegistry.create_role(self.__class__.__name__)
         self._inject_code_exec_section()
-        self._oap_lock: threading.Lock = threading.Lock()
+        self._oap_lock: asyncio.Lock = asyncio.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
         self._oap_system_prompt_hooks: dict[str, Callable[[], str]] = {}
@@ -788,10 +787,10 @@ class AgenticObject:
             return f"Error: {e}"
         return None
 
-    def acquire(self, timeout: float | None = None) -> None:
+    async def acquire(self, timeout: float | None = None) -> None:
         """Acquire the invocation lock.
 
-        Blocks until the lock is available or timeout expires.
+        Awaits until the lock is available or timeout expires.
         The lock serializes concurrent `invoke()` calls on the same object
         to prevent race conditions from interleaved @tool method calls.
 
@@ -802,25 +801,28 @@ class AgenticObject:
             TimeoutError: Lock not acquired within timeout.
         """
         if timeout is None:
-            self._oap_lock.acquire()
-        elif not self._oap_lock.acquire(timeout=timeout):
-            _logger.error(
-                "Could not acquire invocation lock for %s within %.1fs",
-                self.__class__.__name__,
-                timeout,
-            )
-            raise TimeoutError(
-                f"Could not acquire invocation lock within {timeout}s"
-            )
+            await self._oap_lock.acquire()
+        else:
+            try:
+                await asyncio.wait_for(self._oap_lock.acquire(), timeout=timeout)
+            except asyncio.TimeoutError:
+                _logger.error(
+                    "Could not acquire invocation lock for %s within %.1fs",
+                    self.__class__.__name__,
+                    timeout,
+                )
+                raise TimeoutError(
+                    f"Could not acquire invocation lock within {timeout}s"
+                )
 
-    def release(self) -> None:
+    async def release(self) -> None:
         """Release the invocation lock.
 
         Must be called exactly once for each successful `acquire()`.
         Called via try/finally in `invoke()` to guarantee release even on error.
 
         Raises:
-            RuntimeError: Lock is not held by the calling thread.
+            RuntimeError: Lock is not held by the calling coroutine.
         """
         self._oap_lock.release()
 
@@ -887,7 +889,7 @@ class AgenticObject:
         _logger.debug("invoke_agent[%s]: gatekeeper passed", self.__class__.__name__)
 
         # --- Acquire lock with timeout ---
-        self.acquire(timeout)
+        await self.acquire(timeout)
         _logger.debug("invoke_agent[%s]: lock acquired", self.__class__.__name__)
 
         # --- Update output schema (serialized by lock) ---
@@ -919,10 +921,8 @@ class AgenticObject:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
 
         if persistent_thread_id is not None:
-            try:
+            if runner.state.get("_persistent_thread_id") is None:
                 runner.state.create("_persistent_thread_id", persistent_thread_id)
-            except ValueError:
-                pass  # key may already exist from a prior invoke_agent call on the same persistent session
 
         # Store invocation hooks on the session (clear first, then repopulate)
         # Local hooks are copied fresh from this invocation; transitive from the caller.
@@ -1185,4 +1185,4 @@ class AgenticObject:
                     await self._oap_agent.destroy_session(session.uuid)
                 except Exception:
                     pass
-            self.release()
+            await self.release()
