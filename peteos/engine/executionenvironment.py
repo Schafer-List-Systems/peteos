@@ -607,18 +607,19 @@ class ExecutionEnvironment:
         result_str, success = await self.execute_tool(record.tool_call, runner)
         record.execution_status = ToolExecutionStatus.EXECUTED
         record.execution_result = result_str
-        if result_str is None:
-            return None, success
 
         # inject result into the tool_result placeholder so the LLM sees it
         result_msg = group.result_message
         for cp_raw in result_msg.raw_dict["content"]:
-            if cp_raw.get("type") == "tool_result" and cp_raw.get("call_id") == record.tool_call.call_id:
-                cp_raw["content"] = result_str
-                cp_raw.pop("pending", None)
-                break
+            if cp_raw.get("type") != "tool_result" or cp_raw.get("call_id") != record.tool_call.call_id:
+                continue
 
-        group.mark_real_result()
+            cp_raw.pop("pending", None)
+            if result_str is not None:
+                group.mark_real_result()
+                cp_raw["content"] = result_str
+            break
+
         return result_str, success
 
     # ------------------------------------------------------------------ #
