@@ -337,6 +337,13 @@ class Runner(ActiveClass):
 
         # --- Phase 3: Use the normalized message from the chatbot ---
         response_msg: Message = response.message
+
+        # Normalize tool_use parts: the LLM does not set approval_status, so we
+        # ensure it is PENDING before any downstream code reads it.
+        for cp in response_msg.content:
+            if cp.type == "tool_use" and cp.approval_status is None:
+                cp.set_approval_status(ToolApprovalStatus.PENDING)
+
         await self.append_and_notify(response_msg)
         content_parts = response_msg.content
         has_text_part = response.has_text_part
