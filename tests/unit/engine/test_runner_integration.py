@@ -604,7 +604,6 @@ class TestRunnerNotifications:
         await runner.publish_notification(test_msg)
 
         ch.push_event.assert_called_once()
-        await runner.stop()
 
     @pytest.mark.asyncio
     async def test_append_and_notify(self):
@@ -634,7 +633,6 @@ class TestRunnerNotifications:
 
             assert len(runner.session.active_context.messages) > 0
             ch.push_event.assert_called_once()
-            await runner.stop()
 
 
 # ---------------------------------------------------------------------------

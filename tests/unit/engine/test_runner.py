@@ -512,8 +512,6 @@ class TestRunnerEventHandling:
 
         assert not runner.event_queue.empty()
 
-        await runner.stop()
-
 
 # ---------------------------------------------------------------------------
 # Runner subscriptions

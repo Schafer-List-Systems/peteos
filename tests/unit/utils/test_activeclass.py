@@ -54,9 +54,10 @@ class TestStartStop:
     async def test_stop_cancels_task(self):
         obj = ActiveHarness()
         await obj.start()
-        await obj.stop()
+        task = await obj.stop()
         assert obj.is_running() is False
-        assert obj._loop_task.done()
+        await task
+        assert task.done()
 
     @pytest.mark.asyncio
     async def test_start_already_running_raises(self):
@@ -69,7 +70,8 @@ class TestStartStop:
     @pytest.mark.asyncio
     async def test_stop_not_running_is_noop(self):
         obj = ActiveHarness()
-        await obj.stop()  # should not raise
+        with pytest.raises(RuntimeError):
+            await obj.stop()
         assert obj.is_running() is False
 
     @pytest.mark.asyncio
@@ -77,7 +79,8 @@ class TestStartStop:
         obj = ActiveHarness()
         await obj.start()
         await obj.stop()
-        await obj.stop()  # should not raise
+        with pytest.raises(RuntimeError):
+            await obj.stop()
         assert obj.is_running() is False
 
 

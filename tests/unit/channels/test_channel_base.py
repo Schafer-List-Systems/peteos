@@ -1,5 +1,6 @@
 """Unit tests for Channel base class."""
 
+import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -185,6 +186,7 @@ class TestChannelRunLoop:
 
         ch._wait = AsyncMock(side_effect=_iter_side_effect([test_msg, None]))
         ch._running = True
+        ch._loop_task = True
         ch._session_uuid = None
 
         await ch.run()
@@ -203,6 +205,7 @@ class TestChannelRunLoop:
 
         ch._wait = AsyncMock(side_effect=_iter_side_effect([event, None]))
         ch._running = True
+        ch._loop_task = True
         ch._session_uuid = event.session_uuid
 
         await ch.run()
@@ -224,6 +227,7 @@ class TestChannelRunLoop:
 
         ch._wait = AsyncMock(side_effect=_iter_side_effect([reasoning_msg, user_msg, None]))
         ch._running = True
+        ch._loop_task = True
         ch._show_reasoning = False
         ch._session_uuid = None
 
@@ -244,6 +248,7 @@ class TestChannelRunLoop:
 
         ch._wait = AsyncMock(side_effect=_iter_side_effect([tool_msg, user_msg, None]))
         ch._running = True
+        ch._loop_task = True
         ch._show_tool_calls = False
         ch._session_uuid = None
 
@@ -263,6 +268,7 @@ class TestChannelRunLoop:
 
         ch._wait = AsyncMock(side_effect=[tool_result_msg, user_msg, None])
         ch._running = True
+        ch._loop_task = True
         ch._show_tool_results = False
         ch._session_uuid = None
 
@@ -275,11 +281,10 @@ class TestChannelRunLoop:
         mock_runner = MagicMock()
         ch = _TestChannel("t", mock_runner)
         ch._wait = AsyncMock(return_value=None)
-        ch._running = True
+        await ch.start()
+        await asyncio.sleep(0)
 
-        await ch.run()
-
-        assert ch._running is False
+        assert not ch.is_running()
 
     @pytest.mark.asyncio
     async def test_run_stops_on_none_message(self):
@@ -287,9 +292,8 @@ class TestChannelRunLoop:
         ch = _TestChannel("t", mock_runner)
         event = NotificationEvent(session_uuid=uuid.uuid4(), message=None)
         ch._wait = AsyncMock(return_value=event)
-        ch._running = True
         ch.send = AsyncMock()
+        await ch.start()
+        await asyncio.sleep(0)
 
-        await ch.run()
-
-        assert ch._running is False
+        assert not ch.is_running()

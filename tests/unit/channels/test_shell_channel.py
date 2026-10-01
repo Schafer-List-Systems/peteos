@@ -250,11 +250,17 @@ class TestShellChannelRun:
 
         channel.send = mock_send
 
-        asyncio.run(channel.start())
+        async def main():
+            await channel.start()
+            await asyncio.sleep(0)
+            if channel.is_running():
+                stop_task = await channel.stop()
+                if stop_task:
+                    await stop_task
+
+        asyncio.run(main())
 
         assert any("Connected" in str(msg) or "Commands" in str(msg) for msg in output)
-
-        asyncio.run(channel.stop())
 
     def test_run_handles_quit(self):
         channel = InteractiveShellChannel("shell", self.runner)

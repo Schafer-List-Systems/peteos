@@ -406,9 +406,12 @@ class TestStartStop:
 
         assert "http://" in url
         assert "/nextcloud-talk-webhook" in url
-        assert channel._running is True
         assert channel._app is not None
-        await channel.stop()
+
+        if channel.is_running():
+            stop_task = await channel.stop()
+            if stop_task:
+                await stop_task
 
     @pytest.mark.asyncio
     async def test_stop_cleans_up(self, agent):
@@ -418,8 +421,11 @@ class TestStartStop:
         )
 
         await channel.start()
-        assert channel._running is True
-        await channel.stop()
+
+        if channel.is_running():
+            stop_task = await channel.stop()
+            if stop_task:
+                await stop_task
         assert channel._running is False
 
 

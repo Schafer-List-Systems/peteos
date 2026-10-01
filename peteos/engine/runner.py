@@ -539,60 +539,71 @@ class Runner(ActiveClass):
         """
         have_new_message = False
 
-        while self.is_running():
-            foreground = self._execution_environment.get_foreground_group()
+        try:
+            while self.is_running():
+                foreground = self._execution_environment.get_foreground_group()
 
-            # Drain the event queue
-            if not have_new_message and not self.has_event() and (not foreground or not foreground.has_reviewed()):
-                waiting_due_to_pending = foreground is not None and foreground.has_pending()
-                if not waiting_due_to_pending:
+                # Drain the event queue
+                if not have_new_message and not self.has_event() and (not foreground or not foreground.has_reviewed()):
+                    waiting_due_to_pending = foreground is not None and foreground.has_pending()
+                    if not waiting_due_to_pending:
+                        self._idle.set()
+                    if not await self._wait_for_event() or not self.is_running():
+                        continue
+                    if not waiting_due_to_pending:
+                        self._idle.clear()
+
+                # drain event queue
+                events_processed = 0
+                while self.has_event():
+                    event = self.event_queue.get_nowait()
+                    if event is None:
+                        continue
+
+                    events_processed += 1
+
+                    if isinstance(event, Message):
+                        await self.append_and_notify(event)
+                        have_new_message = True
+                    elif isinstance(event, ApprovalEvent):
+                        self._execution_environment._handle_approval(event)
+                    else:
+                        events_processed -= 1
+                        continue
+
+                # If a foreground tool group exists, process approved tool calls
+                if foreground is not None:
+                    if not await self._handle_tool_group() and not have_new_message:
+                        continue
+
+                # Send context to chatbot and get a response, already passing the tool calls
+                try:
+                    status, response_msg = await self.step()
+                    hook_status = await self.call_hooks("after_step", status)
+                    hook_return = hook_status if hook_status is not None else status
+                    _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
+                except Exception as e:
+                    _logger.error("[runner] step/hook raised exception: %s: %r", type(e).__name__, e)
+                    self._critical_error = e
                     self._idle.set()
-                if not await self._wait_for_event():
                     continue
-                if not waiting_due_to_pending:
-                    self._idle.clear()
+                finally:
+                    have_new_message = False
 
-            # drain event queue
-            events_processed = 0
-            while self.has_event():
-                event = self.event_queue.get_nowait()
-                if event is None:
-                    continue
+                if hook_return == ExecStatus.CRITICAL:
+                    _logger.debug("[runner] run(): Execution error, exiting loop.")
+                    break
+                _logger.debug("[runner] run(): Iterating...")
 
-                events_processed += 1
-
-                if isinstance(event, Message):
-                    await self.append_and_notify(event)
-                    have_new_message = True
-                elif isinstance(event, ApprovalEvent):
-                    self._execution_environment._handle_approval(event)
-                else:
-                    events_processed -= 1
-                    continue
-
-            # If a foreground tool group exists, process approved tool calls
-            if foreground is not None:
-                if not await self._handle_tool_group() and not have_new_message:
-                    continue
-
-            # Send context to chatbot and get a response, already passing the tool calls
-            try:
-                status, response_msg = await self.step()
-                hook_status = await self.call_hooks("after_step", status)
-                hook_return = hook_status if hook_status is not None else status
-                _logger.debug("[runner] after_step hook returned status=%s, final=%s", hook_status, hook_return)
-            except Exception as e:
-                _logger.error("[runner] step/hook raised exception: %s: %r", type(e).__name__, e)
-                self._critical_error = e
-                self._idle.set()
-                continue
-            finally:
-                have_new_message = False
-
-            if hook_return == ExecStatus.CRITICAL:
-                _logger.debug("[runner] run(): Execution error, exiting loop.")
-                break
-            _logger.debug("[runner] run(): Iterating...")
+        finally:
+            # Deny any unexecuted tool calls so the session reflects a consistent state.
+            foreground = self._execution_environment.get_foreground_group()
+            if foreground is not None and foreground.has_unfinished():
+                _logger.warning(
+                    "[runner] Tool calls left unexecuted at stop: %s",
+                    [r.tool_call.name for r in foreground.records if r.execution_status != ToolExecutionStatus.EXECUTED],
+                )
+                foreground.deny_all_remaining("Tool call denied because of an interrupt to the runner")
 
     async def _wait_for_event(self, timeout: float | None = None) -> bool:
         """Block until an event arrives in the queue.

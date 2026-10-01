@@ -38,7 +38,7 @@ class ActiveClass:
 
     def is_running(self) -> bool:
         """Check if the component is currently running."""
-        return self._running
+        return self._loop_task is not None
 
     async def start(self) -> None:
         """Start the background task that runs self.run().
@@ -46,56 +46,39 @@ class ActiveClass:
         Raises:
             RuntimeError: If already running.
         """
-        if self._running:
+        if self.is_running():
             raise RuntimeError("ActiveClass is already running")
 
-        self._running = True
         self._loop_task = asyncio.create_task(self._main_loop())
 
-    async def stop(self) -> None:
+    async def stop(self, timeout: float | None = None) -> "asyncio.Task":
         """Stop the background task gracefully.
 
-        No-op if not running.
+        Never awaits internally — returns the task so the caller decides
+        whether to await it.
+
+        Raises:
+            RuntimeError: If not running.
         """
-        if not self._running:
-            return
+        if not self.is_running():
+            raise RuntimeError("ActiveClass is not running")
 
-        self._running = False
+        # Capture the task reference and mark the runner as stopped immediately.
+        task = self._loop_task
+        self._loop_task = None
 
-        # When called from within the running task itself (e.g. exception unwind
-        # in _main_loop), we can't await the current task — that's a deadlock.
-        # Just clean up state and return.
-        try:
-            current = asyncio.current_task()
-        except RuntimeError:
-            _logger.error(
-                "[%s] stop() called but no running event loop found — "
-                "invoke_agent was likely called from an external event loop "
-                "that was closed before this runner could finish. "
-                "Ensure the outer loop stays open until all invoke_agent calls complete.",
-                type(self).__name__,
-            )
-            self._running = False
-            self._loop_task = None
-            return
-        if current is self._loop_task:
-            self._loop_task = None
-            return
-
-        # Send sentinel to unblock _wait() so it can see _running is False.
-        # Without this, stop() cancelling the task could steal the wakeup
-        # before _wait() has a chance to drain the queue.
+        # Wake the event queue with a sentinel so any waiter unblocks.
         self.event_queue.put_nowait(None)
         self._event_trigger.set()
-        # TODO: we have to somehow tell the agent to stop (set some variable or so),
-        #       then await asyncio.sleep(0). otherwise it will always be a CancelledException there
 
-        if self._loop_task:
-            self._loop_task.cancel()
+        # If a timeout is given, wait that long before cancelling the task.
+        if timeout is not None:
             try:
-                await self._loop_task
-            except asyncio.CancelledError:
-                pass
+                await asyncio.wait_for(task, timeout=timeout)
+            except asyncio.TimeoutError:
+                task.cancel()
+
+        return task
 
     async def _main_loop(self) -> None:
         """Internal loop that runs self.run() and handles cancellation."""
@@ -107,15 +90,8 @@ class ActiveClass:
                 type(self).__name__,
             )
         finally:
-            try:
-                await self.stop()
-            except Exception as stop_exc:
-                _logger.error(
-                    "[%s] _main_loop: stop() raised during cleanup: %s: %r",
-                    type(self).__name__,
-                    type(stop_exc).__name__,
-                    stop_exc,
-                )
+            # Always clear the task reference so is_running() reflects the stopped state.
+            self._loop_task = None
 
     async def _wait_for_event(self, timeout: Optional[float] = None) -> bool:
         """Block until an event arrives in the queue.
