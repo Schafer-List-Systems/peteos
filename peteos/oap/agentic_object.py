@@ -1141,6 +1141,7 @@ class AgenticObject:
                     role="user",
                     content_parts=[ContentPart.create_text(reminder_msg)],
                 ))
+
         finally:
             # Fire on_invoke_complete hooks before cleanup
             if hooks and session is not None and final_result is not None:
@@ -1168,6 +1169,7 @@ class AgenticObject:
                         runner.state.delete("_oap_error")
                 except KeyError:
                     pass
+
             # Always deactivate the session so the next invoke can reuse it
             if session is not None:
                 session.is_active = False
@@ -1177,7 +1179,9 @@ class AgenticObject:
                     session.save()
                 _logger.debug("invoke_agent[%s]: cleared invocation hooks on session %s", self.__class__.__name__, session.uuid)
             try:
-                await runner.stop()
+                stop_task = await runner.stop(timeout=2.0)
+                if stop_task:
+                    await stop_task
             except Exception:
                 pass
             if persistent_thread_id is None:
