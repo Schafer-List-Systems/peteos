@@ -1,8 +1,24 @@
 import uuid
 from datetime import datetime
+from enum import Enum
 
 from .message_registry import MessageRegistry
 from peteos.utils import json
+
+
+class ToolApprovalStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    DENIED = "denied"
+
+
+class ToolExecutionStatus(str, Enum):
+    WAITING_FOR_APPROVAL = "waiting_for_approval"
+    WAITING_FOR_EXECUTION = "waiting_for_execution"
+    DENIED = "denied"
+    EXECUTING = "executing"
+    EXECUTED = "executed"
+    ABORTED = "aborted"
 
 
 class ContentPart:
@@ -17,8 +33,8 @@ class ContentPart:
         {"type": "video", "source": {"type": "base64"|"url", "data": str, "media_type": str}}
         {"type": "audio", "source": {"type": "base64"|"url", "data": str, "media_type": str}}
         {"type": "thinking", "text": str}
-        {"type": "tool_use", "call_id": str, "name": str, "arguments": str}
-        {"type": "tool_result", "call_id": str, "content": str}
+        {"type": "tool_use", "call_id": str, "name": str, "arguments": str, "approval_status": str}
+        {"type": "tool_result", "call_id": str, "content": str, "execution_status": str}
         {"type": "tool", "name": str, "description": str, "parameters": dict}
 
     Example:
@@ -87,7 +103,7 @@ class ContentPart:
             name: The tool name.
             arguments: JSON string of tool arguments.
         """
-        return ContentPart({"type": "tool_use", "call_id": call_id, "name": name, "arguments": arguments})
+        return ContentPart({"type": "tool_use", "call_id": call_id, "name": name, "arguments": arguments, "approval_status": ToolApprovalStatus.PENDING.value})
 
     @staticmethod
     def create_tool_result(call_id: str, content: str) -> "ContentPart":
@@ -97,7 +113,7 @@ class ContentPart:
             call_id: The tool call ID this result belongs to.
             content: The tool output text.
         """
-        return ContentPart({"type": "tool_result", "call_id": call_id, "content": content})
+        return ContentPart({"type": "tool_result", "call_id": call_id, "content": content, "execution_status": ToolExecutionStatus.WAITING_FOR_APPROVAL.value})
 
     @staticmethod
     def create_tool(name: str, description: str, parameters: dict) -> "ContentPart":
@@ -173,6 +189,36 @@ class ContentPart:
     def parameters(self) -> dict | None:
         """Return the tool parameters schema (for tool definition parts)."""
         return self._json_dict.get("parameters")
+
+    @property
+    def approval_status(self) -> ToolApprovalStatus | None:
+        """Return the approval status (for tool_use parts)."""
+        val = self._json_dict.get("approval_status")
+        if val is None:
+            return None
+        try:
+            return ToolApprovalStatus(val)
+        except ValueError:
+            return None
+
+    def set_approval_status(self, status: ToolApprovalStatus) -> None:
+        """Set the approval status for a tool_result part."""
+        self._json_dict["approval_status"] = status.value
+
+    @property
+    def execution_status(self) -> ToolExecutionStatus | None:
+        """Return the execution status (for tool_result parts)."""
+        val = self._json_dict.get("execution_status")
+        if val is None:
+            return None
+        try:
+            return ToolExecutionStatus(val)
+        except ValueError:
+            return None
+
+    def set_execution_status(self, status: ToolExecutionStatus) -> None:
+        """Set the execution status for a tool_result part."""
+        self._json_dict["execution_status"] = status.value
 
 
 class Message:
@@ -251,6 +297,10 @@ class Message:
     def raw_dict(self) -> dict:
         """Return the wrapped serialized dict."""
         return self._json_dict
+
+    def add_content(self, part: "ContentPart") -> None:
+        """Append a content part to the message's content list."""
+        self._json_dict["content"].append(part.raw_dict)
 
     @property
     def role(self) -> str:

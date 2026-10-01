@@ -142,7 +142,7 @@ class NextcloudTalkChannel(Channel):
             tool_call_id = part.raw_dict.get("call_id") or part.raw_dict.get("id") if part.type == "tool_use" else None
             if tool_call_id is not None:
                 pending = self._runner._execution_environment.get_pending_tool_calls()
-                if any(r.tool_call_id == tool_call_id for r in pending):
+                if any(r.tool_call.call_id == tool_call_id for r in pending):
                     muted = False
             if muted:
                 continue
@@ -474,8 +474,8 @@ class NextcloudTalkChannel(Channel):
         record = self._runner._execution_environment.find_pending_record(tool_call_id)
         if record is None:
             return
-        record.approval_status = ToolApprovalStatus.PENDING
-        record.execution_status = ToolExecutionStatus.WAITING_FOR_APPROVAL
+        record.tool_call.set_approval_status(ToolApprovalStatus.PENDING)
+        record.tool_result.set_execution_status(ToolExecutionStatus.WAITING_FOR_APPROVAL)
 
     async def _handle_join(self, event: dict) -> None:
         """Handle bot added to room (Join event)."""

@@ -483,11 +483,11 @@ class Runner(ActiveClass):
             tool_call = record.tool_call
             tool_name = tool_call.name
 
-            if record.approval_status == ToolApprovalStatus.DENIED:
+            if record.tool_call.approval_status == ToolApprovalStatus.DENIED:
                 _logger.debug("[runner] Tool call %s denied, skipping execution", tool_name)
                 break
 
-            if record.approval_status == ToolApprovalStatus.PENDING:
+            if record.tool_call.approval_status == ToolApprovalStatus.PENDING:
                 _logger.debug(
                     "[runner] Tool call %s pending, re-inserting for async resolution",
                     tool_name,
@@ -518,9 +518,9 @@ class Runner(ActiveClass):
             _logger.debug(
                 "[runner] _handle_tool_group: "
                 "approval_status=%s execution_status=%s tool=%s call_id=%s args=%s",
-                first.approval_status,
-                first.execution_status,
-                first.tool_call.name, first.tool_call_id, args_preview,
+                first.tool_call.approval_status,
+                first.tool_result.execution_status,
+                first.tool_call.name, first.tool_call.call_id, args_preview,
             )
 
         return False
@@ -601,7 +601,7 @@ class Runner(ActiveClass):
             if foreground is not None and foreground.has_unfinished():
                 _logger.warning(
                     "[runner] Tool calls left unexecuted at stop: %s",
-                    [r.tool_call.name for r in foreground.records if r.execution_status != ToolExecutionStatus.EXECUTED],
+                    [r.tool_call.name for r in foreground.records if r.tool_result.execution_status != ToolExecutionStatus.EXECUTED],
                 )
                 foreground.deny_all_remaining("Tool call denied because of an interrupt to the runner")
 

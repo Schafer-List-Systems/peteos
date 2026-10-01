@@ -13,7 +13,7 @@ from peteos.utils import get_logger
 from peteos.utils import json
 from peteos.utils.serialization import serialize
 
-from peteos.conversation.message import ContentPart, Message
+from peteos.conversation.message import ContentPart, Message, ToolApprovalStatus
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import ToolManager
 
@@ -21,12 +21,6 @@ if TYPE_CHECKING:
     from peteos.engine.runner import Runner
 
 _logger = get_logger(__name__)
-
-
-class ToolApprovalStatus(str, Enum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    DENIED = "denied"
 
 
 class ToolExecutionStatus(str, Enum):
@@ -131,15 +125,9 @@ def _merge_approval_status(
 @dataclass
 class ToolCallRecord:
     """Tracks the lifecycle of a tool call through approval and execution."""
-    tool_call_id: str
     tool_call: ContentPart
-    approval_status: ToolApprovalStatus = ToolApprovalStatus.PENDING
-    execution_status: ToolExecutionStatus = ToolExecutionStatus.WAITING_FOR_APPROVAL
+    tool_result: ContentPart | None = None
     nextcloud_message_id: Optional[str] = None
-    execution_result: Optional[str] = None
-    execution_success: Optional[bool] = None
-    denied_reason: Optional[str] = None
-    respond: Optional[RespondHandle] = None
     decisions: list[tuple[ToolApprovalStatus, str | None, bool]] = field(default_factory=list)
     responded_count: int = 0
     queued: bool = False
@@ -166,47 +154,50 @@ class ToolCallGroup:
     def mark_real_result(self) -> None:
         self._any_real_result = True
 
-    def add_tool_call(self, record: ToolCallRecord) -> None:
-        """Add a tool call record to this group and inject a result placeholder."""
-        # Register record in the group's list.
-        self.records.append(record)
+    def add_tool_call(self, tool_call: ContentPart) -> ToolCallRecord:
+        """Create and link a record and its result placeholder, inject into the result message."""
+        # Create result placeholder ...
+        tool_result = ContentPart.create_tool_result(tool_call.call_id, "")
 
-        # Create an empty result placeholder so the LLM can see a slot for the result.
-        cp = ContentPart.create_tool_result(record.tool_call_id, "")
-        cp.raw_dict["name"] = record.tool_call.name
-        
-        # Mark as pending so recovery can detect unexecuted tools after a crash or forced stop.
-        cp.raw_dict["pending"] = True
-        
-        # Inject the placeholder into the result message the LLM will receive.
-        self.result_message.raw_dict["content"].append(cp.raw_dict)
+        # ... and inject the tool_result into the message, so the LLM sees a result slot.
+        self.result_message.add_content(tool_result)
+
+        # Create a record PENDING / WAITING_FOR_APPROVAL tool call record.
+        record = ToolCallRecord(
+            tool_call=tool_call,
+            tool_result=tool_result
+        )
+
+        # Register and return the record.
+        self.records.append(record)
+        return record
 
     def has_pending(self) -> bool:
-        return any(r.approval_status == ToolApprovalStatus.PENDING for r in self.records)
+        return any(r.tool_call.approval_status == ToolApprovalStatus.PENDING for r in self.records)
 
     def has_reviewed(self) -> bool:
         for r in self.records:
-            if r.approval_status == ToolApprovalStatus.PENDING:
+            if r.tool_call.approval_status == ToolApprovalStatus.PENDING:
                 return False
             return True
         return False
 
     def has_unfinished(self) -> bool:
-        return any(r.execution_status != ToolExecutionStatus.EXECUTED for r in self.records)
+        return any(r.tool_result.execution_status != ToolExecutionStatus.EXECUTED for r in self.records)
 
     def is_done(self) -> bool:
         """Return True when all tool calls are finalized (no more pending or approved)."""
         for r in self.records:
-            if r.approval_status not in (ToolApprovalStatus.DENIED, ToolApprovalStatus.APPROVED):
+            if r.tool_call.approval_status not in (ToolApprovalStatus.DENIED, ToolApprovalStatus.APPROVED):
                 return False
-            if r.approval_status == ToolApprovalStatus.APPROVED:
-                if r.execution_status != ToolExecutionStatus.EXECUTED:
+            if r.tool_call.approval_status == ToolApprovalStatus.APPROVED:
+                if r.tool_result.execution_status != ToolExecutionStatus.EXECUTED:
                     return False
         return True
 
     def pop_first_reviewed(self) -> Optional[ToolCallRecord]:
         for i, r in enumerate(self.records):
-            if r.approval_status != ToolApprovalStatus.PENDING:
+            if r.tool_call.approval_status != ToolApprovalStatus.PENDING:
                 return self.records.pop(i)
         return None
 
@@ -214,20 +205,13 @@ class ToolCallGroup:
         """Deny all records in this group that have not yet executed."""
         # Iterate over all tool call records in the group.
         for r in self.records:
-            if r.execution_status == ToolExecutionStatus.EXECUTED:
+            if r.tool_result.execution_status == ToolExecutionStatus.EXECUTED:
                 continue
 
-            # Mark each remaining record as denied, recording the reason.
-            r.approval_status = ToolApprovalStatus.DENIED
-            r.execution_status = ToolExecutionStatus.DENIED
-            r.denied_reason = f"Tool group denied: {reason}"
-
-            # Find the matching result placeholder in the result message.
-            for cp_raw in self.result_message.raw_dict["content"]:
-                if cp_raw.get("type") == "tool_result" and cp_raw.get("call_id") == r.tool_call_id:
-                    # Clear the pending marker so the session reflects the denied state.
-                    cp_raw.pop("pending", None)
-                    break
+            # Mark the tool use as denied and the result as DENIED.
+            r.tool_call.set_approval_status(ToolApprovalStatus.DENIED)
+            r.tool_result.set_execution_status(ToolExecutionStatus.DENIED)
+            r.tool_result.set_tool_result_content(f"[DENIED] {reason}")
 
 
 def _merge_all_decisions(
@@ -271,7 +255,7 @@ async def _call_on_tool_call_hooks(
     for i, hook in enumerate(hooks):
         # build respond handle so hooks can defer their decision to a later turn
         respond = RespondHandle(
-            tool_call_id=record.tool_call_id,
+            tool_call_id=record.tool_call.call_id,
             tool_call=record.tool_call,
             _runner=runner,
             _record=record,
@@ -300,6 +284,15 @@ async def _call_on_tool_call_hooks(
         if did_increment:
             record.decisions[i] = (new_status, new_reason, True)
             record.responded_count += 1
+
+
+@dataclass
+class ApprovalEvent:
+    """Event pushed to Runner.event_queue to signal approval of a tool call."""
+    tool_call_id: str = ""
+    tool_call: ContentPart = field(default_factory=lambda: ContentPart({"type": "tool_use"}))
+    approved: bool = True
+    denied_reason: str | None = None
 
 
 @dataclass
@@ -342,14 +335,15 @@ class RespondHandle:
             self._record.responded_count == len(self._record.decisions)
             and self._record.queued
         ):
+            # Merge all decisions into a final status and reason; commit to the tool call.
             final_status, final_reason = _merge_all_decisions(self._record.decisions)
-            self._record.approval_status = final_status
-            self._record.denied_reason = final_reason
-            if final_status == ToolApprovalStatus.APPROVED:
-                self._record.execution_status = ToolExecutionStatus.WAITING_FOR_EXECUTION
+            self._record.tool_call.set_approval_status(final_status)
 
-            # Push an ApprovalEvent to the runner so it can process the approval.
-            from peteos.engine.executionenvironment import ApprovalEvent
+            # For approved: advance the result to WAITING_FOR_EXECUTION.
+            if final_status == ToolApprovalStatus.APPROVED:
+                self._record.tool_result.set_execution_status(ToolExecutionStatus.WAITING_FOR_EXECUTION)
+
+            # Push an ApprovalEvent so the runner can process the final decision.
             self._runner.push_event(ApprovalEvent(
                 tool_call_id=self.tool_call_id,
                 tool_call=self.tool_call,
@@ -379,29 +373,22 @@ class RespondHandle:
             self._record.responded_count == len(self._record.decisions)
             and self._record.queued
         ):
+            # Merge all decisions into a final status and reason; commit to the tool call.
             final_status, final_reason = _merge_all_decisions(self._record.decisions)
-            self._record.approval_status = final_status
-            self._record.denied_reason = final_reason
-            if final_status == ToolApprovalStatus.DENIED:
-                self._record.execution_status = ToolExecutionStatus.DENIED
+            self._record.tool_call.set_approval_status(final_status)
 
-            # Push an ApprovalEvent to the runner so it can process the denial.
-            from peteos.engine.executionenvironment import ApprovalEvent
+            # For denied: mark the result DENIED and embed the reason in the content.
+            if final_status == ToolApprovalStatus.DENIED:
+                self._record.tool_result.set_execution_status(ToolExecutionStatus.DENIED)
+                self._record.tool_result.set_tool_result_content(f"[DENIED] {final_reason}")
+
+            # Push an ApprovalEvent so the runner can process the final decision.
             self._runner.push_event(ApprovalEvent(
                 tool_call_id=self.tool_call_id,
                 tool_call=self.tool_call,
                 approved=False,
                 denied_reason=final_reason,
             ))
-
-
-@dataclass
-class ApprovalEvent:
-    """Event pushed to Runner.event_queue to signal approval of a tool call."""
-    tool_call_id: str = ""
-    tool_call: ContentPart = field(default_factory=lambda: ContentPart({"type": "tool_use"}))
-    approved: bool = True
-    denied_reason: str | None = None
 
 
 class ExecutionEnvironment:
@@ -464,69 +451,58 @@ class ExecutionEnvironment:
 
     async def add_tool_call(self, tool_call: ContentPart, runner: "Runner") -> ToolCallRecord:
         """Add a tool call to the foreground group. Returns the created record."""
-        group = self._foreground_group
-        if group is None:
+        # Fail fast if no foreground group.
+        if self._foreground_group is None:
             raise RuntimeError("No foreground tool call group")
 
-        # validate required fields
-        tc_id = tool_call.call_id
-        if tc_id is None:
+        # Fail fast if the tool call has no call_id.
+        if tool_call.call_id is None:
             raise ValueError("Tool call missing required 'call_id' field")
-        tool_name = tool_call.name
-        tool_args = json.loads(tool_call.arguments) if tool_call.arguments else {}
 
-        # gather all hooks: prepended existence + auto_approve closures, then user hooks
-        user_hooks = list(runner.session.invocation_hooks.get("on_tool_call", []))
+        # Create the record and its result placeholder via the group.
+        record = self._foreground_group.add_tool_call(tool_call)
 
         def _existence_check(ctx):
-            if not self._tool_manager or not self._tool_manager.get_tool(tool_name):
-                return f"Tool '{tool_name}' is not available for this agent"
+            if not self._tool_manager or not self._tool_manager.get_tool(tool_call.name):
+                return f"Tool '{tool_call.name}' is not available for this agent"
             return None
 
         def _auto_approve(ctx):
-            if tool_name in self.auto_approve_tools:
+            if tool_call.name in self.auto_approve_tools:
                 return True
             return None
 
+        # Gather all hooks: existence check and auto_approve prepended, then user hooks.
+        user_hooks = list(runner.session.invocation_hooks.get("on_tool_call", []))
         hooks = [_existence_check, _auto_approve] + user_hooks
 
-        # initialize record in PENDING state; one decision slot per hook
-        decisions: list[tuple[ToolApprovalStatus, str | None, bool]] = [
-            (ToolApprovalStatus.PENDING, None, False) for _ in hooks
+        # Size the decisions array to the hook count; call hooks synchronously.
+        record.decisions = [
+            (ToolApprovalStatus.PENDING, None, False)
+            for _ in hooks
         ]
-        record = ToolCallRecord(
-            tool_call_id=tc_id,
-            tool_call=tool_call,
-            approval_status=ToolApprovalStatus.PENDING,
-            execution_status=ToolExecutionStatus.WAITING_FOR_APPROVAL,
-            denied_reason=None,
-            decisions=decisions,
-            responded_count=0,
-            queued=False,
-        )
-
-        # call hooks synchronously; each fills its decision slot on return
         await _call_on_tool_call_hooks(hooks, record, runner, runner.role.name)
 
-        # sync path: all hooks responded — merge decisions, set final status
+        # All hooks responded — merge decisions and finalize the record.
         if record.responded_count == len(record.decisions):
             final_status, final_reason = _merge_all_decisions(record.decisions)
-            record.approval_status = final_status
-            record.denied_reason = final_reason
+
+            # Commit the final approval status to the tool call.
+            record.tool_call.set_approval_status(final_status)
+
+            # For approved: advance result to WAITING_FOR_EXECUTION.
             if final_status == ToolApprovalStatus.APPROVED:
-                record.execution_status = ToolExecutionStatus.WAITING_FOR_EXECUTION
-            group.add_tool_call(record)
-            # inject denial reason into the tool_result placeholder so the LLM sees it
+                record.tool_result.set_execution_status(ToolExecutionStatus.WAITING_FOR_EXECUTION)
+
+            # For denied with a reason: embed the reason in the result placeholder.
             if final_status == ToolApprovalStatus.DENIED and final_reason:
-                for cp in group.result_message.content:
-                    if cp.type == "tool_result" and cp.call_id == record.tool_call_id:
-                        cp.set_tool_result_content(f"[DENIED] {final_reason}")
-                        break
+                record.tool_result.set_tool_result_content(f"[DENIED] {final_reason}")
+
+            record.queued = False
             return record
 
-        # deferred path: at least one hook will respond asynchronously later
+        # Deferred path: at least one hook will respond asynchronously later.
         record.queued = True
-        group.add_tool_call(record)
         return record
 
     def get_pending_tool_calls(self) -> list[ToolCallRecord]:
@@ -534,7 +510,7 @@ class ExecutionEnvironment:
         group = self._foreground_group
         if group is None:
             return []
-        return [r for r in group.records if r.approval_status == ToolApprovalStatus.PENDING]
+        return [r for r in group.records if r.tool_call.approval_status == ToolApprovalStatus.PENDING]
 
     def find_pending_record(self, tool_call_id: str) -> Optional[ToolCallRecord]:
         """Find a tool call record by its tool_call_id in the foreground group."""
@@ -542,7 +518,7 @@ class ExecutionEnvironment:
         if group is None:
             return None
         for record in group.records:
-            if record.tool_call_id == tool_call_id:
+            if record.tool_call.call_id == tool_call_id:
                 return record
         return None
 
@@ -552,28 +528,23 @@ class ExecutionEnvironment:
         If the tool call is denied, all remaining PENDING records in the
         group are also denied.
         """
-        # no foreground group → event is stale, ignore
+        # No foreground group → event is stale, ignore.
         group = self._foreground_group
         if group is None:
             return False, None
 
-        # find the record this event is targeting
+        # Find the record this event is targeting.
         for record in group.records:
-            if record.tool_call_id == event.tool_call_id:
+            if record.tool_call.call_id == event.tool_call_id:
                 if event.approved:
-                    record.approval_status = ToolApprovalStatus.APPROVED
-                    record.denied_reason = event.denied_reason
+                    record.tool_call.set_approval_status(ToolApprovalStatus.APPROVED)
                     return True, group.id
 
-                # denied: update record, inject reason into placeholder, cascade denial
+                # Denied: update tool_use, set result content, cascade denial.
                 else:
-                    record.approval_status = ToolApprovalStatus.DENIED
-                    record.denied_reason = event.denied_reason
-                    for cp in group.result_message.content:
-                        if cp.type == "tool_result" and cp.call_id == event.tool_call_id:
-                            cp.set_tool_result_content(f"[DENIED] {event.denied_reason}")
-                            cp.raw_dict.pop("pending", None)
-                            break
+                    record.tool_call.set_approval_status(ToolApprovalStatus.DENIED)
+                    record.tool_result.set_tool_result_content(f"[DENIED] {event.denied_reason}")
+                    record.tool_result.raw_dict.pop("pending", None)
                     group.deny_all_remaining(f"Denied as consequence of '{record.tool_call.name}' being denied in the same response.")
                     return False, group.id
         return False, None
@@ -602,23 +573,15 @@ class ExecutionEnvironment:
         if group is None:
             raise RuntimeError("No foreground tool call group")
 
-        # mark the record as actively running; EE owns this transition
-        record.execution_status = ToolExecutionStatus.EXECUTING
+        # Mark the record as actively running; EE owns this transition.
+        record.tool_result.set_execution_status(ToolExecutionStatus.EXECUTING)
         result_str, success = await self.execute_tool(record.tool_call, runner)
-        record.execution_status = ToolExecutionStatus.EXECUTED
-        record.execution_result = result_str
+        record.tool_result.set_execution_status(ToolExecutionStatus.EXECUTED)
 
-        # inject result into the tool_result placeholder so the LLM sees it
-        result_msg = group.result_message
-        for cp_raw in result_msg.raw_dict["content"]:
-            if cp_raw.get("type") != "tool_result" or cp_raw.get("call_id") != record.tool_call.call_id:
-                continue
-
-            cp_raw.pop("pending", None)
-            if result_str is not None:
-                group.mark_real_result()
-                cp_raw["content"] = result_str
-            break
+        # Inject result into the tool_result placeholder so the LLM sees it.
+        if result_str is not None:
+            group.mark_real_result()
+            record.tool_result.set_tool_result_content(result_str)
 
         return result_str, success
 
