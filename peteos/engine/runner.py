@@ -543,7 +543,7 @@ class Runner(ActiveClass):
             while self.is_running():
                 foreground = self._execution_environment.get_foreground_group()
 
-                # Drain the event queue
+                # Idle when there is nothing to do
                 if not have_new_message and not self.has_event() and (not foreground or not foreground.has_reviewed()):
                     waiting_due_to_pending = foreground is not None and foreground.has_pending()
                     if not waiting_due_to_pending:

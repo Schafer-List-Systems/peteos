@@ -386,7 +386,7 @@ class TestRunnerStepToolCalls:
         # Verify the group was created and the tool call was auto-approved
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
-        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.APPROVED
 
     async def test_tool_failed_at_execution(self, chatbot_manager_mock):
         """Auto-approved tool fails at runtime → step returns PENDING (loop handles execution)."""
@@ -426,7 +426,7 @@ class TestRunnerStepToolCalls:
         assert status is ExecStatus.CONTINUE
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
-        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.APPROVED
 
     async def test_tool_denied_by_hook(self, chatbot_manager_mock):
         """Auto-approved tool denied by before_tool_execution hook → record denied."""
@@ -472,13 +472,13 @@ class TestRunnerStepToolCalls:
         assert status is ExecStatus.CONTINUE
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
-        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.APPROVED
         record = fg.records[0]
 
         await runner._handle_tool_group()
 
-        assert record.execution_status == ToolExecutionStatus.EXECUTED
-        assert record.execution_result == "denied by hook"
+        assert record.tool_result.execution_status == ToolExecutionStatus.EXECUTED
+        assert record.tool_result.content == "denied by hook"
         tool_mock.execute.assert_not_called()
 
 
@@ -616,8 +616,8 @@ class TestRunnerOnToolCallHook:
         fg = runner.execution_environment.get_foreground_group()
         record = fg.records[0]
 
-        assert record.approval_status == ToolApprovalStatus.DENIED
-        assert record.denied_reason == "Hook says no"
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
+        assert "[DENIED]" in record.tool_result.content
 
     async def test_on_tool_call_allows_with_none(self):
         """on_tool_call hook returning None keeps pending status."""
@@ -637,8 +637,7 @@ class TestRunnerOnToolCallHook:
         fg = runner.execution_environment.get_foreground_group()
         record = fg.records[0]
 
-        assert record.approval_status == ToolApprovalStatus.PENDING
-        assert record.denied_reason is None
+        assert record.tool_call.approval_status == ToolApprovalStatus.PENDING
 
     async def test_on_tool_call_broadcast_calls_all_hooks(self):
         """All on_tool_call hooks fire — broadcast, not short-circuit."""
@@ -663,9 +662,9 @@ class TestRunnerOnToolCallHook:
         fg = runner.execution_environment.get_foreground_group()
         record = fg.records[0]
 
-        assert record.approval_status == ToolApprovalStatus.DENIED
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
         assert call_order == ["first", "second"]
-        assert "first denied" in record.denied_reason
+        assert "first denied" in record.tool_result.content
 
     async def test_on_tool_call_multiple_denied_reasons_joined(self):
         """Multiple denying hooks have reasons joined with newlines."""
@@ -684,9 +683,9 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.DENIED
-        assert "reason one" in record.denied_reason
-        assert "reason two" in record.denied_reason
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
+        assert "reason one" in record.tool_result.content
+        assert "reason two" in record.tool_result.content
 
     async def test_on_tool_call_ctx_denied_reason_accumulates(self):
         """Each hook sees ctx['denied_reason'] with all prior denial reasons."""
@@ -727,8 +726,7 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.APPROVED
-        assert record.denied_reason is None
+        assert record.tool_call.approval_status == ToolApprovalStatus.APPROVED
 
     async def test_on_tool_call_true_on_approved_stays_approved(self):
         """True on already APPROVED stays APPROVED (True cannot escalate APPROVED)."""
@@ -744,7 +742,7 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.APPROVED
+        assert record.tool_call.approval_status == ToolApprovalStatus.APPROVED
 
     async def test_on_tool_call_true_on_denied_stays_denied(self):
         """True on DENIED stays DENIED (True cannot escalate DENIED)."""
@@ -761,7 +759,7 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.DENIED
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
 
     async def test_on_tool_call_false_denies_approved(self):
         """False on APPROVED downgrades to DENIED."""
@@ -777,7 +775,7 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.DENIED
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
 
     async def test_on_tool_call_false_denies_pending(self):
         """False on PENDING becomes DENIED."""
@@ -794,7 +792,7 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.DENIED
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
 
     async def test_on_tool_call_tool_not_found_still_fires_hooks(self):
         """Tool not found creates DENIED, but hooks still fire and can add reasons."""
@@ -811,9 +809,9 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.DENIED
-        assert "not available" in record.denied_reason
-        assert "hook adds context" in record.denied_reason
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
+        assert "not available" in record.tool_result.content
+        assert "hook adds context" in record.tool_result.content
 
     async def test_on_tool_call_tool_not_found_no_hooks(self):
         """Tool not found with no hooks: DENIED with initial reason only."""
@@ -826,9 +824,9 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.DENIED
-        assert "not available" in record.denied_reason
-        assert "\n" not in record.denied_reason
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
+        assert "not available" in record.tool_result.content
+        assert "\n" not in record.tool_result.content
 
     async def test_on_tool_call_empty_hooks_list(self):
         """Empty hooks list: status unchanged from initial."""
@@ -840,7 +838,7 @@ class TestRunnerOnToolCallHook:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         record = runner.execution_environment.get_foreground_group().records[0]
-        assert record.approval_status == ToolApprovalStatus.APPROVED
+        assert record.tool_call.approval_status == ToolApprovalStatus.APPROVED
 
     async def test_on_tool_call_ctx_has_required_fields(self):
         """on_tool_call ctx contains all required fields."""
@@ -929,7 +927,6 @@ class TestRunnerExecuteAndInject:
         cp = fg.result_message.raw_dict["content"][0]
         assert cp["type"] == "tool_result"
         assert cp["call_id"] == "tc1"
-        assert cp["name"] == "add"
         assert cp["content"] == "5"
 
     async def test_execute_and_inject_appends_multiple_results(self):

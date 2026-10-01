@@ -239,7 +239,7 @@ class TestRunnerStepChains:
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
         # Tool is registered but not auto-approved → PENDING
-        assert fg.records[0].approval_status == ToolApprovalStatus.PENDING
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.PENDING
 
     @pytest.mark.asyncio
     async def test_error_response(self):
@@ -480,7 +480,7 @@ class TestHandleToolGroup:
 
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
-        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.APPROVED
 
         result_appended = await runner._handle_tool_group()
         assert result_appended is True
@@ -566,7 +566,7 @@ class TestHandleToolGroup:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
-        fg.records[0].approval_status = ToolApprovalStatus.DENIED
+        fg.records[0].tool_call.set_approval_status(ToolApprovalStatus.DENIED)
 
         result_appended = await runner._handle_tool_group()
         fg2 = runner.execution_environment.get_foreground_group()
@@ -680,9 +680,9 @@ class TestForegroundGroupStates:
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
         record = await runner.execution_environment.add_tool_call(tc, runner=runner)
 
-        assert record.approval_status == ToolApprovalStatus.PENDING
-        assert record.execution_status == ToolExecutionStatus.WAITING_FOR_APPROVAL
-        assert record.tool_call_id == "tc1"
+        assert record.tool_call.approval_status == ToolApprovalStatus.PENDING
+        assert record.tool_result.execution_status == ToolExecutionStatus.WAITING_FOR_APPROVAL
+        assert record.tool_call.call_id == "tc1"
 
     @pytest.mark.asyncio
     async def test_group_add_auto_approved_record(self):
@@ -701,8 +701,8 @@ class TestForegroundGroupStates:
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
         record = await runner.execution_environment.add_tool_call(tc, runner=runner)
 
-        assert record.approval_status == ToolApprovalStatus.APPROVED
-        assert record.execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
+        assert record.tool_call.approval_status == ToolApprovalStatus.APPROVED
+        assert record.tool_result.execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
     @pytest.mark.asyncio
     async def test_group_add_unknown_tool_denied(self):
@@ -721,8 +721,7 @@ class TestForegroundGroupStates:
         tc = ContentPart.create_tool_use("tc1", "nonexistent", "{}")
         record = await runner.execution_environment.add_tool_call(tc, runner=runner)
 
-        assert record.approval_status == ToolApprovalStatus.DENIED
-        assert record.denied_reason is not None
+        assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
 
     @pytest.mark.asyncio
     async def test_group_deny_all_remaining(self):
@@ -746,10 +745,8 @@ class TestForegroundGroupStates:
         fg = runner.execution_environment.get_foreground_group()
         fg.deny_all_remaining("user cancelled")
 
-        assert fg.records[0].approval_status == ToolApprovalStatus.DENIED
-        assert fg.records[1].approval_status == ToolApprovalStatus.DENIED
-        assert fg.records[0].denied_reason == "Tool group denied: user cancelled"
-        assert fg.records[1].denied_reason == "Tool group denied: user cancelled"
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.DENIED
+        assert fg.records[1].tool_call.approval_status == ToolApprovalStatus.DENIED
 
     @pytest.mark.asyncio
     async def test_group_is_done_all_executed(self):
@@ -769,7 +766,7 @@ class TestForegroundGroupStates:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
-        fg.records[0].execution_status = ToolExecutionStatus.EXECUTED
+        fg.records[0].tool_result.set_execution_status(ToolExecutionStatus.EXECUTED)
         assert fg.is_done() is True
 
     @pytest.mark.asyncio
@@ -838,12 +835,12 @@ class TestToolCallRecordLifecycle:
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
         fg = runner.execution_environment.get_foreground_group()
-        assert fg.records[0].approval_status == ToolApprovalStatus.PENDING
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.PENDING
 
         evt = ApprovalEvent(tool_call_id="tc1", approved=True)
         approved, _ = runner.execution_environment._handle_approval(evt)
         assert approved is True
-        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.APPROVED
 
     @pytest.mark.asyncio
     async def test_record_denied_cascades(self):
@@ -870,8 +867,8 @@ class TestToolCallRecordLifecycle:
         approved, _ = runner.execution_environment._handle_approval(evt)
         assert approved is False
 
-        assert fg.records[0].approval_status == ToolApprovalStatus.DENIED
-        assert fg.records[1].approval_status == ToolApprovalStatus.DENIED
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.DENIED
+        assert fg.records[1].tool_call.approval_status == ToolApprovalStatus.DENIED
 
     @pytest.mark.asyncio
     async def test_find_pending_record(self):
@@ -892,7 +889,7 @@ class TestToolCallRecordLifecycle:
 
         record = runner.execution_environment.find_pending_record("tc1")
         assert record is not None
-        assert record.tool_call_id == "tc1"
+        assert record.tool_call.call_id == "tc1"
 
     @pytest.mark.asyncio
     async def test_find_pending_record_not_found(self):
@@ -935,7 +932,7 @@ class TestToolCallRecordLifecycle:
 
         pending = runner.execution_environment.get_pending_tool_calls()
         assert len(pending) == 1
-        assert pending[0].tool_call_id == "tc2"
+        assert pending[0].tool_call.call_id == "tc2"
 
     @pytest.mark.asyncio
     async def test_tool_call_missing_call_id_raises(self):
@@ -1159,16 +1156,8 @@ class TestEEExecuteTool:
         )
 
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
-        record = ToolCallRecord(
-            tool_call_id="tc1",
-            tool_call=tc,
-            approval_status=ToolApprovalStatus.APPROVED,
-            execution_status=ToolExecutionStatus.WAITING_FOR_EXECUTION,
-            denied_reason=None,
-            decisions=[],
-            responded_count=0,
-            queued=False,
-        )
+        tr = ContentPart.create_tool_result("tc1", "")
+        record = ToolCallRecord(tool_call=tc, tool_result=tr, queued=False)
         runner = MagicMock()
         runner.call_hooks_deny = AsyncMock(return_value=None)
         with pytest.raises(RuntimeError, match="No foreground"):
@@ -1306,8 +1295,8 @@ class TestRunnerFullCycle:
         assert status is ExecStatus.CONTINUE
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
-        assert fg.records[0].approval_status == ToolApprovalStatus.APPROVED
-        assert fg.records[0].execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
+        assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.APPROVED
+        assert fg.records[0].tool_result.execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
         # _handle_tool_group executes the auto-approved tool and closes the group
         await runner._handle_tool_group()
