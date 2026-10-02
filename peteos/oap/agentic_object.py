@@ -923,6 +923,9 @@ class AgenticObject:
             if persistent_thread_id is not None:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
                 self._oap_runner_store[persistent_thread_id] = runner
+            else:
+                self._oap_thread_store[str(session.uuid)] = session.uuid
+                self._oap_runner_store[str(session.uuid)] = runner
 
         if persistent_thread_id is not None:
             if runner.state.get("_persistent_thread_id") is None:
@@ -1162,13 +1165,16 @@ class AgenticObject:
             try:
                 # Clean up temporary or anonymous threads immediately.
                 if persistent_thread_id is None:
-                    await self.suspend_thread(runner, session)
+                    session_uuid_str = str(session.uuid)
+                    await self.suspend_thread(session_uuid_str)
+                    self._oap_runner_store.pop(session_uuid_str, None)
+                    self._oap_thread_store.pop(session_uuid_str, None)
                     if session is not None:
                         await self._oap_agent.destroy_session(session.uuid)
-                
+
                 # Park persistent threads for reuse without stopping the runner.
                 else:
-                    self.clear_oap_state(runner, session)
+                    self._clear_oap_state(runner, session)
 
             except Exception as e:
                 _logger.error(
@@ -1183,7 +1189,7 @@ class AgenticObject:
                 await self.release()
 
 
-    def clear_oap_state(self, runner: Runner | None, session: Session | None) -> None:
+    def _clear_oap_state(self, runner: Runner | None, session: Session | None) -> None:
         """Clear all invocation state so the next invoke_agent call starts fresh."""
         _logger.debug("invoke_agent[%s]: clearing OAP state", self.__class__.__name__)
 
@@ -1216,28 +1222,33 @@ class AgenticObject:
                 self.__class__.__name__,
             )
 
-    async def suspend_thread(
-        self,
-        runner: Runner | None,
-        session: Session | None,
-    ) -> None:
-        _logger.debug("invoke_agent[%s]: suspending thread", self.__class__.__name__)
+    async def suspend_thread(self, thread_id: str) -> None:
+        """Suspend a thread by thread_id: look up session and runner, clear state, stop runner."""
+        _logger.debug("invoke_agent[%s]: suspending thread %s", self.__class__.__name__, thread_id)
+        stored_uuid = self._oap_thread_store.get(thread_id)
+        if stored_uuid is None:
+            return
+        session = self._oap_agent.get_session(stored_uuid)
+        runner = self._oap_runner_store.get(thread_id)
+        if runner is None and session is None:
+            return
 
         # Clear OAP state and deactivate session for a clean teardown.
-        self.clear_oap_state(runner, session)
+        self._clear_oap_state(runner, session)
 
         # Stop the runner with a 2-second timeout.
-        try:
-            stop_task = await runner.stop(timeout=2.0)
-            if stop_task:
-                await stop_task
-        except Exception as e:
-            _logger.error(
-                "AgenticObject[%s]: error during suspend_thread: %s: %r",
-                self.__class__.__name__,
-                type(e).__name__,
-                e,
-            )
+        if runner is not None:
+            try:
+                stop_task = await runner.stop(timeout=2.0)
+                if stop_task:
+                    await stop_task
+            except Exception as e:
+                _logger.error(
+                    "AgenticObject[%s]: error during suspend_thread: %s: %r",
+                    self.__class__.__name__,
+                    type(e).__name__,
+                    e,
+                )
 
     def __del__(self) -> None:
         """Stop all parked runners on object destruction."""
