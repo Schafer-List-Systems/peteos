@@ -233,7 +233,7 @@ class Runner(ActiveClass):
         from peteos.engine.channel import NotificationEvent
         await self._call_before_notification_publish(message)
         for channel in self._channels:
-            channel.push_event(NotificationEvent(self.uuid, message))
+            await channel._notify(NotificationEvent(message))
 
     # ------------------------------------------------------------------ #
     # Hook callbacks
