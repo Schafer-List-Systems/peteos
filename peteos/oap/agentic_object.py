@@ -15,7 +15,7 @@ from typing import Any, Callable
 from peteos.conversation import ContentPart, Message
 from peteos.conversation.context import Context
 from peteos.conversation.session import Session
-from peteos.engine import ExecStatus, Runner
+from peteos.engine import Channel, ExecStatus, Runner
 from peteos.oap.agentic_registry import AgenticObjectRegistry
 from peteos.oap.decorators import tool
 from peteos.oap.error import Error
@@ -1249,6 +1249,55 @@ class AgenticObject:
                     type(e).__name__,
                     e,
                 )
+
+    async def attach_channel(self, channel: Channel, persistent_thread_id: str) -> None:
+        """Attach a channel to the runner for a persistent thread.
+
+        Args:
+            channel: The channel to attach.
+            persistent_thread_id: The ID of the persistent thread whose runner to attach to.
+
+        Raises:
+            KeyError: No runner found for the given persistent_thread_id.
+        """
+        runner = self._oap_runner_store.get(persistent_thread_id)
+        if runner is None:
+            raise KeyError(f"No runner found for persistent_thread_id: {persistent_thread_id}")
+        await channel.attach(runner)
+
+    async def notify_agent(
+        self,
+        prompt: str,
+        persistent_thread_id: str,
+        image: str | None = None,
+    ) -> None:
+        """Inject a user message directly into a running persistent thread.
+
+        Does not invoke the agent for a response — only queues the message.
+        The thread must already be running.
+
+        Args:
+            prompt: The text message to inject.
+            persistent_thread_id: The ID of the persistent thread to target.
+            image: Optional local file path or HTTP(S) URL to attach an image.
+
+        Raises:
+            KeyError: No runner found for the given persistent_thread_id.
+        """
+        # Check that a runner exists for this thread.
+        if persistent_thread_id not in self._oap_runner_store:
+            raise KeyError(f"No runner found for persistent_thread_id: {persistent_thread_id}")
+        runner = self._oap_runner_store[persistent_thread_id]
+
+        # Build the user message with optional image part.
+        content: list[ContentPart] = [ContentPart.create_text(prompt)]
+        if image is not None:
+            from peteos.conversation.media import create_media_content_part_async
+            image_part = await create_media_content_part_async(image, timeout=30.0)
+            content.append(image_part)
+
+        # Inject the message into the runner's queue.
+        await runner.queue_message(Message.create(role="user", content_parts=content))
 
     def __del__(self) -> None:
         """Stop all parked runners on object destruction."""
