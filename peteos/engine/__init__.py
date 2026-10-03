@@ -20,14 +20,10 @@ from peteos.engine.exec_status import ExecStatus
 from peteos.conversation.session import SessionState
 from peteos.engine.runner import Runner
 
-# Driver is kept as a deprecated alias for Runner
-Driver = Runner
-
 __all__ = [
     "ActiveClass",
     "ApprovalEvent",
     "Channel",
-    "Driver",  # deprecated alias for Runner
     "ExecStatus",
     "ExecutionEnvironment",
     "NotificationEvent",
