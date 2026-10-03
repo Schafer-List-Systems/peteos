@@ -586,6 +586,8 @@ class TestRunnerNotifications:
     @pytest.mark.asyncio
     async def test_publish_notification_to_channels(self):
         """Notification is pushed to all subscribed channels."""
+        from peteos.engine.channel import NotificationEvent
+
         role = _make_role()
         agent = MagicMock()
         agent._tool_manager = role._tool_manager
@@ -596,24 +598,27 @@ class TestRunnerNotifications:
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
 
-        ch = MagicMock()
-        ch.push_event = MagicMock()
+        ch = AsyncMock()
         runner.subscribe(ch)
 
         test_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.publish_notification(test_msg)
 
-        ch.push_event.assert_called_once()
+        ch._notify.assert_awaited_once()
+        call_event = ch._notify.call_args[0][0]
+        assert isinstance(call_event, NotificationEvent)
+        assert call_event.message == test_msg
 
     @pytest.mark.asyncio
     async def test_append_and_notify(self):
         """append_and_notify appends message and publishes notification."""
+        from peteos.engine.channel import NotificationEvent
+
         role = _make_role()
         agent = MagicMock()
         agent._tool_manager = role._tool_manager
         agent.role = role
 
-        # Create a real Session so that append_and_notify actually stores messages
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             session = Session.create(parent_dir=tmpdir, system_prompt_message=None)
@@ -624,15 +629,17 @@ class TestRunnerNotifications:
             sid = session.uuid
             runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
 
-            ch = MagicMock()
-            ch.push_event = MagicMock()
+            ch = AsyncMock()
             runner.subscribe(ch)
 
             test_msg = _make_message("user", [ContentPart.create_text("hello")])
             await runner.append_and_notify(test_msg)
 
             assert len(runner.session.active_context.messages) > 0
-            ch.push_event.assert_called_once()
+            ch._notify.assert_awaited_once()
+            call_event = ch._notify.call_args[0][0]
+            assert isinstance(call_event, NotificationEvent)
+            assert call_event.message == test_msg
 
 
 # ---------------------------------------------------------------------------
@@ -1312,7 +1319,6 @@ class TestRunnerFullCycle:
         agent._tool_manager = role._tool_manager
         agent.role = role
 
-        # Create a real Session so that append_and_notify actually stores messages
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             session = Session.create(parent_dir=tmpdir, system_prompt_message=None)
@@ -1323,14 +1329,12 @@ class TestRunnerFullCycle:
             sid = session.uuid
             runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
 
-            ch = MagicMock()
-            ch.push_event = MagicMock()
+            ch = AsyncMock()
             runner.subscribe(ch)
 
             user_msg = _make_message("user", [ContentPart.create_text("hello")])
             await runner.queue_message(user_msg)
 
-            # Wait for the runner loop to process the event (append_and_notify + chatbot)
             idle = await runner.wait_for_idle(timeout=1.0)
             assert idle is True
 
@@ -1342,6 +1346,6 @@ class TestRunnerFullCycle:
                     break
             assert found is True
 
-            ch.push_event.assert_called()
+            ch._notify.assert_awaited()
             assert idle is True
             await runner.stop()
