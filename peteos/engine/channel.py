@@ -1,11 +1,9 @@
 """Channel — abstract base class for connecting runners to users."""
 
-import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from peteos.utils.activeclass import ActiveClass
 from peteos.chatbot import ContentPart, Message
 
 if TYPE_CHECKING:
@@ -17,12 +15,10 @@ class NotificationEvent:
     message: Message
 
 
-class Channel(ActiveClass, ABC):
+class Channel(ABC):
     """Abstract base class for channels connecting runners to users."""
 
-    def __init__(self, name: str) -> None:
-        super().__init__()
-        self.name = name
+    def __init__(self) -> None:
         self._runner: "Runner | None" = None
         self._disabled_roles: set[str] = set()
         self._disabled_content_types: set[str] = set()
@@ -37,6 +33,7 @@ class Channel(ActiveClass, ABC):
         # Bind the runner to this channel.
         self._runner = runner
         runner.subscribe(self)
+
         # Optionally greet the session on attach.
         if greeting is not None:
             msg = Message.create(
@@ -53,6 +50,7 @@ class Channel(ActiveClass, ABC):
         """
         # Unbind from the runner, if still attached.
         if self._runner is not None:
+
             # Optionally bid farewell to the session on detach.
             if farewell is not None:
                 msg = Message.create(
@@ -60,14 +58,66 @@ class Channel(ActiveClass, ABC):
                     content_parts=[ContentPart.create_text(farewell)]
                 )
                 await self._runner.queue_message(msg)
+
             # Unsubscribe and clear the runner reference.
             self._runner.unsubscribe(self)
             self._runner = None
 
     @abstractmethod
-    async def send(self, message: Message) -> None:
-        """Send a message to the user through this channel."""
+    async def on_outgoing(self, message: Message) -> None:
+        """Called when a message is outgoing from the runner to the external endpoint.
+
+        Override this in your channel implementation to deliver the message
+        to the external system (Nextcloud, shell, etc.).
+
+        Args:
+            message: The message to deliver.
+        """
         pass
+
+    async def _notify(self, event) -> None:
+        """Internal notification handler — called by the runner.
+
+        Unwraps the message from the event, applies filters,
+        and calls on_outgoing if the message passes.
+        Do not call directly — use runner.notify(channel, event) instead.
+        """
+        if not isinstance(event, NotificationEvent):
+            return
+
+        message = event.message
+        if message is None:
+            return
+
+        # Filter out messages whose role is disabled.
+        if message.role in self._disabled_roles:
+            return
+
+        # Filter out messages containing only disabled content types.
+        if any(cp.type in self._disabled_content_types for cp in message.content):
+            return
+
+        # Forward to the developer's outbound hook.
+        await self.on_outgoing(message)
+
+    async def enqueue(self, message: Message) -> None:
+        """Enqueue a message into the runner from an external source.
+
+        Called by the channel implementer when an external event arrives
+        (e.g. a webhook from Nextcloud) — injects the message into the
+        runner's processing queue.
+
+        Args:
+            message: The message to enqueue.
+
+        Raises:
+            RuntimeError: Channel is not attached to a runner.
+        """
+        # Inject the message into the runner's queue.
+        if self._runner is None:
+            raise RuntimeError("Channel is not attached to a runner")
+
+        await self._runner.queue_message(message)
 
     def enable_role(self, role: str, on: bool) -> None:
         """Enable or disable a message role for this channel.
@@ -94,34 +144,3 @@ class Channel(ActiveClass, ABC):
             self._disabled_content_types.discard(content_type)
         else:
             self._disabled_content_types.add(content_type)
-
-    async def run(self) -> None:
-        """Main notification consumption loop.
-
-        Consumes events pushed via push_event() and delivers them via send().
-        Runs until the channel is stopped.
-        """
-        # Consume and forward events until the channel stops.
-        try:
-            while self.is_running():
-                # Wait for the next event from the queue.
-                event = await self._wait()
-                if event is None:
-                    break
-                # Unwrap the message from the event, if it is a NotificationEvent.
-                if isinstance(event, NotificationEvent):
-                    message = event.message
-                else:
-                    message = event
-                if message is None:
-                    break
-                # Filter out messages whose role is disabled.
-                if message.role in self._disabled_roles:
-                    continue
-                # Filter out messages containing only disabled content types.
-                if any(cp.type in self._disabled_content_types for cp in message.content):
-                    continue
-                # Deliver the message to the user.
-                await self.send(message)
-        finally:
-            await self.stop()
