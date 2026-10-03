@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from peteos.chatbot import ContentPart, Message
-from peteos.engine.events import ActivityEvent, ApprovalEvent, MessageEvent, ToolExecutionEvent
+from peteos.engine.events import ActivityEvent, ActivityState, ApprovalEvent, MessageEvent, ToolExecutionEvent
 
 if TYPE_CHECKING:
     from peteos.engine.runner import Runner
@@ -26,9 +26,10 @@ class Channel(ABC):
             runner: The runner to attach to.
             greeting: Optional greeting message to queue for the session.
         """
-        # Bind the runner to this channel.
+        # Bind the runner to this channel and announce current activity state.
         self._runner = runner
         runner.subscribe(self)
+        await self._notify(ActivityEvent(state=runner._activity_state))
 
         # Optionally greet the session on attach.
         if greeting is not None:
@@ -37,6 +38,12 @@ class Channel(ABC):
                 content_parts=[ContentPart.create_text(greeting)]
             )
             await runner.queue_message(msg)
+
+    def get_activity_state(self) -> "ActivityState":
+        """Return the runner's current activity state."""
+        if self._runner is None:
+            raise RuntimeError("Channel is not attached to a runner")
+        return self._runner._activity_state
 
     async def detach(self, farewell: str | None = None) -> None:
         """Unsubscribe this channel from its runner.
