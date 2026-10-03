@@ -20,11 +20,15 @@ from peteos.oap import (
 )
 from peteos.oap.decorators import sandbox
 from peteos.engine import (
+    ActivityEvent,
+    ActivityState,
     Channel,
     ExecStatus,
-    NotificationEvent,
+    ApprovalEvent,
+    MessageEvent,
     ToolApprovalStatus,
     ToolExecutionStatus,
+    ToolExecutionEvent,
 )
 
 __all__ = [
@@ -51,8 +55,12 @@ __all__ = [
     "ToolExecutionStatus",
 
     # channels
+    "ActivityEvent",
+    "ActivityState",
     "Channel",
-    "NotificationEvent",
+    "MessageEvent",
+    "ApprovalEvent",
+    "ToolExecutionEvent",
 ]
 
 # Bootstrap backends and roles from peteos.json at import time.

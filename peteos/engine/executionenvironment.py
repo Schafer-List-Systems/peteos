@@ -13,7 +13,8 @@ from peteos.utils import get_logger
 from peteos.utils import json
 from peteos.utils.serialization import serialize
 
-from peteos.conversation.message import ContentPart, Message, ToolApprovalStatus
+from peteos.conversation.message import ContentPart, Message, ToolApprovalStatus, ToolExecutionStatus
+from peteos.engine.events import ApprovalEvent
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import ToolManager
 
@@ -284,15 +285,6 @@ async def _call_on_tool_call_hooks(
         if did_increment:
             record.decisions[i] = (new_status, new_reason, True)
             record.responded_count += 1
-
-
-@dataclass
-class ApprovalEvent:
-    """Event pushed to Runner.event_queue to signal approval of a tool call."""
-    tool_call_id: str = ""
-    tool_call: ContentPart = field(default_factory=lambda: ContentPart({"type": "tool_use"}))
-    approved: bool = True
-    denied_reason: str | None = None
 
 
 @dataclass

@@ -12,8 +12,8 @@ from peteos.chatbot import ChatBot, ChatBotResponse, ChatBotManager, Message, Co
 
 from peteos.utils.activeclass import ActiveClass
 from peteos.engine.exec_status import ExecStatus, _merge_exec_status
+from peteos.engine.events import ActivityEvent, ActivityState, ApprovalEvent, ToolExecutionEvent
 from peteos.engine.executionenvironment import (
-    ApprovalEvent,
     ExecutionEnvironment,
     ToolApprovalStatus,
     ToolExecutionStatus,
@@ -65,6 +65,7 @@ class Runner(ActiveClass):
         self._channels: set[Channel] = set()
         self._critical_error: BaseException | None = None
         self._idle: asyncio.Event = asyncio.Event()
+        self._activity_state: ActivityState = ActivityState.STOPPED
 
         # Pull configuration from the agent (not the session data model)
         self._session: Session = agent.get_session(session_uuid)
@@ -230,10 +231,21 @@ class Runner(ActiveClass):
 
     async def publish_notification(self, message: Message) -> None:
         """Publish a notification to all subscribed channels."""
-        from peteos.engine.channel import NotificationEvent
+        from peteos.engine.events import MessageEvent
         await self._call_before_notification_publish(message)
+        await self._notify_channels(MessageEvent(message))
+
+    async def _notify_channels(self, event: MessageEvent | ActivityEvent | ApprovalEvent | ToolExecutionEvent) -> None:
+        """Publish a domain event to all subscribed channels."""
         for channel in self._channels:
-            await channel._notify(NotificationEvent(message))
+            await channel._notify(event)
+
+    async def _set_activity(self, state: ActivityState) -> None:
+        """Update activity state and notify channels if it changed."""
+        if self._activity_state == state:
+            return
+        self._activity_state = state
+        await self._notify_channels(ActivityEvent(state=state))
 
     # ------------------------------------------------------------------ #
     # Hook callbacks
@@ -481,19 +493,19 @@ class Runner(ActiveClass):
         Returns False if the group is still pending (waiting for approval).
         In that case the caller should continue.
         """
+        # Fetch the foreground group of reviewed and ready-to-execute tool calls.
         foreground = self._execution_environment.get_foreground_group()
         if foreground is None:
             return False
 
+        # Drain all reviewed records and execute each in sequence.
         while foreground.has_reviewed():
+            # Pop the next reviewed record from the queue.
             record = foreground.pop_first_reviewed()
             tool_call = record.tool_call
             tool_name = tool_call.name
 
-            if record.tool_call.approval_status == ToolApprovalStatus.DENIED:
-                _logger.debug("[runner] Tool call %s denied, skipping execution", tool_name)
-                break
-
+            # Re-queue if the record is pending async approval resolution.
             if record.tool_call.approval_status == ToolApprovalStatus.PENDING:
                 _logger.debug(
                     "[runner] Tool call %s pending, re-inserting for async resolution",
@@ -502,23 +514,35 @@ class Runner(ActiveClass):
                 foreground.records.insert(0, record)
                 break
 
-            result_str, success = await self._execution_environment.execute_and_inject(record, runner=self)
-            if not success and result_str and result_str.startswith("Error: Tool '"):
-                _logger.debug("[runner] Tool %s not found", tool_name)
+            # Skip and halt on denied records — no point retrying.
+            if record.tool_call.approval_status == ToolApprovalStatus.DENIED:
+                _logger.debug("[runner] Tool call %s denied, skipping execution", tool_name)
                 break
+
+            # Notify channels that a tool execution is starting.
+            await self._notify_channels(ToolExecutionEvent(tool_result=record.tool_result))
+
+            # Execute the tool and inject its result into the conversation.
+            result_str, success = await self._execution_environment.execute_and_inject(record, runner=self)
+
+            # Notify channels of the result and fire after_tool_execution hooks.
+            await self._notify_channels(ToolExecutionEvent(tool_result=record.tool_result))
+            await self.call_hooks("after_tool_execution", self, tool_call, result_str, success)
+
+            # Halt on execution failure — deny remaining and stop processing this group.
             if not success:
-                await self.call_hooks("after_tool_execution", self, tool_call, result_str, False)
                 foreground.deny_all_remaining(f"Tool '{tool_name}' execution failed")
                 _logger.debug("[runner] Tool %s failed", tool_name)
                 break
-            await self.call_hooks("after_tool_execution", self, tool_call, result_str or "None", True)
+
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
 
+        # Group is exhausted — close it and return whether a real result was produced (any non-None).
         if foreground.is_done():
             self._execution_environment.close_foreground_group()
             return foreground.any_real_result
 
-        # No reviewed calls — log the first un-reviewed tool call for debugging
+        # No reviewed calls remain — log the head of the pending queue for debugging.
         if foreground.records:
             first = foreground.records[0]
             args_preview = first.tool_call.arguments[:200] if first.tool_call.arguments else ""
@@ -530,6 +554,7 @@ class Runner(ActiveClass):
                 first.tool_call.name, first.tool_call.call_id, args_preview,
             )
 
+        # Group still has pending/queued records — step() should continue waiting.
         return False
 
     # ------------------------------------------------------------------ #
@@ -554,11 +579,19 @@ class Runner(ActiveClass):
                 if not have_new_message and not self.has_event() and (not foreground or not foreground.has_reviewed()):
                     waiting_due_to_pending = foreground is not None and foreground.has_pending()
                     if not waiting_due_to_pending:
+                        # Nothing to do — sleeping, can be interrupted by an incoming event.
+                        await self._set_activity(ActivityState.SLEEPING)
                         self._idle.set()
+                    else:
+                        # Blocked on external approval — waiting for the approval event.
+                        await self._set_activity(ActivityState.WAITING)
                     if not await self._wait_for_event() or not self.is_running():
                         continue
                     if not waiting_due_to_pending:
                         self._idle.clear()
+
+                # Announce active work — we are running this iteration.
+                await self._set_activity(ActivityState.RUNNING)
 
                 # drain event queue
                 events_processed = 0
@@ -592,6 +625,7 @@ class Runner(ActiveClass):
                 except Exception as e:
                     _logger.error("[runner] step/hook raised exception: %s: %r", type(e).__name__, e)
                     self._critical_error = e
+                    await self._set_activity(ActivityState.SLEEPING)
                     self._idle.set()
                     continue
                 finally:
@@ -603,7 +637,8 @@ class Runner(ActiveClass):
                 _logger.debug("[runner] run(): Iterating...")
 
         finally:
-            # Deny any unexecuted tool calls so the session reflects a consistent state.
+            # Announce that the runner has stopped and clean up any dangling tool calls.
+            await self._set_activity(ActivityState.STOPPED)
             foreground = self._execution_environment.get_foreground_group()
             if foreground is not None and foreground.has_unfinished():
                 _logger.warning(

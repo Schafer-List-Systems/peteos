@@ -586,7 +586,7 @@ class TestRunnerNotifications:
     @pytest.mark.asyncio
     async def test_publish_notification_to_channels(self):
         """Notification is pushed to all subscribed channels."""
-        from peteos.engine.channel import NotificationEvent
+        from peteos.engine.events import MessageEvent
 
         role = _make_role()
         agent = MagicMock()
@@ -606,13 +606,13 @@ class TestRunnerNotifications:
 
         ch._notify.assert_awaited_once()
         call_event = ch._notify.call_args[0][0]
-        assert isinstance(call_event, NotificationEvent)
+        assert isinstance(call_event, MessageEvent)
         assert call_event.message == test_msg
 
     @pytest.mark.asyncio
     async def test_append_and_notify(self):
         """append_and_notify appends message and publishes notification."""
-        from peteos.engine.channel import NotificationEvent
+        from peteos.engine.events import MessageEvent
 
         role = _make_role()
         agent = MagicMock()
@@ -638,7 +638,7 @@ class TestRunnerNotifications:
             assert len(runner.session.active_context.messages) > 0
             ch._notify.assert_awaited_once()
             call_event = ch._notify.call_args[0][0]
-            assert isinstance(call_event, NotificationEvent)
+            assert isinstance(call_event, MessageEvent)
             assert call_event.message == test_msg
 
 

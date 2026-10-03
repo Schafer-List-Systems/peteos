@@ -5,14 +5,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from peteos.chatbot import ContentPart, Message
+from peteos.engine.events import ActivityEvent, ApprovalEvent, MessageEvent, ToolExecutionEvent
 
 if TYPE_CHECKING:
     from peteos.engine.runner import Runner
-
-
-@dataclass(frozen=True)
-class NotificationEvent:
-    message: Message
 
 
 class Channel(ABC):
@@ -64,41 +60,40 @@ class Channel(ABC):
             self._runner = None
 
     @abstractmethod
-    async def on_outgoing(self, message: Message) -> None:
-        """Called when a message is outgoing from the runner to the external endpoint.
+    async def on_outgoing(self, event: MessageEvent | ActivityEvent | ApprovalEvent | ToolExecutionEvent) -> None:
+        """Called when a message or domain event is outgoing from the runner.
 
-        Override this in your channel implementation to deliver the message
+        Override this in your channel implementation to deliver the event
         to the external system (Nextcloud, shell, etc.).
 
         Args:
-            message: The message to deliver.
+            event: A MessageEvent or a domain event (ActivityEvent,
+                ApprovalEvent, ToolExecutionEvent) to deliver.
         """
         pass
 
-    async def _notify(self, event) -> None:
+    async def _notify(self, event: MessageEvent | ActivityEvent | ApprovalEvent | ToolExecutionEvent) -> None:
         """Internal notification handler — called by the runner.
 
-        Unwraps the message from the event, applies filters,
-        and calls on_outgoing if the message passes.
-        Do not call directly — use runner.notify(channel, event) instead.
+        For MessageEvent: applies role and content-type filters before delivery.
+        For domain events: delivered directly to on_outgoing without filtering.
+        For unknown types: raises TypeError.
+
+        Do not call directly — use runner._notify_channels(event) instead.
         """
-        if not isinstance(event, NotificationEvent):
-            return
+        if isinstance(event, MessageEvent):
+            message = event.message
+            if message is None:
+                return
+            if message.role in self._disabled_roles:
+                return
+            if any(cp.type in self._disabled_content_types for cp in message.content):
+                return
 
-        message = event.message
-        if message is None:
-            return
+        if not isinstance(event, (MessageEvent, ActivityEvent, ApprovalEvent, ToolExecutionEvent)):
+            raise TypeError(f"Unknown event type {type(event).__name__}: {event!r}")
 
-        # Filter out messages whose role is disabled.
-        if message.role in self._disabled_roles:
-            return
-
-        # Filter out messages containing only disabled content types.
-        if any(cp.type in self._disabled_content_types for cp in message.content):
-            return
-
-        # Forward to the developer's outbound hook.
-        await self.on_outgoing(message)
+        await self.on_outgoing(event)
 
     async def enqueue(self, message: Message) -> None:
         """Enqueue a message into the runner from an external source.

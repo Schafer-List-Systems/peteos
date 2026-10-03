@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from peteos.engine.channel import Channel, NotificationEvent
+from peteos.engine.channel import Channel
+from peteos.engine.events import MessageEvent
 from peteos.chatbot import Message, ContentPart
 
 
@@ -79,10 +80,10 @@ class TestChannelNotify:
             role="user",
             content_parts=[ContentPart.create_text("hi")],
         )
-        event = NotificationEvent(message=test_msg)
+        event = MessageEvent(message=test_msg)
         await ch._notify(event)
         assert len(ch._sent_messages) == 1
-        assert ch._sent_messages[0] == test_msg
+        assert ch._sent_messages[0] == MessageEvent(message=test_msg)
 
     @pytest.mark.asyncio
     async def test_notify_skips_disabled_role(self):
@@ -97,10 +98,10 @@ class TestChannelNotify:
             role="user",
             content_parts=[ContentPart.create_text("hi")],
         )
-        await ch._notify(NotificationEvent(message=reasoning_msg))
-        await ch._notify(NotificationEvent(message=user_msg))
+        await ch._notify(MessageEvent(message=reasoning_msg))
+        await ch._notify(MessageEvent(message=user_msg))
         assert len(ch._sent_messages) == 1
-        assert ch._sent_messages[0] == user_msg
+        assert ch._sent_messages[0] == MessageEvent(message=user_msg)
 
     @pytest.mark.asyncio
     async def test_notify_skips_disabled_content_type(self):
@@ -117,24 +118,25 @@ class TestChannelNotify:
             role="user",
             content_parts=[ContentPart.create_text("hi")],
         )
-        await ch._notify(NotificationEvent(message=tool_msg))
-        await ch._notify(NotificationEvent(message=user_msg))
+        await ch._notify(MessageEvent(message=tool_msg))
+        await ch._notify(MessageEvent(message=user_msg))
         assert len(ch._sent_messages) == 1
-        assert ch._sent_messages[0] == user_msg
+        assert ch._sent_messages[0] == MessageEvent(message=user_msg)
 
     @pytest.mark.asyncio
-    async def test_notify_does_nothing_on_non_notification_event(self):
-        """Test that _notify ignores non-NotificationEvent events."""
+    async def test_notify_raises_on_unknown_event_type(self):
+        """Test that _notify raises TypeError for unknown event types."""
         ch = _TestChannel()
         not_an_event = "not an event"
-        await ch._notify(not_an_event)
+        with pytest.raises(TypeError, match="Unknown event type"):
+            await ch._notify(not_an_event)
         assert len(ch._sent_messages) == 0
 
     @pytest.mark.asyncio
     async def test_notify_does_nothing_on_none_message(self):
-        """Test that _notify ignores NotificationEvent with None message."""
+        """Test that _notify ignores MessageEvent with None message."""
         ch = _TestChannel()
-        await ch._notify(NotificationEvent(message=None))
+        await ch._notify(MessageEvent(message=None))
         assert len(ch._sent_messages) == 0
 
 

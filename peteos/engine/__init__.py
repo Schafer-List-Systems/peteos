@@ -6,10 +6,16 @@ environment that drive agents to act.  Wraps a conversation.Session
 executing tools, and producing output.
 """
 
-from peteos.engine.channel import Channel, NotificationEvent
+from peteos.engine.channel import Channel
+from peteos.engine.events import (
+    ActivityEvent,
+    ActivityState,
+    ApprovalEvent,
+    MessageEvent,
+    ToolExecutionEvent,
+)
 from peteos.utils.activeclass import ActiveClass
 from peteos.engine.executionenvironment import (
-    ApprovalEvent,
     ExecutionEnvironment,
     RespondHandle,
     ToolApprovalStatus,
@@ -22,11 +28,13 @@ from peteos.engine.runner import Runner
 
 __all__ = [
     "ActiveClass",
+    "ActivityEvent",
+    "ActivityState",
     "ApprovalEvent",
     "Channel",
     "ExecStatus",
     "ExecutionEnvironment",
-    "NotificationEvent",
+    "MessageEvent",
     "RespondHandle",
     "Runner",
     "SessionState",
@@ -34,4 +42,5 @@ __all__ = [
     "ToolApprovalStatus",
     "ToolCallRecord",
     "ToolExecutionStatus",
+    "ToolExecutionEvent",
 ]
