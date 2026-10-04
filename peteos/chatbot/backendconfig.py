@@ -20,8 +20,10 @@ class BackendConfig:
         models_endpoint: Custom models endpoint (default: API-specific).
         streaming: Use streaming mode by default.
         max_tokens: Maximum tokens to generate (output budget).
-        max_context_size: LLM's total context window size. Used for context reduction. Defaults to infinity (no proactive reduction until configured).
-        context_reduction_reserve: Safety margin in tokens subtracted from max_context_size before the reduction check. Default 0.
+        max_context_limit: LLM's total context window size. Used for context reduction. Defaults to infinity (no proactive reduction until configured).
+        context_reduction_reserve: Safety margin in tokens subtracted from max_context_limit before the reduction check. Default 0.
+        context_limit_floor: Learned lower bound of the context limit (0.0 initially). Updated on every successful response to max(known, context_size_sent).
+        context_limit_ceil: Learned upper bound of the context limit (inf initially). Tightened on HTTP errors that are confirmed as context overflow.
     """
 
     name: str
@@ -31,8 +33,10 @@ class BackendConfig:
     models_endpoint: Optional[str] = None
     streaming: bool = False
     max_tokens: int = 4096
-    max_context_size: float = float("inf")
+    max_context_limit: float = float("inf")
     context_reduction_reserve: int = 0
+    context_limit_floor: float = 0.0
+    context_limit_ceil: float = float("inf")
     retry_delays: Optional[list[float]] = None
     api_key: Optional[str] = None
     model_priorities: Optional[Dict[str, int]] = None

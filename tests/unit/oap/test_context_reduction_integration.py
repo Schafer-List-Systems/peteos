@@ -43,7 +43,7 @@ def _ctx_with_tokens(token_counts: list[int]):
 def _make_mock_runner(
     context_size: int,
     max_tokens: int,
-    max_context_size: float,
+    max_context_limit: float,
     reserve: int = 0,
 ) -> MagicMock:
     """Create a mock runner with a mock chatbot config and session."""
@@ -57,7 +57,7 @@ def _make_mock_runner(
 
     mock_chatbot = MagicMock()
     mock_chatbot._config.max_tokens = max_tokens
-    mock_chatbot._config.max_context_size = max_context_size
+    mock_chatbot._config.max_context_limit = max_context_limit
     mock_chatbot._config.context_reduction_reserve = reserve
 
     mock_runner = MagicMock()
@@ -79,7 +79,7 @@ class TestBeforeSendToChatbotIntegration:
         """before_send_to_chatbot fires before each chatbot.send_context call."""
         from peteos.oap.agentic_object import _context_reduction_hook
 
-        mock_runner = _make_mock_runner(context_size=10, max_tokens=10, max_context_size=1000.0)
+        mock_runner = _make_mock_runner(context_size=10, max_tokens=10, max_context_limit=1000.0)
 
         call_count = [0]
 
@@ -97,7 +97,7 @@ class TestBeforeSendToChatbotIntegration:
         """Context is reduced via set_active_context when over threshold."""
         from peteos.oap.agentic_object import _context_reduction_hook
 
-        mock_runner = _make_mock_runner(context_size=95, max_tokens=10, max_context_size=100.0)
+        mock_runner = _make_mock_runner(context_size=95, max_tokens=10, max_context_limit=100.0)
 
         mock_runner.call_hooks.side_effect = lambda name, *args: _context_reduction_hook(mock_runner, mock_runner.session.active_context)
 
@@ -111,7 +111,7 @@ class TestBeforeSendToChatbotIntegration:
         """No reduction when context fits within budget."""
         from peteos.oap.agentic_object import _context_reduction_hook
 
-        mock_runner = _make_mock_runner(context_size=10, max_tokens=10, max_context_size=100.0)
+        mock_runner = _make_mock_runner(context_size=10, max_tokens=10, max_context_limit=100.0)
 
         mock_runner.call_hooks.side_effect = lambda name, *args: _context_reduction_hook(mock_runner, mock_runner.session.active_context)
 
@@ -131,7 +131,7 @@ class TestOnTruncationIntegration:
         """on_truncation hook fires after truncation is handled."""
         from peteos.oap.agentic_object import _on_truncation_hook
 
-        mock_runner = _make_mock_runner(context_size=10, max_tokens=10, max_context_size=1000.0)
+        mock_runner = _make_mock_runner(context_size=10, max_tokens=10, max_context_limit=1000.0)
 
         call_count = [0]
         async def patched_call_hooks(name, *args):
@@ -146,10 +146,10 @@ class TestOnTruncationIntegration:
         assert call_count[0] == 1
 
     async def test_max_context_calibrated_on_first_truncation(self):
-        """Hook uses calibrated max_context_size, not inf, after truncation."""
+        """Hook uses calibrated max_context_limit, not inf, after truncation."""
         from peteos.oap.agentic_object import _on_truncation_hook
 
-        mock_runner = _make_mock_runner(context_size=50, max_tokens=10, max_context_size=60.0)
+        mock_runner = _make_mock_runner(context_size=50, max_tokens=10, max_context_limit=60.0)
 
         async def patched_call_hooks(name, *args):
             _on_truncation_hook(mock_runner, args[0], args[1])
@@ -160,7 +160,7 @@ class TestOnTruncationIntegration:
 
         # Hook uses the calibrated max_context (60), not inf
         # Since context 50 + output 10 = 60 fits exactly in 60, no reduction needed
-        assert mock_runner._chatbot._config.max_context_size == 60
+        assert mock_runner._chatbot._config.max_context_limit == 60
 
     async def test_truncation_exhausted_flag_passed_to_hook(self):
         """When counter >= max_retries, hook receives exhausted signal via counter."""
@@ -172,7 +172,7 @@ class TestOnTruncationIntegration:
             else:
                 exhausted_calls.append("retry")
 
-        mock_runner = _make_mock_runner(context_size=30, max_tokens=10, max_context_size=50.0)
+        mock_runner = _make_mock_runner(context_size=30, max_tokens=10, max_context_limit=50.0)
 
         async def patched_call_hooks(name, *args):
             # args = (mock_runner, counter, max_retries)
@@ -188,7 +188,7 @@ class TestOnTruncationIntegration:
         """Context is reduced on truncation retry so next turn can succeed."""
         from peteos.oap.agentic_object import _on_truncation_hook
 
-        mock_runner = _make_mock_runner(context_size=80, max_tokens=10, max_context_size=95.0)
+        mock_runner = _make_mock_runner(context_size=80, max_tokens=10, max_context_limit=95.0)
         mock_runner.session.active_context = _ctx_with_tokens([80, 5])
 
         async def patched_call_hooks(name, *args):

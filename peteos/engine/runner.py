@@ -413,11 +413,11 @@ class Runner(ActiveClass):
             self._session.active_context.total_token_count()
             + self._chatbot._config.max_tokens
         )
-        prev = self._chatbot._config.max_context_size
+        prev = self._chatbot._config.max_context_limit
         if estimated_max_context < prev:
-            self._chatbot._config.max_context_size = estimated_max_context
+            self._chatbot._config.max_context_limit = estimated_max_context
             _logger.debug(
-                "[runner] _handle_truncation: max_context_size %d -> %d (tightened from truncation)",
+                "[runner] _handle_truncation: max_context_limit %d -> %d (tightened from truncation)",
                 prev,
                 estimated_max_context,
             )

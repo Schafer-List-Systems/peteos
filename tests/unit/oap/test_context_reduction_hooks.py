@@ -36,7 +36,7 @@ def _mock_runner(context_size: int, max_tokens: int, max_context: float, reserve
 
     mock_chatbot = MagicMock()
     mock_chatbot._config.max_tokens = max_tokens
-    mock_chatbot._config.max_context_size = max_context
+    mock_chatbot._config.max_context_limit = max_context
     mock_chatbot._config.context_reduction_reserve = reserve
 
     mock_runner = MagicMock()

@@ -232,7 +232,7 @@ def _try_context_reduction(
 def _context_reduction_hook(runner, context: Context) -> None:
     """Proactively reduce context before sending to the chatbot if it would exceed the model's limits."""
     cfg = runner._chatbot._config
-    max_context = cfg.max_context_size
+    max_context = cfg.max_context_limit
     if max_context == float("inf"):
         return
 
@@ -256,7 +256,7 @@ def _on_truncation_hook(runner, counter: int, max_retries: int) -> None:
     control remains with the runner.
     """
     cfg = runner._chatbot._config
-    max_context = cfg.max_context_size
+    max_context = cfg.max_context_limit
     if max_context == float("inf"):
         return
 
