@@ -63,6 +63,11 @@ class TestExecutionEnvironmentAddToolCall:
         env.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", "{}")
         rec = asyncio.run(env.add_tool_call(tc, runner=mock_runner))
+
+        # Process the ApprovalEvent pushed by the election.
+        event = mock_runner.push_event.call_args[0][0]
+        env._handle_approval(event)
+
         assert rec.tool_call.approval_status == ToolApprovalStatus.APPROVED
         assert rec.tool_result.execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
@@ -75,6 +80,11 @@ class TestExecutionEnvironmentAddToolCall:
         env.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "unknown", "{}")
         rec = asyncio.run(env.add_tool_call(tc, runner=mock_runner))
+
+        # Process the ApprovalEvent pushed by the election.
+        event = mock_runner.push_event.call_args[0][0]
+        env._handle_approval(event)
+
         assert rec.tool_call.approval_status == ToolApprovalStatus.DENIED
 
 

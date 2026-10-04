@@ -1,6 +1,6 @@
 """Shared pytest fixtures for engine unit tests."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -40,6 +40,9 @@ def mock_runner(mock_session, mock_role):
     runner = MagicMock()
     runner._session = mock_session
     runner.role = mock_role
+    runner._notify_channels = AsyncMock()
+    runner._execution_environment = MagicMock()
+    runner._execution_environment._elections = {}
     return runner
 
 

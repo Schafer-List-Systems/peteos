@@ -206,6 +206,9 @@ class TestRunnerStepChains:
 
         # Step 2: _handle_tool_group executes the auto-approved tool and closes
         # the group, so the next step() will call the chatbot again
+        # Process the pending ApprovalEvent first.
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
         await runner._handle_tool_group()
         status, resp = await runner.step()
         assert status is ExecStatus.FINISHED
@@ -478,6 +481,11 @@ class TestHandleToolGroup:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
+        # Process the ApprovalEvent pushed by the election.
+        from peteos.engine.events import ApprovalEvent
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
+
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
         assert fg.records[0].tool_call.approval_status == ToolApprovalStatus.APPROVED
@@ -708,6 +716,10 @@ class TestForegroundGroupStates:
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
         record = await runner.execution_environment.add_tool_call(tc, runner=runner)
 
+        # Process the ApprovalEvent pushed by the election.
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
+
         assert record.tool_call.approval_status == ToolApprovalStatus.APPROVED
         assert record.tool_result.execution_status == ToolExecutionStatus.WAITING_FOR_EXECUTION
 
@@ -727,6 +739,10 @@ class TestForegroundGroupStates:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", "{}")
         record = await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        # Process the ApprovalEvent pushed by the election.
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
 
@@ -771,6 +787,10 @@ class TestForegroundGroupStates:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        # Process the ApprovalEvent pushed by the election.
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         fg = runner.execution_environment.get_foreground_group()
         fg.records[0].tool_result.set_execution_status(ToolExecutionStatus.EXECUTED)
@@ -935,6 +955,11 @@ class TestToolCallRecordLifecycle:
         tc1 = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')  # auto-approved
         tc2 = ContentPart.create_tool_use("tc2", "other", '{"q":"y"}')  # not in auto-approve
         await runner.execution_environment.add_tool_call(tc1, runner=runner)
+
+        # Process the ApprovalEvent for tc1.
+        event1 = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event1)
+
         await runner.execution_environment.add_tool_call(tc2, runner=runner)
 
         pending = runner.execution_environment.get_pending_tool_calls()
@@ -1299,6 +1324,8 @@ class TestRunnerFullCycle:
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
 
         status, _ = await runner.step()
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
         assert status is ExecStatus.CONTINUE
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None

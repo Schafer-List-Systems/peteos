@@ -185,6 +185,8 @@ class TestApprovalElection:
         runner = MagicMock()
         runner._notify_channels = AsyncMock()
         runner.push_event = MagicMock()
+        runner._execution_environment = MagicMock()
+        runner._execution_environment._elections = {}
         return runner
 
     # --- Policy layer ---
@@ -201,8 +203,8 @@ class TestApprovalElection:
         await election.start(mock_runner)
 
         assert election._decision == ApprovalDecision.APPROVED
-        assert election._is_deferred is False
-        mock_runner.push_event.assert_not_called()
+        assert election._countdown_task is None
+        mock_runner.push_event.assert_called_once()
         mock_runner._notify_channels.assert_called_once()
 
     @pytest.mark.asyncio
@@ -230,7 +232,8 @@ class TestApprovalElection:
         await election.start(mock_runner)
 
         assert election._decision is None
-        assert election._is_deferred is True
+        assert election._countdown_task is None
+        assert election._published is False
 
     @pytest.mark.asyncio
     async def test_mixed_policies_denied_wins(self, tool_call, mock_runner):
@@ -332,7 +335,6 @@ class TestApprovalElection:
         election = ApprovalElection(_content_part=tool_call)
         election._decision = ApprovalDecision.APPROVED
         election._reason = None
-        election._is_deferred = True
         election._runner = mock_runner
 
         await election.publish_decision()
@@ -350,7 +352,6 @@ class TestApprovalElection:
         election = ApprovalElection(_content_part=tool_call)
         election._decision = ApprovalDecision.DENIED
         election._reason = "policy violation"
-        election._is_deferred = True
         election._runner = mock_runner
 
         await election.publish_decision()
@@ -363,16 +364,15 @@ class TestApprovalElection:
         assert event.denied_reason == "policy violation"
 
     @pytest.mark.asyncio
-    async def test_publish_does_not_push_event_when_not_deferred(self, tool_call, mock_runner):
-        """publish_decision does not push to runner event queue when not deferred."""
+    async def test_publish_always_pushes_event(self, tool_call, mock_runner):
+        """publish_decision always pushes to the runner event queue on resolution."""
         election = ApprovalElection(_content_part=tool_call)
         election._decision = ApprovalDecision.APPROVED
-        election._is_deferred = False
         election._runner = mock_runner
 
         await election.publish_decision()
 
-        mock_runner.push_event.assert_not_called()
+        mock_runner.push_event.assert_called_once()
         mock_runner._notify_channels.assert_called_once()
 
     @pytest.mark.asyncio
@@ -380,7 +380,6 @@ class TestApprovalElection:
         """publish_decision guards against double-publish within the same resolution."""
         election = ApprovalElection(_content_part=tool_call)
         election._decision = ApprovalDecision.APPROVED
-        election._is_deferred = True
         election._runner = mock_runner
 
         await election.publish_decision()

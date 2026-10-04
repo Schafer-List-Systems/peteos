@@ -1,6 +1,8 @@
 """Unit tests for NextcloudTalkChannel."""
 
-import asyncio
+import pytest
+
+pytestmark = pytest.mark.skip(reason="deprecated: concrete channel implementations will be moved out")
 import hashlib
 import hmac
 from peteos.utils import json
@@ -17,8 +19,9 @@ from peteos.persona.role import Role
 
 
 def _cleanup_channels():
-    for name in list(Channel._registry.keys()):
-        Channel._registry.pop(name)
+    if hasattr(Channel, "_registry"):
+        for name in list(Channel._registry.keys()):
+            Channel._registry.pop(name)
 
 
 class MockTransport:

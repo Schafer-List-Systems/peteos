@@ -23,8 +23,9 @@ def _setup_mock_chatbot():
 
 def _cleanup_channels():
     """Clean up channel registry and mock runner call tracking."""
-    for name in list(Channel._registry.keys()):
-        Channel._registry.pop(name)
+    if hasattr(Channel, "_registry"):
+        for name in list(Channel._registry.keys()):
+            Channel._registry.pop(name)
 
 
 def _make_mock_runner():

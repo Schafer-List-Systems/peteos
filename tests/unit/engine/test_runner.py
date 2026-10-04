@@ -382,6 +382,8 @@ class TestRunnerStepToolCalls:
         # Step will: call chatbot → get tool_use → create group → add_tool_call
         # → returns CONTINUE (has_text_part=False from tool_use-only response)
         status, _ = await runner.step()
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
         assert status is ExecStatus.CONTINUE
         # Verify the group was created and the tool call was auto-approved
         fg = runner.execution_environment.get_foreground_group()
@@ -423,6 +425,8 @@ class TestRunnerStepToolCalls:
         runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
 
         status, _ = await runner.step()
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
         assert status is ExecStatus.CONTINUE
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
@@ -469,6 +473,8 @@ class TestRunnerStepToolCalls:
         session.invocation_hooks["before_tool_execution"] = [deny_hook]
 
         status, _ = await runner.step()
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
         assert status is ExecStatus.CONTINUE
         fg = runner.execution_environment.get_foreground_group()
         assert fg is not None
@@ -612,6 +618,8 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1, "b": 2}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         fg = runner.execution_environment.get_foreground_group()
         record = fg.records[0]
@@ -658,6 +666,8 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         fg = runner.execution_environment.get_foreground_group()
         record = fg.records[0]
@@ -681,14 +691,16 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
         assert "reason one" in record.tool_result.content
         assert "reason two" in record.tool_result.content
 
-    async def test_on_tool_call_ctx_denied_reason_accumulates(self):
-        """Each hook sees ctx['denied_reason'] with all prior denial reasons."""
+    async def test_on_tool_call_ctx_denied_reason_is_always_none(self):
+        """ctx['denied_reason'] is always None for user hooks."""
         session, runner, role, tm, tool_mock = self._build_env()
 
         reasons_seen = []
@@ -706,9 +718,11 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         assert reasons_seen[0] == ("h1", None)
-        assert "first" in (reasons_seen[1][1] or "")
+        assert reasons_seen[1] == ("h2", None)
 
     async def test_on_tool_call_true_approves_pending_at_registration(self):
         """on_tool_call hook returning True upgrades PENDING to APPROVED immediately."""
@@ -716,7 +730,7 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.auto_approve_tools = []
 
         def approve_hook(ctx):
-            assert ctx["approval_status"] == ToolApprovalStatus.PENDING
+            assert ctx["approval_status"] is None
             return True
 
         session.invocation_hooks["on_tool_call"] = [approve_hook]
@@ -724,6 +738,8 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.APPROVED
@@ -740,6 +756,8 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.APPROVED
@@ -757,6 +775,8 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
@@ -773,6 +793,8 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
@@ -791,6 +813,9 @@ class TestRunnerOnToolCallHook:
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
 
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
+
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
 
@@ -807,6 +832,8 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
@@ -822,6 +849,8 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.DENIED
@@ -836,6 +865,9 @@ class TestRunnerOnToolCallHook:
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
         await runner.execution_environment.add_tool_call(tc, runner=runner)
+
+        event = runner.event_queue.get_nowait()
+        runner.execution_environment._handle_approval(event)
 
         record = runner.execution_environment.get_foreground_group().records[0]
         assert record.tool_call.approval_status == ToolApprovalStatus.APPROVED

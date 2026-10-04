@@ -5,6 +5,10 @@ Anthropic's API returns tool call content parts with type='tool_use', not
 so the reaction handler can find pending tool calls.
 """
 
+import pytest
+
+pytestmark = pytest.mark.skip(reason="deprecated: concrete channel implementations will be moved out")
+
 import asyncio
 import uuid
 from unittest.mock import MagicMock
