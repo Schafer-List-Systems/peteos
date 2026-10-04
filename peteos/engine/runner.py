@@ -594,27 +594,29 @@ class Runner(ActiveClass):
                 await self._set_activity(ActivityState.RUNNING)
 
                 # drain event queue
-                events_processed = 0
+                require_reasoning = have_new_message
                 while self.has_event():
                     event = self.event_queue.get_nowait()
                     if event is None:
                         continue
 
-                    events_processed += 1
-
                     if isinstance(event, Message):
                         await self.append_and_notify(event)
                         have_new_message = True
-                    elif isinstance(event, ApprovalEvent):
-                        self._execution_environment._handle_approval(event)
-                    else:
-                        events_processed -= 1
-                        continue
+                        require_reasoning = True
 
-                # If a foreground tool group exists, process approved tool calls
-                if foreground is not None:
-                    if not await self._handle_tool_group() and not have_new_message:
-                        continue
+                    elif isinstance(event, ApprovalEvent):
+                        # Handle the approval event. returns handled == True, if a tool call was approved. We can potentially execute a tool.
+                        handled, _ = self._execution_environment._handle_approval(event)
+                        if not handled:
+                            continue
+
+                        # Try to execute a tool. If we could execute a tool, we can reason about the result.
+                        if await self._handle_tool_group():
+                            require_reasoning = True
+
+                if not require_reasoning:
+                    continue
 
                 # Send context to chatbot and get a response, already passing the tool calls
                 try:

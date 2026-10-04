@@ -174,7 +174,6 @@ class ApprovalElection:
     _policies: list[object] = field(default_factory=list)
     _policy_responses = 0
     _policy_decisions: list[tuple[ApprovalDecision, str | None, bool]] = field(default_factory=list)
-    _is_deferred: bool = False
 
     _decision: ApprovalDecision | None = field(default=None)
     _reason: str | None = None
@@ -195,13 +194,7 @@ class ApprovalElection:
         # Let policies vote. Escalate only if the election was ignored by all policies.
         policy_result = await self._call_policies()
         if policy_result is not ApprovalDecision.IGNORED:
-            if policy_result is ApprovalDecision.PENDING:
-                # If at least one policy is pending, it is a deferred decision.
-                self._is_deferred = True
             return
-
-        # Escalated voting is also deferred.
-        self._is_deferred = True
 
         # If we already have a voter upon escalation, start the countdown.
         # Otherwise the first voter will start the countdown.
@@ -228,16 +221,21 @@ class ApprovalElection:
 
             # Coerce the policy vote and record it for resolution.
             decision, denied_reason = _coerce_to_approval_decision(result)
-            await self.policy_vote(i, decision, denied_reason)
+            await self.policy_vote(i, decision, denied_reason, resolve=False)
         
-        decision, reason = _resolve_decision(self._policy_decisions)
-        return decision
+        return await self._resolve_from_policies()
 
-    async def policy_vote(self, policy_index: int, decision: ApprovalDecision, reason: str | None = None) -> ApprovalDecision:
+    async def policy_vote(
+        self,
+        policy_index: int,
+        decision: ApprovalDecision,
+        reason: str | None = None,
+        resolve: bool = True,
+    ) -> ApprovalDecision:
         # Ignore this vote if it is (still) deferred.
         decided = decision is not ApprovalDecision.PENDING
         if not decided:
-            return
+            return ApprovalDecision.PENDING
 
         # Ensure that each policy has only one vote.
         d, _, responded = self._policy_decisions[policy_index]
@@ -250,7 +248,9 @@ class ApprovalElection:
         self._policy_decisions[policy_index] = (decision, reason, True)
         self._policy_responses += 1
 
-        # Try to resolve the decision.
+        # Try to resolve the decision only when explicitly requested.
+        if not resolve:
+            return ApprovalDecision.PENDING
         return await self._resolve_from_policies()
 
     async def _resolve_from_policies(self) -> ApprovalDecision:
@@ -261,6 +261,10 @@ class ApprovalElection:
         # Otherwise, resolve the decision.
         decision, merged_reason = _resolve_decision(self._policy_decisions)
         
+        # If we got here, there must be no pending policies left
+        if decision is ApprovalDecision.PENDING:
+            raise RuntimeError("Cannot publish a PENDING decision")
+
         # Publish the decision, if at least one policy did not ignore it.
         if decision is not ApprovalDecision.IGNORED:
             self._decision = decision
@@ -334,9 +338,8 @@ class ApprovalElection:
             raise RuntimeError("Decision already published")
         self._published = True
 
-        # Push the approval event into the runner's queue if the decision was deferred.
-        if self._is_deferred:
-            self._runner.push_event(approval)
+        # Push the approval event into the runner's queue
+        self._runner.push_event(approval)
         
         # Notify all channels about the approval event.
         await self._runner._notify_channels(approval)

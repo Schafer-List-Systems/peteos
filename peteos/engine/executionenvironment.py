@@ -14,6 +14,7 @@ from peteos.utils import json
 from peteos.utils.serialization import serialize
 
 from peteos.conversation.message import ContentPart, Message, ToolApprovalStatus, ToolExecutionStatus
+from peteos.engine.approval_voting import ApprovalElection
 from peteos.engine.events import ApprovalEvent
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import ToolManager
@@ -410,6 +411,7 @@ class ExecutionEnvironment:
         self.tool_failure_policy = tool_failure_policy
         self._groups: dict[str, ToolCallGroup] = {}  # group_id -> ToolCallGroup
         self._foreground_group: ToolCallGroup | None = None
+        self._elections: dict[str, ApprovalElection] = {}  # call_id -> election
 
     # ------------------------------------------------------------------ #
     # Foreground group management
@@ -454,6 +456,9 @@ class ExecutionEnvironment:
         # Create the record and its result placeholder via the group.
         record = self._foreground_group.add_tool_call(tool_call)
 
+        # Prepended policy layer: existence check runs before user hooks so
+        # a missing tool is denied immediately. The auto_approve policy forces
+        # an immediate APPROVED decision when the tool name is in the list.
         def _existence_check(ctx):
             if not self._tool_manager or not self._tool_manager.get_tool(tool_call.name):
                 return f"Tool '{tool_call.name}' is not available for this agent"
@@ -464,36 +469,32 @@ class ExecutionEnvironment:
                 return True
             return None
 
-        # Gather all hooks: existence check and auto_approve prepended, then user hooks.
+        # Wrap each user hook to provide the full ctx signature the hook expects.
+        # The election passes ctx with content + respond; this wrapper adds the
+        # remaining fields and forwards to the actual hook.
+        def _user_hook_wrapper(hook):
+            def wrapped(ctx):
+                return hook({
+                    "role": runner.role.name,
+                    "session": runner._session,
+                    "tool_name": tool_call.name,
+                    "arguments": json.loads(tool_call.arguments) if tool_call.arguments else {},
+                    "approval_status": None,
+                    "denied_reason": None,
+                    "respond": ctx["respond"],
+                })
+            return wrapped
+
+        # Register policies with the election: existence check, auto_approve, then user hooks.
+        election = ApprovalElection(_content_part=tool_call)
         user_hooks = list(runner.session.invocation_hooks.get("on_tool_call", []))
-        hooks = [_existence_check, _auto_approve] + user_hooks
+        election.register_policies([_existence_check, _auto_approve] + [_user_hook_wrapper(h) for h in user_hooks])
 
-        # Size the decisions array to the hook count; call hooks synchronously.
-        record.decisions = [
-            (ToolApprovalStatus.PENDING, None, False)
-            for _ in hooks
-        ]
-        await _call_on_tool_call_hooks(hooks, record, runner, runner.role.name)
+        # Run the policy layer. If all policies IGNORE, the election defers to
+        # channel voting and this tool call waits in the queue. Otherwise the
+        # election resolves synchronously and publishes an ApprovalEvent.
+        await election.start(runner)
 
-        # All hooks responded — merge decisions and finalize the record.
-        if record.responded_count == len(record.decisions):
-            final_status, final_reason = _merge_all_decisions(record.decisions)
-
-            # Commit the final approval status to the tool call.
-            record.tool_call.set_approval_status(final_status)
-
-            # For approved: advance result to WAITING_FOR_EXECUTION.
-            if final_status == ToolApprovalStatus.APPROVED:
-                record.tool_result.set_execution_status(ToolExecutionStatus.WAITING_FOR_EXECUTION)
-
-            # For denied with a reason: embed the reason in the result placeholder.
-            if final_status == ToolApprovalStatus.DENIED and final_reason:
-                record.tool_result.set_tool_result_content(f"[DENIED] {final_reason}")
-
-            record.queued = False
-            return record
-
-        # Deferred path: at least one hook will respond asynchronously later.
         record.queued = True
         return record
 
