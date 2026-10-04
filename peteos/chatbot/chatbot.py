@@ -37,7 +37,8 @@ class ChatBot(ABC):
         self,
         context: Context,
         generation_config: Optional[Dict[str, Any]] = None,
-        streaming: bool | None = None
+        streaming: bool | None = None,
+        hooks: Optional[dict[str, list[Callable]]] = None,
     ) -> ChatBotResponse:
         """
         Send a context to the LLM and receive a response.
@@ -48,6 +49,9 @@ class ChatBot(ABC):
                 max_tokens, tool_choice, etc.) passed to the LLM provider.
             streaming: If None, uses the instance default.
                        If True/False, overrides the instance default.
+            hooks: Optional dict of hook name -> list of callables.
+                Passed to the HTTP client for error interception.
+                "on_http_error" hooks receive error context and may raise.
 
         Returns:
             A ChatBotResponse that can be iterated to receive the response.
@@ -107,7 +111,7 @@ class ChatBot(ABC):
         in the compiled bytecode and are visible through ``executor.__code__.co_consts``.
         An agent with access to the returned callable can extract these secrets
         via introspection. This approach protects against closure-based leaks
-        (e.g., ``__closure__[0].__cell_contents``) but is NOT a secure mechanism
+        (e.g., ``__closure__[0].__cell_contents__``) but is NOT a secure mechanism
         for storing secrets. If sandboxed code may access the executor, use an
         intermediary proxy vault that holds real API keys — the executor should
         only contain unprivileged proxy credentials (e.g. ``http://localhost``
@@ -120,17 +124,17 @@ class ChatBot(ABC):
             endpoint: The API endpoint URL (hardcoded into compiled source).
 
         Returns:
-            An async callable ``(body, caller_headers) -> response``.
+            An async callable ``(body, caller_headers, hooks=None) -> response``.
         """
         headers_json = json.dumps(secure_headers)
 
         _code = f"""
-async def executor(body, caller_headers):
+async def executor(body, caller_headers, hooks=None):
     if id(http_client) != {id(http_client)}:
         raise ValueError("HTTP client was replaced at runtime")
     safe = dict(caller_headers or {{}})
     safe.update({headers_json})
-    return await http_client.post({endpoint!r}, body, headers=safe)
+    return await http_client.post({endpoint!r}, body, headers=safe, hooks=hooks)
 """
         _globals: Dict[str, Any] = {"http_client": http_client}
         exec(_code, _globals)
@@ -151,8 +155,8 @@ async def executor(body, caller_headers):
         in the compiled bytecode and are visible through ``executor.__code__.co_consts``.
         An agent with access to the returned callable can extract these secrets
         via introspection. This approach protects against closure-based leaks
-        but is NOT a secure mechanism for storing secrets. If sandboxed code may
-        access the executor, use an intermediary proxy vault holding real API keys.
+        but is NOT a secure mechanism for storing secrets. If sandboxed code
+        may access the executor, use an intermediary proxy vault holding real API keys.
 
         Args:
             http_client: The HTTP client instance to use.
@@ -161,18 +165,18 @@ async def executor(body, caller_headers):
             endpoint: The API endpoint URL (hardcoded into compiled source).
 
         Returns:
-            An async callable ``(body, caller_headers) ->
+            An async callable ``(body, caller_headers, hooks=None) ->
             AsyncGenerator[str, None]``.
         """
         headers_json = json.dumps(secure_headers)
 
         _code = f"""
-async def executor(body, caller_headers):
+async def executor(body, caller_headers, hooks=None):
     if id(http_client) != {id(http_client)}:
         raise ValueError("HTTP client was replaced at runtime")
     safe = dict(caller_headers or {{}})
     safe.update({headers_json})
-    async for line in http_client.stream_post({endpoint!r}, body, headers=safe):
+    async for line in http_client.stream_post({endpoint!r}, body, headers=safe, hooks=hooks):
         yield line
 """
         _globals: Dict[str, Any] = {"http_client": http_client}

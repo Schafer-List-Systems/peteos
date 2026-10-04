@@ -1,6 +1,6 @@
 """Simple mock chatbot for unit testing."""
 
-from typing import AsyncGenerator, Dict, Any, List
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from .backendprovider import BackendProvider
 from .chatbot import ChatBot
@@ -68,6 +68,7 @@ class SimpleMockChatBot(ChatBot):
         _context: object,
         _generation_config: Dict[str, Any] | None = None,
         _streaming: bool | None = None,
+        _hooks: Optional[dict[str, list[Callable]]] = None,
     ) -> ChatBotResponse:
         if self._responses:
             return SimpleMockChatBotResponse(self._responses.pop(0))

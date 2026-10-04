@@ -2,7 +2,7 @@
 
 import asyncio
 import httpx
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Callable, Optional
 
 from peteos.utils import get_logger
 
@@ -33,7 +33,14 @@ class HTTPClient:
     def _max_retries(self) -> int:
         return len(self._retry_delays)
 
-    async def _ensure_response(self, client: httpx.AsyncClient, method: str, url: str, json_body: Optional[dict] = None) -> httpx.Response:
+    async def _ensure_response(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        url: str,
+        json_body: Optional[dict] = None,
+        hooks: Optional[dict[str, list[Callable]]] = None,
+    ) -> httpx.Response:
         """Make an HTTP request with retry for network errors and HTTP error status codes.
 
         Retries on:
@@ -41,12 +48,17 @@ class HTTPClient:
         - HTTP error status codes (3xx, 4xx, 5xx)
 
         GeneratorExit is always propagated without retry.
+        on_http_error hooks are called on each HTTP error; if a hook raises,
+        the exception propagates and the retry loop is broken.
 
         Args:
             client: The httpx.AsyncClient to use.
             method: HTTP method ("GET" or "POST").
             url: Target URL.
             json_body: Optional JSON body for POST requests.
+            hooks: Optional dict of hook name -> list of callables.
+                "on_http_error" hooks receive {"url", "status_code", "body", "error_text"}
+                and may raise to abort the retry loop.
 
         Returns:
             The httpx.Response object (2xx status).
@@ -55,13 +67,22 @@ class HTTPClient:
             GeneratorExit: Always re-raised without retry.
             RuntimeError: On HTTP error after all retries exhausted.
             Exception: On network error after all retries exhausted.
+            Exception: Re-raised if an on_http_error hook raises.
         """
         for attempt in range(self._max_retries + 1):
             try:
                 response = await client.get(url) if method == "GET" else await client.post(url, json=json_body)
                 if response.status_code >= 300:
                     error_text = response.content.decode(errors='replace')
+                    error_context = {
+                        "url": url,
+                        "status_code": response.status_code,
+                        "body": json_body,
+                        "error_text": error_text,
+                    }
                     _logger.error("HTTP %d from %s (attempt %d/%d): %s", response.status_code, url, attempt + 1, self._max_retries + 1, error_text)
+                    for hook in (hooks or {}).get("on_http_error", []):
+                        hook(error_context)
                     raise RuntimeError(
                         f"HTTP {response.status_code} from {url}: {error_text}"
                     )
@@ -82,28 +103,33 @@ class HTTPClient:
         url: str,
         body: dict,
         headers: Optional[dict] = None,
+        hooks: Optional[dict[str, list[Callable]]] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Send a POST request and stream SSE events.
 
         The initial connection and HTTP error responses are retried.
         Once streaming begins, mid-stream failures are not retried.
+        on_http_error hooks fire on each HTTP-level error and may raise to abort retry.
 
         Args:
             url: Endpoint URL.
             body: Request body.
             headers: Optional HTTP headers to include.
+            hooks: Optional hook dict passed to _ensure_response.
+                See _ensure_response for hook semantics.
 
         Yields:
             Raw SSE lines as strings.
 
         Raises:
             RuntimeError: If the response status code is not 2xx after all retries.
+            Exception: Re-raised if an on_http_error hook raises.
         """
         client = httpx.AsyncClient(timeout=self._timeout, headers=headers or {})
         try:
             async with client:
-                response = await self._ensure_response(client, "POST", url, body)
+                response = await self._ensure_response(client, "POST", url, body, hooks=hooks)
 
                 try:
                     async for line in response.aiter_lines():
@@ -114,25 +140,39 @@ class HTTPClient:
         finally:
             await client.aclose()
 
-    async def get(self, url: str, headers: Optional[dict] = None) -> dict:
+    async def get(
+        self,
+        url: str,
+        headers: Optional[dict] = None,
+        hooks: Optional[dict[str, list[Callable]]] = None,
+    ) -> dict:
         """
         Send a GET request and return the parsed JSON response.
 
         Args:
-            url: Endpoint URL.
+            url: Target URL.
             headers: Optional HTTP headers to include.
+            hooks: Optional hook dict passed to _ensure_response.
+                See _ensure_response for hook semantics.
 
         Returns:
             Parsed JSON response.
 
         Raises:
             RuntimeError: If the response status code is not 2xx after all retries.
+            Exception: Re-raised if an on_http_error hook raises.
         """
         async with httpx.AsyncClient(timeout=self._timeout, headers=headers or {}) as client:
-            response = await self._ensure_response(client, "GET", url)
+            response = await self._ensure_response(client, "GET", url, hooks=hooks)
             return response.json()
 
-    async def post(self, url: str, body: dict, headers: Optional[dict] = None) -> dict:
+    async def post(
+        self,
+        url: str,
+        body: dict,
+        headers: Optional[dict] = None,
+        hooks: Optional[dict[str, list[Callable]]] = None,
+    ) -> dict:
         """
         Send a POST request and return the parsed JSON response.
 
@@ -140,13 +180,16 @@ class HTTPClient:
             url: Endpoint URL.
             body: Request body.
             headers: Optional HTTP headers to include.
+            hooks: Optional hook dict passed to _ensure_response.
+                See _ensure_response for hook semantics.
 
         Returns:
             Parsed JSON response.
 
         Raises:
             RuntimeError: If the response status code is not 2xx after all retries.
+            Exception: Re-raised if an on_http_error hook raises.
         """
         async with httpx.AsyncClient(timeout=self._timeout, headers=headers or {}) as client:
-            response = await self._ensure_response(client, "POST", url, body)
+            response = await self._ensure_response(client, "POST", url, body, hooks=hooks)
             return response.json()

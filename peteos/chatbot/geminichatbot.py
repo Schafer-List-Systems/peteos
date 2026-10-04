@@ -1,7 +1,7 @@
 """Google Gemini ChatBot implementation."""
 
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional, AsyncGenerator, AsyncIterator
+from typing import Any, Callable, Dict, List, Optional, AsyncGenerator, AsyncIterator
 
 from peteos.utils import get_logger
 from peteos.utils import json
@@ -60,6 +60,7 @@ class GeminiChatBot(ChatBot):
         context: Context,
         generation_config: Optional[Dict[str, Any]] = None,
         streaming: bool | None = None,
+        hooks: Optional[dict[str, list[Callable]]] = None,
     ) -> ChatBotResponse:
         """Send a context to the Gemini API and receive a response."""
         streaming_mode = self._config.streaming if streaming is None else streaming
@@ -76,10 +77,10 @@ class GeminiChatBot(ChatBot):
                 _logger.debug("Gemini request contents[%d] parts[%d] role=%s key=%s has_thought_signature=%s", ci, pi, c.get("role"), key[:120], has_ts)
 
         if streaming_mode:
-            stream = self._stream_executor(body, self.get_headers())
+            stream = self._stream_executor(body, self.get_headers(), hooks=hooks)
             return GeminiChatBotResponse(stream, {})
         else:
-            response_data = await self._post_executor(body, self.get_headers())
+            response_data = await self._post_executor(body, self.get_headers(), hooks=hooks)
             return GeminiChatBotResponse.from_json(response_data)
 
     @staticmethod

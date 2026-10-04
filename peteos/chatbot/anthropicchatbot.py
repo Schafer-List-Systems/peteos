@@ -1,7 +1,7 @@
 """Anthropic-compatible ChatBot implementation."""
 
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from peteos.utils import get_logger
 from peteos.utils import json
@@ -185,6 +185,7 @@ class AnthropicChatBot(ChatBot):
         context: Context,
         generation_config: Optional[Dict[str, Any]] = None,
         streaming: bool | None = None,
+        hooks: Optional[dict[str, list[Callable]]] = None,
         **kwargs
     ) -> ChatBotResponse:
         """Send a context to the LLM and receive a response."""
@@ -195,10 +196,10 @@ class AnthropicChatBot(ChatBot):
         _logger.debug("Anthropic request: model=%s, messages=%d, tools=%d", self._config.model, len(body.get("messages", [])), len(body.get("tools", [])))
 
         if streaming_mode:
-            stream = self._stream_executor(body, self.get_headers())
+            stream = self._stream_executor(body, self.get_headers(), hooks=hooks)
             return AnthropicChatBotResponse(stream, self._config.response_translations or {})
         else:
-            response_data = await self._post_executor(body, self.get_headers())
+            response_data = await self._post_executor(body, self.get_headers(), hooks=hooks)
             return AnthropicChatBotResponse.from_json(response_data, self._config.response_translations or {})
 
     def _build_body(
