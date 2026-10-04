@@ -67,11 +67,16 @@ class HTTPClient:
             GeneratorExit: Always re-raised without retry.
             RuntimeError: On HTTP error after all retries exhausted.
             Exception: On network error after all retries exhausted.
-            Exception: Re-raised if an on_http_error hook raises.
+             Exception: Re-raised if an on_http_error hook raises.
         """
+        # Prepare the error context once; re-used across retries with attempt metadata attached on each failure.
+        error_context: dict | None = None
         for attempt in range(self._max_retries + 1):
             try:
+                # Attempt one HTTP request against the target.
                 response = await client.get(url) if method == "GET" else await client.post(url, json=json_body)
+
+                # Surface non-success status codes as errors that will be caught below.
                 if response.status_code >= 300:
                     error_text = response.content.decode(errors='replace')
                     error_context = {
@@ -81,21 +86,38 @@ class HTTPClient:
                         "error_text": error_text,
                     }
                     _logger.error("HTTP %d from %s (attempt %d/%d): %s", response.status_code, url, attempt + 1, self._max_retries + 1, error_text)
-                    for hook in (hooks or {}).get("on_http_error", []):
-                        hook(error_context)
                     raise RuntimeError(
                         f"HTTP {response.status_code} from {url}: {error_text}"
                     )
+
+                # 2xx — return the successful response.
                 return response
+
+            # GeneratorExit — raised by the caller cancelling the async generator
+            # (e.g. the session was interrupted). Always propagate without retry.
             except GeneratorExit:
                 raise
+
+            # Any other exception — attach retry metadata, fire hooks, then decide whether to retry.
             except Exception as e:
+                if error_context is not None:
+                    error_context["attempt"] = attempt + 1
+                    error_context["max_retries"] = self._max_retries
+                    error_context["exception"] = e
+
+                # Notify listeners of the error; a listener may raise to abort retries.
+                for hook in (hooks or {}).get("on_http_error", []):
+                    hook(error_context)
+
+                # Check whether any retries remain for this attempt loop.
                 if attempt < self._max_retries:
                     delay = self._retry_delays[attempt]
                     if delay > 0:
                         _logger.warning("HTTP %s to %s failed (attempt %d/%d), retrying in %ss", method, url, attempt + 1, self._max_retries, delay)
                     await asyncio.sleep(delay)
                     continue
+
+                # No retries remain — surface the original error.
                 raise
 
     async def stream_post(

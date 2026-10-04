@@ -8,12 +8,21 @@ from peteos.utils import json
 from .httpclient import HTTPClient
 from .chatbotconfig import ChatBotConfig
 from .chatbotresponse import ChatBotResponse
-from peteos.conversation.context import Context
+from peteos.conversation import ContentPart, Message, Context
 
 _logger = get_logger(__name__)
 
 # Executor type: async func(url, body, caller_headers) -> response
 PostExecutor = Callable[..., Any]
+
+
+class ContextOverflowError(Exception):
+    """Raised when an HTTP error is confirmed as likely caused by context size exceeding the model's limit.
+
+    Fired after a probe (minimal context) succeeds but the original context fails,
+    giving high confidence the error is a context overflow, not a transient network
+    or auth issue.
+    """
 
 
 class ChatBot(ABC):
@@ -33,7 +42,7 @@ class ChatBot(ABC):
         self._config = config
 
     @abstractmethod
-    async def send_context(
+    async def _send_context(
         self,
         context: Context,
         generation_config: Optional[Dict[str, Any]] = None,
@@ -41,7 +50,11 @@ class ChatBot(ABC):
         hooks: Optional[dict[str, list[Callable]]] = None,
     ) -> ChatBotResponse:
         """
-        Send a context to the LLM and receive a response.
+        Provider-internal send — override to implement actual LLM calls.
+
+        Called by the public send_context() wrapper in this base class,
+        which manages learned context limit bounds on success and overflow.
+        Subclasses should not need to manage bounds themselves.
 
         Args:
             context: The Context to send to the LLM.
@@ -57,6 +70,105 @@ class ChatBot(ABC):
             A ChatBotResponse that can be iterated to receive the response.
         """
         pass
+
+    async def send_context(
+        self,
+        context: Context,
+        generation_config: Optional[Dict[str, Any]] = None,
+        streaming: bool | None = None,
+    ) -> ChatBotResponse:
+        """Send a context to the LLM, learning bounds on success and overflow.
+
+        On a successful response, tightens the learned lower bound to
+        max(known_floor, context_token_count). On a confirmed context
+        overflow (ContextOverflowError from the probe strategy), tightens
+        the learned upper bound to the failed size. Calls the provider's
+        _send_context for the actual LLM interaction.
+
+        Args:
+            context: The Context to send to the LLM.
+            generation_config: Optional generation parameters.
+            streaming: If None, uses the instance default.
+
+        Returns:
+            A ChatBotResponse from the provider.
+        """
+        # Probe hook: on HTTP error, send a minimal context to check backend
+        # reachability. Retries at most once. On clear non-context errors (network
+        # failures), returns immediately without probing.
+        _probe_attempt = 0
+        async def _on_http_error(err_ctx: dict) -> None:
+            nonlocal _probe_attempt
+            exc = err_ctx.get("exception")
+            status_code = err_ctx["status_code"]
+            attempt = err_ctx.get("attempt", 1)
+
+            # Let the HTTP-Client handle non-context errors
+            if isinstance(exc, (ConnectionError, OSError, TimeoutError)):
+                return
+
+            # On the second call, the first probe already succeeded but the
+            # retry still failed — treat this as a confirmed context overflow.
+            if _probe_attempt >= 1:
+                failed_size = context.total_token_count() + self._config.max_tokens
+                if failed_size < self._config.context_limit_ceil:
+                    self._config.context_limit_ceil = failed_size
+                raise ContextOverflowError(
+                    f"HTTP {status_code} after probe on retry #2 — context overflow",
+                )
+
+            # Attempt 1: send a minimal probe to check backend reachability.
+            _probe_attempt += 1
+            _logger.debug(
+                "[runner] _send_to_chatbot: HTTP %d — probing reachability (attempt %d)",
+                status_code,
+                _probe_attempt,
+            )
+
+            # Build a minimal probe context inheriting the parent's tool definitions.
+            probe_ctx = Context.create(parent_context=context)
+            probe_msg = Message.create(
+                role="user",
+                content_parts=[ContentPart.create_text("hello")],
+            )
+            probe_ctx.append(probe_msg, anchor_point="messages")
+
+            # Send the probe with a tight output limit.
+            try:
+                probe_response = await self._send_context(
+                    probe_ctx,
+                    generation_config={"max_tokens": 10},
+                )
+                async for _ in probe_response:
+                    pass
+            except Exception as probe_err:
+                _logger.debug(
+                    "[runner] _send_to_chatbot: Probe failed — backend unreachable: %s",
+                    str(probe_err)[:80],
+                )
+                raise err_ctx["exception"]
+
+            # Probe succeeded — the backend is reachable. Let the HTTP client
+            # retry the original. If that also fails, this hook fires again and
+            # the second call will raise ContextOverflowError.
+            _logger.debug(
+                "[runner] _send_to_chatbot: Probe succeeded — allowing HTTP retry",
+            )
+
+        response = await self._send_context(
+            context,
+            generation_config,
+            streaming,
+            hooks={"on_http_error": [_on_http_error]}
+        )
+
+        # Confirm the context is handleable — update the learned lower bound.
+        context_size = context.total_token_count()
+        new_floor = context_size + self._config.max_tokens
+        if new_floor > self._config.context_limit_floor:
+            self._config.context_limit_floor = new_floor
+
+        return response
 
     @abstractmethod
     def list_available_models(self) -> List[str]:

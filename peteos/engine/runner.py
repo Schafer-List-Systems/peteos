@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from peteos.conversation.session import SessionState
 from peteos.sandbox import Sandbox, SandboxBuilder
-from peteos.chatbot import ChatBot, ChatBotResponse, ChatBotManager, Message, ContentPart
+from peteos.chatbot import ChatBot, ChatBotResponse, ChatBotManager, Message, ContentPart, ContextOverflowError
 
 from peteos.utils.activeclass import ActiveClass
 from peteos.engine.exec_status import ExecStatus, _merge_exec_status
@@ -288,40 +288,6 @@ class Runner(ActiveClass):
     # step() — the core reasoning iteration
     # ------------------------------------------------------------------ #
 
-    async def _send_to_chatbot(self) -> Any:
-        """Materialize context, send to the LLM, and drain the response stream.
-
-        Handles materialization, before_send_to_chatbot, the actual send,
-        stream draining, and after_receive_from_chatbot. The caller receives
-        the ChatBotResponse for downstream processing only.
-
-        Returns:
-            The ChatBotResponse from the chatbot.
-        """
-        # Materialize the session context so the chatbot receives a complete view.
-        self._session.materialize()
-        ctx = self._session.active_context
-        tdm = ctx.tool_definitions_message
-        tool_count = len(tdm.content) if tdm and tdm.content else 0
-        _logger.debug(
-            "[runner] _send_to_chatbot(): Materialized context, "
-            "tool_definitions_message has %d tools",
-            tool_count,
-        )
-
-        # Notify listeners the context is about to be sent.
-        await self.call_hooks("before_send_to_chatbot", self, ctx)
-
-        # Send to the LLM and drain the full response stream before returning.
-        response = await self._chatbot.send_context(ctx)
-        async for _ in response:
-            pass
-
-        # Confirm receipt so listeners can process the response.
-        await self.call_hooks("after_receive_from_chatbot", response.message)
-
-        return response
-
     async def step(self) -> tuple[ExecStatus, Message | None]:
         """Execute one reasoning iteration: chatbot -> create tool group.
 
@@ -364,8 +330,8 @@ class Runner(ActiveClass):
             _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
             return (ExecStatus.CRITICAL, None)
 
-        # --- Phase 2.5: Handle max_tokens truncation ---
-        truncation_result = await self._handle_truncation(response)
+        # --- Phase 2.5: Handle max_tokens truncation (answer too long) ---
+        truncation_result = await self._handle_response_truncation(response)
         if truncation_result is not None:
             return truncation_result
 
@@ -410,7 +376,61 @@ class Runner(ActiveClass):
         _logger.debug("[runner] step(): Had final answer.")
         return (ExecStatus.FINISHED, response_msg)
 
-    async def _handle_truncation(
+    async def _send_to_chatbot(self) -> Any:
+        """Materialize context, send to the LLM, and drain the response stream.
+
+        Handles materialization, before_send_to_chatbot, the actual send,
+        stream draining, and after_receive_from_chatbot. The caller receives
+        the ChatBotResponse for downstream processing only.
+
+        Returns:
+            The ChatBotResponse from the chatbot.
+        """
+        # Materialize the session context so the chatbot receives a complete view.
+        self._session.materialize()
+        ctx = self._session.active_context
+        tdm = ctx.tool_definitions_message
+        tool_count = len(tdm.content) if tdm and tdm.content else 0
+        _logger.debug(
+            "[runner] _send_to_chatbot(): Materialized context, "
+            "tool_definitions_message has %d tools",
+            tool_count,
+        )
+
+        # Send the context to the LLM and drain the response. On a confirmed
+        # context overflow, reduce the context and retry once without hooks.
+        try:
+            # Notify listeners the context is about to be sent.
+            await self.call_hooks("before_send_to_chatbot", self, ctx)
+
+            response = await self._chatbot.send_context(ctx)
+            async for _ in response:
+                pass
+        except ContextOverflowError:
+            # A confirmed context overflow — the context exhaustion handler runs to reduce
+            # the context before retrying so the next attempt has a better chance.
+            _logger.debug(
+                "[runner] _send_to_chatbot: ContextOverflowError — invoking truncation handler",
+            )
+            if not await self._handle_context_exhaustion():
+                raise
+
+            # Truncation handler reduced the context. Retry with the updated
+            # active_context and no hooks — the overflow is already confirmed.
+            _logger.debug(
+                "[runner] _send_to_chatbot: Retrying with reduced context (no hooks)",
+            )
+            await self.call_hooks("before_send_to_chatbot", self, self._session.active_context)
+            response = await self._chatbot.send_context(self._session.active_context)
+            async for _ in response:
+                pass
+
+        # Confirm receipt so listeners can process the response.
+        await self.call_hooks("after_receive_from_chatbot", response.message)
+
+        return response
+
+    async def _handle_response_truncation(
         self, response: ChatBotResponse
     ) -> tuple[ExecStatus, Message] | None:
         """Handle a response that was truncated by max_tokens.
@@ -439,7 +459,7 @@ class Runner(ActiveClass):
         if estimated_max_context < prev:
             self._chatbot._config.max_context_limit = estimated_max_context
             _logger.debug(
-                "[runner] _handle_truncation: max_context_limit %d -> %d (tightened from truncation)",
+                "[runner] _handle_response_truncation: max_context_limit %d -> %d (tightened from truncation)",
                 prev,
                 estimated_max_context,
             )
@@ -500,6 +520,56 @@ class Runner(ActiveClass):
             )
 
         return (ExecStatus.CONTINUE, truncated_msg)
+
+    async def _handle_context_exhaustion(self) -> bool:
+        """Handle a confirmed context overflow from the LLM backend.
+
+        Tightens the learned upper bound to the context size that just failed,
+        then reduces the active_context to fit below the learned lower bound.
+        If reduction is possible, the caller retries the send. If not, returns
+        False so the original error surfaces.
+
+        Returns:
+            True if context was reduced and retry is recommended.
+            False if reduction is not possible (cannot shrink enough or no
+            learned bounds available yet).
+        """
+        # Tighten the learned upper bound to the size that just failed.
+        cfg = self._chatbot._config
+        failed_size = self._session.active_context.total_token_count() + cfg.max_tokens
+        if failed_size < cfg.context_limit_ceil:
+            cfg.context_limit_ceil = failed_size
+            _logger.debug(
+                "[runner] _handle_context_exhaustion: Tightened ceil -> %d",
+                failed_size,
+            )
+
+        # Strip thinking blocks — they are compressible without losing content.
+        reduced = self._session.active_context.strip_thinking()
+        reduced_size = reduced.total_token_count()
+        _logger.debug(
+            "[runner] _handle_context_exhaustion: After strip_thinking: %d tokens (budget=%d)",
+            reduced_size,
+            cfg.context_limit_floor,
+        )
+
+        # If still over budget, apply the rolling token window to finish reduction.
+        if reduced_size > cfg.context_limit_floor:
+            reduced = reduced.rolling_token_window(cfg.context_limit_floor)
+            reduced_size = reduced.total_token_count()
+            _logger.debug(
+                "[runner] _handle_context_exhaustion: After rolling_window: %d tokens",
+                reduced_size,
+            )
+
+        # Update the active context with the reduced version.
+        self._session.set_active_context(reduced)
+        _logger.debug(
+            "[runner] _handle_context_exhaustion: Reduced context to %d tokens (budget=%d)",
+            reduced_size,
+            cfg.context_limit_floor,
+        )
+        return True
 
     # ------------------------------------------------------------------ #
     # Tool group processing — called from run loop

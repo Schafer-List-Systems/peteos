@@ -63,12 +63,12 @@ class SimpleMockChatBot(ChatBot):
         super().__init__(ChatBotConfig(name="simple-mock", url="http://localhost", model="simple-mock"))
         self._responses = list(responses)
 
-    async def send_context(
+    async def _send_context(
         self,
         _context: object,
         _generation_config: Dict[str, Any] | None = None,
         _streaming: bool | None = None,
-        _hooks: Optional[dict[str, list[Callable]]] = None,
+        hooks: Optional[dict[str, list[Callable]]] = None,
     ) -> ChatBotResponse:
         if self._responses:
             return SimpleMockChatBotResponse(self._responses.pop(0))

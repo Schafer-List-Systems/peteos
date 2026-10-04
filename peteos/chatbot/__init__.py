@@ -1,5 +1,5 @@
 from peteos.chatbot.manager import ChatBotManager, BackendInfo
-from peteos.chatbot.chatbot import ChatBot
+from peteos.chatbot.chatbot import ChatBot, ContextOverflowError
 from peteos.chatbot.openaichatbot import OpenAIChatBot, OpenAIChatBotResponse
 from peteos.chatbot.anthropicchatbot import AnthropicChatBot, AnthropicChatBotResponse
 from peteos.chatbot.geminichatbot import GeminiChatBot, GeminiChatBotResponse
@@ -17,4 +17,5 @@ __all__ = [
     "ChatBotResponse", "GenericChatBotResponse", "AnthropicChatBotResponse", "GeminiChatBotResponse",
     "StopReason", "normalize_stop_reason",
     "ContentPart", "Message", "MessageRegistry", "SystemPromptMessage", "ToolDefinitionsMessage", "HTTPClient",
+    "ContextOverflowError",
 ]

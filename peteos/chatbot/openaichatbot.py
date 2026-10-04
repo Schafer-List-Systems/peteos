@@ -178,14 +178,28 @@ class OpenAIChatBot(ChatBot):
             return self._models
         return [self._config.model]
 
-    async def send_context(
+    async def _send_context(
         self,
         context: Context,
         generation_config: Optional[Dict[str, Any]] = None,
         streaming: bool | None = None,
         hooks: Optional[dict[str, list[Callable]]] = None,
     ) -> ChatBotResponse:
-        """Send a context to the LLM and receive a response."""
+        """Send a context to the LLM and receive a response.
+
+        Args:
+            context: The Context to send to the LLM.
+            generation_config: Optional generation parameters (temperature,
+                max_tokens, tool_choice, etc.) passed to the LLM provider.
+            streaming: If None, uses the instance default.
+                       If True/False, overrides the instance default.
+            hooks: Optional dict of hook name -> list of callables.
+                Passed to the HTTP client for error interception.
+                "on_http_error" hooks receive error context and may raise.
+
+        Returns:
+            A ChatBotResponse that can be iterated to receive the response.
+        """
         streaming_mode = self._config.streaming if streaming is None else streaming
         body = self._build_body(context, generation_config, streaming)
 
