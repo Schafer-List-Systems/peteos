@@ -325,6 +325,15 @@ class ApprovalElection:
         await self.publish_decision()
 
     async def publish_decision(self) -> None:
+        # Guard against double-publish — raises if this election was already published.
+        if self._published:
+            raise RuntimeError("Decision already published")
+        self._published = True
+
+        # Remove this election from the execution environment so it cannot accept
+        # further votes.
+        self._runner._execution_environment._elections.pop(self._content_part.call_id, None)
+
         # Construct the approval event.
         approval = ApprovalEvent(
             tool_call_id=self._content_part.call_id,
@@ -333,13 +342,8 @@ class ApprovalElection:
             denied_reason=self._reason
         )
 
-        # Guard against double-publish — raises if this election was already published.
-        if self._published:
-            raise RuntimeError("Decision already published")
-        self._published = True
-
-        # Push the approval event into the runner's queue
+        # Push the approval event into the runner's queue.
         self._runner.push_event(approval)
-        
+
         # Notify all channels about the approval event.
         await self._runner._notify_channels(approval)

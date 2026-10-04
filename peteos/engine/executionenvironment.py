@@ -490,6 +490,9 @@ class ExecutionEnvironment:
         user_hooks = list(runner.session.invocation_hooks.get("on_tool_call", []))
         election.register_policies([_existence_check, _auto_approve] + [_user_hook_wrapper(h) for h in user_hooks])
 
+        # Register the election so channels can look it up by call_id for voting.
+        self._elections[tool_call.call_id] = election
+
         # Run the policy layer. If all policies IGNORE, the election defers to
         # channel voting and this tool call waits in the queue. Otherwise the
         # election resolves synchronously and publishes an ApprovalEvent.
