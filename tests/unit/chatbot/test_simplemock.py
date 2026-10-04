@@ -10,6 +10,7 @@ from peteos.chatbot import (
 )
 from peteos.conversation.message import Message
 from peteos.conversation import ContentPart
+from peteos.conversation.context import Context
 
 
 def _make_message(role: str, parts: list[ContentPart]) -> Message:
@@ -85,10 +86,10 @@ class TestSimpleMockChatBot:
 
         bot = SimpleMockChatBot([msg_a, msg_b])
 
-        resp1 = await bot.send_context(None)
+        resp1 = await bot.send_context(Context.create())
         assert resp1.message.content[0].text == "First"
 
-        resp2 = await bot.send_context(None)
+        resp2 = await bot.send_context(Context.create())
         assert resp2.message.content[0].text == "Second"
 
     @pytest.mark.asyncio
@@ -97,7 +98,7 @@ class TestSimpleMockChatBot:
         bot = SimpleMockChatBot([])
 
         with pytest.raises(RuntimeError, match="HTTP 503"):
-            await bot.send_context(None)
+            await bot.send_context(Context.create())
 
     @pytest.mark.asyncio
     async def test_pops_messages_from_list(self):
@@ -105,12 +106,12 @@ class TestSimpleMockChatBot:
         bot = SimpleMockChatBot([_make_message("assistant", [ContentPart.create_text("X")])])
 
         # First call succeeds
-        resp1 = await bot.send_context(None)
+        resp1 = await bot.send_context(Context.create())
         assert resp1.message.content[0].text == "X"
 
         # Second call raises
         with pytest.raises(RuntimeError, match="HTTP 503"):
-            await bot.send_context(None)
+            await bot.send_context(Context.create())
 
     @pytest.mark.asyncio
     async def test_tool_use_content_part(self):
@@ -119,7 +120,7 @@ class TestSimpleMockChatBot:
         msg = _make_message("assistant", parts)
         bot = SimpleMockChatBot([msg])
 
-        resp = await bot.send_context(None)
+        resp = await bot.send_context(Context.create())
         assert resp["content"][0]["type"] == "tool_use"
         assert resp["content"][0]["name"] == "search"
         assert resp["content"][0]["arguments"] == '{"q":"hello"}'
@@ -152,7 +153,7 @@ class TestSimpleMockBackendProvider:
         provider = SimpleMockBackendProvider([msg])
 
         bot = provider.create_chatbot(None, None)
-        resp = await bot.send_context(None)
+        resp = await bot.send_context(Context.create())
         assert resp.message.content[0].text == "Hello from mock"
 
 
@@ -187,7 +188,7 @@ class TestChatBotManagerIntegration:
         model_id, chatbot = chatbots[0]
         assert model_id == "simple-mock"
 
-        resp = await chatbot.send_context(None)
+        resp = await chatbot.send_context(Context.create())
         assert resp.message.content[0].text == "Hello"
 
     @pytest.mark.asyncio

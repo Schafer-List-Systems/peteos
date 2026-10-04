@@ -89,7 +89,7 @@ class AdaptiveMockChatBot(SimpleMockChatBot):
                 except (TypeError, AttributeError):
                     pass
 
-        return await super().send_context(context, *_args, **_kwargs)
+        return await self._send_context(context, *_args, **_kwargs)
 
     def captured_tools_at_step(self, step: int) -> List[str]:
         """Return the tool names captured at the given step (0-indexed)."""

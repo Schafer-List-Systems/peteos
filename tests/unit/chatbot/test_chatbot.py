@@ -13,7 +13,7 @@ from peteos.chatbot.chatbotresponse import ChatBotResponse
 class ConcreteChatBot(ChatBot):
     """Concrete ChatBot for testing the base class."""
 
-    async def send_context(self, context, generation_config=None, streaming=None):
+    async def _send_context(self, context, generation_config=None, streaming=None, hooks=None):
         return ChatBotResponse(MagicMock())
 
     def list_available_models(self):

@@ -152,6 +152,7 @@ class TestRunnerStepChains:
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
         assert status is ExecStatus.FINISHED
@@ -169,6 +170,7 @@ class TestRunnerStepChains:
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        runner._session.active_context.total_token_count.return_value = 4096
 
         # First call: reasoning only → CONTINUE
         status, resp = await runner.step()
@@ -197,6 +199,7 @@ class TestRunnerStepChains:
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        runner._session.active_context.total_token_count.return_value = 4096
 
         # Step 1: tool_use → CONTINUE, foreground group created
         status, resp = await runner.step()
@@ -236,6 +239,7 @@ class TestRunnerStepChains:
         bot = SimpleMockChatBot([msg1])
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        runner._session.active_context.total_token_count.return_value = 4096
 
         status, resp = await runner.step()
         assert status is ExecStatus.CONTINUE
@@ -274,6 +278,7 @@ class TestRunnerStepChains:
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
         assert status is ExecStatus.CONTINUE
@@ -293,6 +298,7 @@ class TestRunnerStepChains:
         bot = SimpleMockChatBot([msg, msg2])
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
         assert status is ExecStatus.CONTINUE
@@ -1322,6 +1328,7 @@ class TestRunnerFullCycle:
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
         runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
         event = runner.event_queue.get_nowait()

@@ -185,6 +185,11 @@ def _make_mock_chatbot(
     error: str | None = None,
 ) -> MagicMock:
     cb = MagicMock()
+    cfg = MagicMock()
+    cfg.context_limit_floor = 0.0
+    cfg.context_limit_ceil = float("inf")
+    cfg.max_tokens = 4096
+    cb._config = cfg
     response = AsyncMock()
     data: dict[str, Any] = {"role": role, "content": content or []}
     if error:
