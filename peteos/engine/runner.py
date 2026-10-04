@@ -606,9 +606,10 @@ class Runner(ActiveClass):
                         require_reasoning = True
 
                     elif isinstance(event, ApprovalEvent):
-                        # Handle the approval event. returns handled == True, if a tool call was approved. We can potentially execute a tool.
-                        handled, _ = self._execution_environment._handle_approval(event)
-                        if not handled:
+                        # Handle the approval event. returns handled == True, if a tool call was handled.
+                        #  We can therefore potentially execute a tool.
+                        handled, group_id = self._execution_environment._handle_approval(event)
+                        if not group_id:
                             continue
 
                         # Try to execute a tool. If we could execute a tool, we can reason about the result.

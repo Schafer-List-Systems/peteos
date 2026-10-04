@@ -213,7 +213,7 @@ class ToolCallGroup:
             # Mark the tool use as denied and the result as DENIED.
             r.tool_call.set_approval_status(ToolApprovalStatus.DENIED)
             r.tool_result.set_execution_status(ToolExecutionStatus.DENIED)
-            r.tool_result.set_tool_result_content(f"[DENIED] {reason}")
+            r.tool_result.set_tool_result_content(f"[DENIED] {reason}\n{r.tool_result.content}")
 
 
 def _merge_all_decisions(
@@ -534,6 +534,7 @@ class ExecutionEnvironment:
             if record.tool_call.call_id == event.tool_call_id:
                 if event.approved:
                     record.tool_call.set_approval_status(ToolApprovalStatus.APPROVED)
+                    record.tool_result.set_execution_status(ToolExecutionStatus.WAITING_FOR_EXECUTION)
                     return True, group.id
 
                 # Denied: update tool_use, set result content, cascade denial.
