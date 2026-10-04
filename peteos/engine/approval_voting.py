@@ -222,7 +222,7 @@ class ApprovalElection:
             # Coerce the policy vote and record it for resolution.
             decision, denied_reason = _coerce_to_approval_decision(result)
             await self.policy_vote(i, decision, denied_reason, resolve=False)
-        
+
         return await self._resolve_from_policies()
 
     async def policy_vote(
@@ -306,8 +306,7 @@ class ApprovalElection:
         ]
         self._decision, self._reason = _resolve_decision(voter_decisions)
 
-        # Publish decision
-        await self.publish_decision()
+        return self._decision, self._reason
 
     def _start_countdown(self) -> None:
         """Start the voting window. Called once on the first voter vote."""
@@ -318,10 +317,10 @@ class ApprovalElection:
         # Give each voter a chance to vote within a time frame.
         await asyncio.sleep(CHANNEL_APPROVAL_WINDOW)
         
-        # Resolve the decision. Since the timer started, at least one vote is availabl.
-        self._decision, self._reason = await self._resolve_from_voters()
-        
-        # Publish the resolved decision.
+        # Resolve the decision. Since the timer started, at least one vote is available.
+        await self._resolve_from_voters()
+
+        # Publish decision
         await self.publish_decision()
 
     async def publish_decision(self) -> None:

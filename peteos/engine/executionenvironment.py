@@ -204,16 +204,26 @@ class ToolCallGroup:
         return None
 
     def deny_all_remaining(self, reason: str) -> None:
-        """Deny all records in this group that have not yet executed."""
+        """Deny all records in this group that have not yet executed or been denied."""
         # Iterate over all tool call records in the group.
         for r in self.records:
-            if r.tool_result.execution_status == ToolExecutionStatus.EXECUTED:
+            # Skip records that are in a terminal or in-progress execution state —
+            # nothing to deny.
+            if r.tool_result.execution_status in (
+                ToolExecutionStatus.DENIED,
+                ToolExecutionStatus.EXECUTING,
+                ToolExecutionStatus.EXECUTED,
+                ToolExecutionStatus.ABORTED,
+            ):
                 continue
 
             # Mark the tool use as denied and the result as DENIED.
             r.tool_call.set_approval_status(ToolApprovalStatus.DENIED)
             r.tool_result.set_execution_status(ToolExecutionStatus.DENIED)
-            r.tool_result.set_tool_result_content(f"[DENIED] {reason}\n{r.tool_result.content}")
+            existing = r.tool_result.content.strip()
+            r.tool_result.set_tool_result_content(
+                f"[DENIED] {reason}" + (f"\n{existing}" if existing else "")
+            )
 
 
 def _merge_all_decisions(
@@ -540,6 +550,7 @@ class ExecutionEnvironment:
                 # Denied: update tool_use, set result content, cascade denial.
                 else:
                     record.tool_call.set_approval_status(ToolApprovalStatus.DENIED)
+                    record.tool_result.set_execution_status(ToolExecutionStatus.DENIED)
                     record.tool_result.set_tool_result_content(f"[DENIED] {event.denied_reason}")
                     record.tool_result.raw_dict.pop("pending", None)
                     group.deny_all_remaining(f"Denied as consequence of '{record.tool_call.name}' being denied in the same response.")
