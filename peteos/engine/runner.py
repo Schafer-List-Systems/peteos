@@ -288,6 +288,40 @@ class Runner(ActiveClass):
     # step() — the core reasoning iteration
     # ------------------------------------------------------------------ #
 
+    async def _send_to_chatbot(self) -> Any:
+        """Materialize context, send to the LLM, and drain the response stream.
+
+        Handles materialization, before_send_to_chatbot, the actual send,
+        stream draining, and after_receive_from_chatbot. The caller receives
+        the ChatBotResponse for downstream processing only.
+
+        Returns:
+            The ChatBotResponse from the chatbot.
+        """
+        # Materialize the session context so the chatbot receives a complete view.
+        self._session.materialize()
+        ctx = self._session.active_context
+        tdm = ctx.tool_definitions_message
+        tool_count = len(tdm.content) if tdm and tdm.content else 0
+        _logger.debug(
+            "[runner] _send_to_chatbot(): Materialized context, "
+            "tool_definitions_message has %d tools",
+            tool_count,
+        )
+
+        # Notify listeners the context is about to be sent.
+        await self.call_hooks("before_send_to_chatbot", self, ctx)
+
+        # Send to the LLM and drain the full response stream before returning.
+        response = await self._chatbot.send_context(ctx)
+        async for _ in response:
+            pass
+
+        # Confirm receipt so listeners can process the response.
+        await self.call_hooks("after_receive_from_chatbot", response.message)
+
+        return response
+
     async def step(self) -> tuple[ExecStatus, Message | None]:
         """Execute one reasoning iteration: chatbot -> create tool group.
 
@@ -307,19 +341,7 @@ class Runner(ActiveClass):
             return (ExecStatus.PENDING, None)
 
         # --- Phase 1: Call chatbot ---
-        self._session.materialize()
-        tdm = self._session.active_context.tool_definitions_message
-        tool_count = len(tdm.content) if tdm and tdm.content else 0
-        _logger.debug(
-            "[runner] step(): Materialized context, tool_definitions_message has %d tools",
-            tool_count,
-        )
-        await self.call_hooks("before_send_to_chatbot", self, self._session.active_context)
-        response = await self._chatbot.send_context(self._session.active_context)
-        async for _ in response:
-            pass
-
-        await self.call_hooks("after_receive_from_chatbot", response.message)
+        response = await self._send_to_chatbot()
 
         # --- Phase 1.5: Debug output ---
         _logger.debug(
