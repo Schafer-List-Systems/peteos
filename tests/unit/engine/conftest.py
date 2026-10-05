@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from peteos.conversation.session import _UserHooks
 from peteos.engine.executionenvironment import ExecutionEnvironment
 
 
@@ -31,7 +32,10 @@ def mock_session(mock_role, mock_tool_manager):
     session = MagicMock()
     session.role = mock_role
     session.tool_manager = mock_tool_manager
-    session.invocation_hooks = {}
+    session._user_hook_owners = {}
+    session._user_hook_owner_order = []
+    session.user_hooks = _UserHooks(session)
+    session.user_hooks["transitive", "on_tool_call"] = []
     return session
 
 

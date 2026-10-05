@@ -145,11 +145,11 @@ class TestSessionHooks:
             call_order.append("transitive")
             return None
 
-        session._local_invocation_hooks["test_key"] = [local_hook]
-        session._transitive_invocation_hooks["test_key"] = [transitive_hook]
+        session.user_hooks["local", "test_key"] = [local_hook]
+        session.user_hooks["transitive", "test_key"] = [transitive_hook]
 
-        merged = session.invocation_hooks
-        assert merged["test_key"] == [local_hook, transitive_hook]
+        merged = session.user_hooks
+        assert merged.get("test_key") == [local_hook, transitive_hook]
 
     def test_merged_hooks_multiple_per_key(self):
         session = Session.create("/some/path")
@@ -171,10 +171,10 @@ class TestSessionHooks:
             call_order.append("transitive_y")
             return None
 
-        session._local_invocation_hooks["key"] = [local_a, local_b]
-        session._transitive_invocation_hooks["key"] = [transitive_x, transitive_y]
+        session.user_hooks["local", "key"] = [local_a, local_b]
+        session.user_hooks["transitive", "key"] = [transitive_x, transitive_y]
 
-        merged = session.invocation_hooks["key"]
+        merged = session.user_hooks.get("key")
         # local hooks always first, then transitive
         assert merged == [local_a, local_b, transitive_x, transitive_y]
 

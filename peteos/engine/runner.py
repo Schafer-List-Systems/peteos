@@ -252,9 +252,9 @@ class Runner(ActiveClass):
     # ------------------------------------------------------------------ #
 
     async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
-        """Call all hooks for hook_point from the session's invocation_hooks, merging ExecStatus results."""
-        hooks = self._session.invocation_hooks
-        callbacks = hooks.get(hook_point, [])
+        """Call all hooks for hook_point from the session's user_hooks, merging ExecStatus results."""
+        hooks = self._session.user_hooks
+        callbacks = hooks.get(hook_point)
         merged: ExecStatus | None = None
         for callback in callbacks:
             result = callback(*args)
@@ -266,8 +266,8 @@ class Runner(ActiveClass):
 
     async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
         """Call hooks for hook_point, returning the first deny tuple (False, reason) if any."""
-        hooks = self._session.invocation_hooks
-        callbacks = hooks.get(hook_point, [])
+        hooks = self._session.user_hooks
+        callbacks = hooks.get(hook_point)
         for callback in callbacks:
             result = callback(*args)
             if asyncio.iscoroutine(result):

@@ -497,7 +497,7 @@ class ExecutionEnvironment:
 
         # Register policies with the election: existence check, auto_approve, then user hooks.
         election = ApprovalElection(_content_part=tool_call)
-        user_hooks = list(runner.session.invocation_hooks.get("on_tool_call", []))
+        user_hooks = list(runner.session.user_hooks.get("on_tool_call"))
         election.register_policies([_existence_check, _auto_approve] + [_user_hook_wrapper(h) for h in user_hooks])
 
         # Register the election so channels can look it up by call_id for voting.

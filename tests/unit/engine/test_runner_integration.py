@@ -18,7 +18,7 @@ from peteos.chatbot import (
     SimpleMockChatBot,
 )
 from peteos.conversation.message import ContentPart, Message
-from peteos.conversation.session import Session
+from peteos.conversation.session import Session, _UserHooks
 from peteos.engine.exec_status import ExecStatus
 from peteos.engine.executionenvironment import (
     ApprovalEvent,
@@ -1100,7 +1100,9 @@ class TestEEExecuteTool:
 
         sid = _uuid.uuid4()
         session = MagicMock()
-        session.invocation_hooks = {}
+        session._user_hook_owners = {"transitive": {"before_tool_execution": [lambda *a: (False, "not allowed")]}}
+        session._user_hook_owner_order = ["transitive"]
+        session.user_hooks = _UserHooks(session)
         agent.get_session = MagicMock(return_value=session)
 
         runner = Runner(agent=agent, session_uuid=sid, chatbot=MagicMock())
@@ -1109,10 +1111,6 @@ class TestEEExecuteTool:
             tool_manager=tm, role=role, auto_approve_tools=[],
             tool_failure_policy="abort",
         )
-
-        session.invocation_hooks["before_tool_execution"] = [
-            lambda *a: (False, "not allowed"),
-        ]
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
         result, success = await ee.execute_tool(tc, runner=runner)
@@ -1138,7 +1136,7 @@ class TestEEExecuteTool:
         ee.create_tool_group("g1", "g1:tool_result")
         add_runner = MagicMock()
         add_runner._session = MagicMock()
-        add_runner._session.invocation_hooks = {}
+        add_runner._session.user_hooks = _UserHooks(add_runner._session)
         add_runner.role = role
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
         record = await ee.add_tool_call(tc, runner=add_runner)
@@ -1170,7 +1168,7 @@ class TestEEExecuteTool:
         ee.create_tool_group("g1", "g1:tool_result")
         add_runner = MagicMock()
         add_runner._session = MagicMock()
-        add_runner._session.invocation_hooks = {}
+        add_runner._session.user_hooks = _UserHooks(add_runner._session)
         add_runner.role = role
         tc = ContentPart.create_tool_use("tc1", "notify", "{}")
         record = await ee.add_tool_call(tc, runner=add_runner)
@@ -1278,7 +1276,7 @@ class TestRunnerFullCycle:
         def deny_add(ctx):
             return "denied by hook"
 
-        runner._session.invocation_hooks = {"on_tool_call": [deny_add]}
+        runner._session.user_hooks["transitive", "on_tool_call"] = [deny_add]
 
         user_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.queue_message(user_msg)

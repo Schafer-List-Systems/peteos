@@ -568,7 +568,7 @@ class AgenticObject:
 
         if config.get("invoke_sub_agents", False):
             parent_ptid = runner.state.get("_persistent_thread_id") if runner else None
-            parent_hooks = runner.session.transitive_invocation_hooks if runner and runner.session else {}
+            parent_hooks = runner.session._user_hook_owners.get("transitive", {}) if runner and runner.session else {}
 
             def _invoke(
                 target,
@@ -931,13 +931,18 @@ class AgenticObject:
             if runner.state.get("_persistent_thread_id") is None:
                 runner.state.create("_persistent_thread_id", persistent_thread_id)
 
-        # Store invocation hooks on the session (clear first, then repopulate)
+        # Store user hooks on the session (clear first, then repopulate)
         # Local hooks are copied fresh from this invocation; transitive from the caller.
-        session._transitive_invocation_hooks = {}
-        session._local_invocation_hooks = dict(self._oap_local_hooks)
+        if "local" in session._user_hook_owner_order or "transitive" in session._user_hook_owner_order:
+            raise ValueError("User hooks already registered for this session")
+        session._user_hook_owner_order.append("local")
+        session._user_hook_owner_order.append("transitive")
+        for hook_point, hook_list in self._oap_local_hooks.items():
+            session.user_hooks["local", hook_point] = list(hook_list)
         if hooks is not None:
-            session._transitive_invocation_hooks.update(hooks)
-        _logger.debug("invoke_agent[%s]: stored %d hooks on session %s", self.__class__.__name__, len(session.invocation_hooks), session.uuid)
+            for hook_point, hook_list in hooks.items():
+                session.user_hooks["transitive", hook_point] = list(hook_list)
+        _logger.debug("invoke_agent[%s]: stored %d hooks on session %s", self.__class__.__name__, len(session.user_hooks.hook_points()), session.uuid)
 
         # Fire on_invoke hooks — first non-None string prevents invocation
         _invocation_prevented: str | None = None
@@ -1017,7 +1022,7 @@ class AgenticObject:
                 return None
 
             if output_schema is not None and output_schema is not Any:
-                session._local_invocation_hooks.setdefault("after_step", []).append(
+                session.user_hooks["local", "after_step"].append(
                     lambda status: _on_step_done(runner, status)
                 )
                 _logger.debug(
@@ -1213,8 +1218,8 @@ class AgenticObject:
         # Deactivate the session and save it for reuse on the next invocation.
         if session is not None:
             session.is_active = False
-            session._transitive_invocation_hooks.clear()
-            session._local_invocation_hooks.clear()
+            session._user_hook_owners.pop("local", None)
+            session._user_hook_owners.pop("transitive", None)
             if session._autosave:
                 session.save()
             _logger.debug(

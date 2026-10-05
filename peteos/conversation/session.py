@@ -6,6 +6,48 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from peteos.utils import json
 
 
+class _UserHooks:
+    """Hook registry interface for a session.
+
+    Provides a flat merged view for reading and per-owner storage for writing.
+    """
+
+    def __init__(self, session: "Session") -> None:
+        self._session = session
+
+    def get(self, hook_point: str) -> list[Callable]:
+        """Return a flat merged list of all owners' hooks for this hook point."""
+        owners = self._session._user_hook_owners
+        order = self._session._user_hook_owner_order
+        result: list[Callable] = []
+        for owner in order:
+            owner_dict = owners.get(owner, {})
+            result.extend(owner_dict.get(hook_point, []))
+        return result
+
+    def __getitem__(self, key: tuple[str, str]) -> list[Callable]:
+        """Return the internal hooks list for an owner and hook point.
+
+        Allows in-place mutation via .append(), .remove(), etc.
+        """
+        owner, hook_point = key
+        return self._session._user_hook_owners.setdefault(owner, {}).setdefault(hook_point, [])
+
+    def __setitem__(self, key: tuple[str, str], value: list[Callable]) -> None:
+        """Replace the entire hook list for an owner and hook point."""
+        owner, hook_point = key
+        self._session._user_hook_owners.setdefault(owner, {})[hook_point] = value
+        if owner not in self._session._user_hook_owner_order:
+            self._session._user_hook_owner_order.append(owner)
+
+    def hook_points(self) -> set[str]:
+        """Return the set of all distinct hook points across all owners."""
+        pts: set[str] = set()
+        for owner_dict in self._session._user_hook_owners.values():
+            pts.update(owner_dict.keys())
+        return pts
+
+
 class SessionState:
     """Mutable key-value store for leaving intermediate state.
 
@@ -110,42 +152,19 @@ class Session:
         self._message_hooks: dict[str, Callable[[], str]] = {}
         self._active_context: Context | None = None
         self._state: SessionState = SessionState(self._json_dict.setdefault("state_data", {}))
-        self._transitive_invocation_hooks: dict[str, list[Callable]] = {}
-        self._local_invocation_hooks: dict[str, list[Callable]] = {}
+        self._user_hook_owners: dict[str, dict[str, list[Callable]]] = {}
+        self._user_hook_owner_order: list[str] = []
 
     @property
-    def invocation_hooks(self) -> dict[str, list[Callable]]:
-        """Return the merged transitive and local invocation hooks.
+    def user_hooks(self) -> "_UserHooks":
+        """Return the user hooks interface for reading and writing hook dictionaries.
 
-        The transitive hooks are those provided by the caller and forwarded to
-        sub-agents. The local hooks are internal to this invocation and not
-        forwarded. Both lists are concatenated; local hooks execute before
-        transitive hooks (local has priority).
+        The interface provides:
+        - user_hooks.get(hook_point) -> flat merged list of all owners, in owner order
+        - user_hooks[owner, hook_point] = [callables] -> set/replace full list for owner
+        - user_hooks[owner, hook_point] -> returns internal list for in-place mutation
         """
-        # Merge transitive and local hooks; local hooks run FIRST so they can
-        # short-circuit or set context before transitive hooks execute
-        result: dict[str, list[Callable]] = {}
-        for key in set(self._transitive_invocation_hooks) | set(self._local_invocation_hooks):
-            result[key] = [
-                *self._local_invocation_hooks.get(key, []),
-                *self._transitive_invocation_hooks.get(key, []),
-            ]
-        return result
-
-    @invocation_hooks.setter
-    def invocation_hooks(self, hooks: dict[str, list[Callable]]) -> None:
-        """Set the invocation hooks for this session. Routes into transitive hooks."""
-        if self._transitive_invocation_hooks:
-            raise ValueError("Invocation hooks are already set for this session")
-        self._transitive_invocation_hooks = hooks
-
-    @property
-    def transitive_invocation_hooks(self) -> dict[str, list[Callable]]:
-        """Return the raw transitive invocation hooks (not merged with local hooks).
-
-        Used by sub-agents to inherit only the transitive hooks from the parent.
-        """
-        return self._transitive_invocation_hooks
+        return _UserHooks(self)
 
     @property
     def session_dir(self) -> Path:

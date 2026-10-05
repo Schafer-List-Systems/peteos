@@ -167,7 +167,6 @@ def _make_mock_session(
     session.tool_failure_policy = tool_failure_policy
     session.active_context = ctx
     session.state = SessionState()
-    session.invocation_hooks = {}
     return session
 
 
@@ -439,6 +438,8 @@ class TestRunnerStepToolCalls:
 
     async def test_tool_denied_by_hook(self, chatbot_manager_mock):
         """Auto-approved tool denied by before_tool_execution hook → record denied."""
+        from peteos.conversation.session import _UserHooks
+
         role = MagicMock()
         role.name = "test-role"
         role.model = "test-model"
@@ -462,7 +463,9 @@ class TestRunnerStepToolCalls:
         session.auto_approve_tools = list(role.auto_approve_tools)
         session.tool_failure_policy = "abort"
         session.active_context = ctx
-        session.invocation_hooks = {}
+        session._user_hook_owners = {}
+        session._user_hook_owner_order = []
+        session.user_hooks = _UserHooks(session)
 
         chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
 
@@ -475,7 +478,7 @@ class TestRunnerStepToolCalls:
         def deny_hook(tool_call):
             return (False, "denied by hook")
 
-        session.invocation_hooks["before_tool_execution"] = [deny_hook]
+        session.user_hooks["transitive", "before_tool_execution"] = [deny_hook]
 
         status, _ = await runner.step()
         event = runner.event_queue.get_nowait()
@@ -569,6 +572,8 @@ class TestRunnerSubscriptions:
 class TestRunnerOnToolCallHook:
     def _build_env(self, auto_approve_tools=None, invocation_hooks=None):
         """Build session/runner with execution environment."""
+        from peteos.conversation.session import _UserHooks
+
         role = MagicMock()
         role.name = "test-role"
         role.model = "test-model"
@@ -592,7 +597,12 @@ class TestRunnerOnToolCallHook:
         session.auto_approve_tools = list(role.auto_approve_tools)
         session.tool_failure_policy = "abort"
         session.active_context = ctx
-        session.invocation_hooks = invocation_hooks or {}
+        session._user_hook_owners = {}
+        session._user_hook_owner_order = []
+        session.user_hooks = _UserHooks(session)
+        if invocation_hooks:
+            for hook_point, hook_list in invocation_hooks.items():
+                session.user_hooks["transitive", hook_point] = list(hook_list)
 
         agent = MagicMock()
         agent.get_session.return_value = session
@@ -618,7 +628,7 @@ class TestRunnerOnToolCallHook:
             assert ctx["session"] is session
             return "Hook says no"
 
-        session.invocation_hooks["on_tool_call"] = [deny_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [deny_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1, "b": 2}')
@@ -641,7 +651,7 @@ class TestRunnerOnToolCallHook:
             assert ctx["tool_name"] == "add"
             return None
 
-        session.invocation_hooks["on_tool_call"] = [allow_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [allow_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1, "b": 2}')
@@ -666,7 +676,7 @@ class TestRunnerOnToolCallHook:
             call_order.append("second")
             return None
 
-        session.invocation_hooks["on_tool_call"] = [deny_hook, second_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [deny_hook, second_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
@@ -691,7 +701,7 @@ class TestRunnerOnToolCallHook:
         def deny2(ctx):
             return "reason two"
 
-        session.invocation_hooks["on_tool_call"] = [deny1, deny2]
+        session.user_hooks["transitive", "on_tool_call"] = [deny1, deny2]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
@@ -718,7 +728,7 @@ class TestRunnerOnToolCallHook:
             reasons_seen.append(("h2", ctx.get("denied_reason")))
             return None
 
-        session.invocation_hooks["on_tool_call"] = [hook1, hook2]
+        session.user_hooks["transitive", "on_tool_call"] = [hook1, hook2]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
@@ -738,7 +748,7 @@ class TestRunnerOnToolCallHook:
             assert ctx["approval_status"] is None
             return True
 
-        session.invocation_hooks["on_tool_call"] = [approve_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [approve_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1}')
@@ -756,7 +766,7 @@ class TestRunnerOnToolCallHook:
         def no_op(ctx):
             return True
 
-        session.invocation_hooks["on_tool_call"] = [no_op]
+        session.user_hooks["transitive", "on_tool_call"] = [no_op]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
@@ -775,7 +785,7 @@ class TestRunnerOnToolCallHook:
         def approve_hook(ctx):
             return True
 
-        session.invocation_hooks["on_tool_call"] = [approve_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [approve_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
@@ -793,7 +803,7 @@ class TestRunnerOnToolCallHook:
         def deny_hook(ctx):
             return False
 
-        session.invocation_hooks["on_tool_call"] = [deny_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [deny_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
@@ -812,7 +822,7 @@ class TestRunnerOnToolCallHook:
         def deny_hook(ctx):
             return False
 
-        session.invocation_hooks["on_tool_call"] = [deny_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [deny_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
@@ -832,7 +842,7 @@ class TestRunnerOnToolCallHook:
         def enrich_hook(ctx):
             return "hook adds context"
 
-        session.invocation_hooks["on_tool_call"] = [enrich_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [enrich_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
@@ -849,7 +859,6 @@ class TestRunnerOnToolCallHook:
         """Tool not found with no hooks: DENIED with initial reason only."""
         session, runner, role, tm, tool_mock = self._build_env()
         tm.get_tool.return_value = None
-        session.invocation_hooks = {}
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", '{}')
@@ -865,7 +874,6 @@ class TestRunnerOnToolCallHook:
     async def test_on_tool_call_empty_hooks_list(self):
         """Empty hooks list: status unchanged from initial."""
         session, runner, role, tm, tool_mock = self._build_env()
-        session.invocation_hooks = {}
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{}')
@@ -887,7 +895,7 @@ class TestRunnerOnToolCallHook:
             captured_ctx.update(ctx)
             return None
 
-        session.invocation_hooks["on_tool_call"] = [capture_hook]
+        session.user_hooks["transitive", "on_tool_call"] = [capture_hook]
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "add", '{"a": 1}')
@@ -908,6 +916,8 @@ class TestRunnerOnToolCallHook:
 
 def _make_runner_with_exec_env(auto_approve_tools=None):
     """Build a runner with execution environment for execute_and_inject tests."""
+    from peteos.conversation.session import _UserHooks
+
     role = MagicMock()
     role.name = "test-role"
     role.model = "test-model"
@@ -932,7 +942,9 @@ def _make_runner_with_exec_env(auto_approve_tools=None):
     session.auto_approve_tools = list(role.auto_approve_tools)
     session.tool_failure_policy = "abort"
     session.active_context = ctx
-    session.invocation_hooks = {}
+    session._user_hook_owners = {}
+    session._user_hook_owner_order = []
+    session.user_hooks = _UserHooks(session)
 
     agent = MagicMock()
     agent.get_session.return_value = session
@@ -996,6 +1008,8 @@ class TestRunnerExecuteAndInject:
 
     async def test_execute_and_inject_tool_not_found(self):
         """execute_and_inject returns error for unknown tool."""
+        from peteos.conversation.session import _UserHooks
+
         tm = MagicMock()
         tm.get_tool.return_value = None
         role = MagicMock()
@@ -1006,7 +1020,9 @@ class TestRunnerExecuteAndInject:
         role.tool_filter = []
         session = MagicMock()
         session.role = role
-        session.invocation_hooks = {}
+        session._user_hook_owners = {}
+        session._user_hook_owner_order = []
+        session.user_hooks = _UserHooks(session)
         agent = MagicMock()
         agent.get_session.return_value = session
         agent._tool_manager = tm
@@ -1024,6 +1040,8 @@ class TestRunnerExecuteAndInject:
 
     async def test_execute_and_inject_no_foreground_group(self):
         """execute_and_inject raises if no foreground group exists."""
+        from peteos.conversation.session import _UserHooks
+
         role = MagicMock()
         role.name = "test-role"
         role.model = "test-model"
@@ -1033,7 +1051,9 @@ class TestRunnerExecuteAndInject:
         tm = MagicMock()
         session = MagicMock()
         session.role = role
-        session.invocation_hooks = {}
+        session._user_hook_owners = {}
+        session._user_hook_owner_order = []
+        session.user_hooks = _UserHooks(session)
         agent = MagicMock()
         agent.get_session.return_value = session
         agent._tool_manager = tm
@@ -1055,6 +1075,8 @@ class TestRunnerExecuteAndInject:
 
 class TestRunnerAfterReceiveFromChatbot:
     def _build_env(self, invocation_hooks=None):
+        from peteos.conversation.session import _UserHooks
+
         role = MagicMock()
         role.name = "test-role"
         role.model = "test-model"
@@ -1065,7 +1087,12 @@ class TestRunnerAfterReceiveFromChatbot:
         tm = MagicMock()
         session = MagicMock()
         session.role = role
-        session.invocation_hooks = invocation_hooks or {}
+        session._user_hook_owners = {}
+        session._user_hook_owner_order = []
+        session.user_hooks = _UserHooks(session)
+        if invocation_hooks:
+            for hook_point, hook_list in invocation_hooks.items():
+                session.user_hooks["transitive", hook_point] = list(hook_list)
 
         agent = MagicMock()
         agent.get_session.return_value = session
@@ -1086,7 +1113,7 @@ class TestRunnerAfterReceiveFromChatbot:
             captured_message.append(msg)
             return None
 
-        session.invocation_hooks["after_receive_from_chatbot"] = [capture_hook]
+        session.user_hooks["transitive", "after_receive_from_chatbot"] = [capture_hook]
 
         bot_response = Message.create(
             role="assistant",
@@ -1112,7 +1139,7 @@ class TestRunnerAfterReceiveFromChatbot:
             call_order.append("second")
             return None
 
-        session.invocation_hooks["after_receive_from_chatbot"] = [first_hook, second_hook]
+        session.user_hooks["transitive", "after_receive_from_chatbot"] = [first_hook, second_hook]
 
         bot_response = Message.create(role="assistant", content_parts=[])
         await runner.call_hooks("after_receive_from_chatbot", bot_response)
@@ -1129,7 +1156,7 @@ class TestRunnerAfterReceiveFromChatbot:
             captured.append(msg)
             return None
 
-        session.invocation_hooks["after_receive_from_chatbot"] = [async_hook]
+        session.user_hooks["transitive", "after_receive_from_chatbot"] = [async_hook]
 
         bot_response = Message.create(role="assistant", content_parts=[])
         await runner.call_hooks("after_receive_from_chatbot", bot_response)
