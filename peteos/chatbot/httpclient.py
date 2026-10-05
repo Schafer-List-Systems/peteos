@@ -107,7 +107,9 @@ class HTTPClient:
 
                 # Notify listeners of the error; a listener may raise to abort retries.
                 for hook in (hooks or {}).get("on_http_error", []):
-                    hook(error_context)
+                    result = hook(error_context)
+                    if asyncio.iscoroutine(result):
+                        await result
 
                 # Check whether any retries remain for this attempt loop.
                 if attempt < self._max_retries:
