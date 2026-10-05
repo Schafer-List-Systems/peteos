@@ -6,48 +6,6 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from peteos.utils import json
 
 
-class _UserHooks:
-    """Hook registry interface for a session.
-
-    Provides a flat merged view for reading and per-owner storage for writing.
-    """
-
-    def __init__(self, session: "Session") -> None:
-        self._session = session
-
-    def get(self, hook_point: str) -> list[Callable]:
-        """Return a flat merged list of all owners' hooks for this hook point."""
-        owners = self._session._user_hook_owners
-        order = self._session._user_hook_owner_order
-        result: list[Callable] = []
-        for owner in order:
-            owner_dict = owners.get(owner, {})
-            result.extend(owner_dict.get(hook_point, []))
-        return result
-
-    def __getitem__(self, key: tuple[str, str]) -> list[Callable]:
-        """Return the internal hooks list for an owner and hook point.
-
-        Allows in-place mutation via .append(), .remove(), etc.
-        """
-        owner, hook_point = key
-        return self._session._user_hook_owners.setdefault(owner, {}).setdefault(hook_point, [])
-
-    def __setitem__(self, key: tuple[str, str], value: list[Callable]) -> None:
-        """Replace the entire hook list for an owner and hook point."""
-        owner, hook_point = key
-        self._session._user_hook_owners.setdefault(owner, {})[hook_point] = value
-        if owner not in self._session._user_hook_owner_order:
-            self._session._user_hook_owner_order.append(owner)
-
-    def hook_points(self) -> set[str]:
-        """Return the set of all distinct hook points across all owners."""
-        pts: set[str] = set()
-        for owner_dict in self._session._user_hook_owners.values():
-            pts.update(owner_dict.keys())
-        return pts
-
-
 class SessionState:
     """Mutable key-value store for leaving intermediate state.
 
@@ -154,17 +112,6 @@ class Session:
         self._state: SessionState = SessionState(self._json_dict.setdefault("state_data", {}))
         self._user_hook_owners: dict[str, dict[str, list[Callable]]] = {}
         self._user_hook_owner_order: list[str] = []
-
-    @property
-    def user_hooks(self) -> "_UserHooks":
-        """Return the user hooks interface for reading and writing hook dictionaries.
-
-        The interface provides:
-        - user_hooks.get(hook_point) -> flat merged list of all owners, in owner order
-        - user_hooks[owner, hook_point] = [callables] -> set/replace full list for owner
-        - user_hooks[owner, hook_point] -> returns internal list for in-place mutation
-        """
-        return _UserHooks(self)
 
     @property
     def session_dir(self) -> Path:

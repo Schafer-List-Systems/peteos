@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid as _uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from peteos.conversation.session import SessionState
+
 from peteos.sandbox import Sandbox, SandboxBuilder
 from peteos.chatbot import ChatBot, ChatBotResponse, ChatBotManager, Message, ContentPart, ContextOverflowError
 
@@ -28,6 +29,48 @@ if TYPE_CHECKING:
     from peteos.persona.agent import Agent
 
 _logger = get_logger(__name__)
+
+
+class _Hooks:
+    """Hook registry interface for a runner.
+
+    Provides a flat merged view for reading and per-owner storage for writing.
+    """
+
+    def __init__(self, runner: "Runner") -> None:
+        self._runner = runner
+
+    def get(self, hook_point: str) -> list[Callable]:
+        """Return a flat merged list of all owners' hooks for this hook point."""
+        owners = self._runner._hook_owners
+        order = self._runner._hook_owner_order
+        result: list[Callable] = []
+        for owner in order:
+            owner_dict = owners.get(owner, {})
+            result.extend(owner_dict.get(hook_point, []))
+        return result
+
+    def __getitem__(self, key: tuple[str, str]) -> list[Callable]:
+        """Return the internal hooks list for an owner and hook point.
+
+        Allows in-place mutation via .append(), .remove(), etc.
+        """
+        owner, hook_point = key
+        return self._runner._hook_owners.setdefault(owner, {}).setdefault(hook_point, [])
+
+    def __setitem__(self, key: tuple[str, str], value: list[Callable]) -> None:
+        """Replace the entire hook list for an owner and hook point."""
+        owner, hook_point = key
+        self._runner._hook_owners.setdefault(owner, {})[hook_point] = value
+        if owner not in self._runner._hook_owner_order:
+            self._runner._hook_owner_order.append(owner)
+
+    def hook_points(self) -> set[str]:
+        """Return the set of all distinct hook points across all owners."""
+        pts: set[str] = set()
+        for owner_dict in self._runner._hook_owners.values():
+            pts.update(owner_dict.keys())
+        return pts
 
 
 class Runner(ActiveClass):
@@ -83,6 +126,8 @@ class Runner(ActiveClass):
         self._sandbox_builder: SandboxBuilder | None = None
         self._max_truncation_retries = agent.role.max_truncation_retries
         self._truncation_counter: int = 0
+        self._hook_owners: dict[str, dict[str, list[Callable]]] = {}
+        self._hook_owner_order: list[str] = []
 
     # ------------------------------------------------------------------ #
     # Properties
@@ -97,6 +142,17 @@ class Runner(ActiveClass):
     def session(self) -> "Session":
         """Return the Session this runner controls."""
         return self._session
+
+    @property
+    def hooks(self) -> "_Hooks":
+        """Return the hooks interface for reading and writing hook dictionaries.
+
+        The interface provides:
+        - hooks.get(hook_point) -> flat merged list of all owners, in owner order
+        - hooks[owner, hook_point] = [callables] -> set/replace full list for owner
+        - hooks[owner, hook_point] -> returns internal list for in-place mutation
+        """
+        return _Hooks(self)
 
     @property
     def session_uuid(self) -> "_uuid.UUID":
@@ -252,9 +308,8 @@ class Runner(ActiveClass):
     # ------------------------------------------------------------------ #
 
     async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
-        """Call all hooks for hook_point from the session's user_hooks, merging ExecStatus results."""
-        hooks = self._session.user_hooks
-        callbacks = hooks.get(hook_point)
+        """Call all hooks for hook_point from the runner's hooks, merging ExecStatus results."""
+        callbacks = self.hooks.get(hook_point)
         merged: ExecStatus | None = None
         for callback in callbacks:
             result = callback(*args)
@@ -266,8 +321,7 @@ class Runner(ActiveClass):
 
     async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
         """Call hooks for hook_point, returning the first deny tuple (False, reason) if any."""
-        hooks = self._session.user_hooks
-        callbacks = hooks.get(hook_point)
+        callbacks = self.hooks.get(hook_point)
         for callback in callbacks:
             result = callback(*args)
             if asyncio.iscoroutine(result):

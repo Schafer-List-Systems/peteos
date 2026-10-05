@@ -913,13 +913,13 @@ class AgenticObject:
         if session is None or runner is None:
             _logger.debug("invoke_agent[%s]: creating new session and runner", self.__class__.__name__)
             session = await self._oap_agent.create_session()
-            session.user_hooks["policy", "on_tool_call"] = [
-                lambda ctx: _tool_policy_dispatcher(self, ctx)
-            ]
             system_prompt_msg = session.active_context.system_prompt_message
             for name, callback in self._oap_system_prompt_hooks.items():
                 session.register_hook(system_prompt_msg, name, callback)
             runner = await self._start_session(session)
+            runner.hooks["policy", "on_tool_call"] = [
+                lambda ctx: _tool_policy_dispatcher(self, ctx)
+            ]
             if persistent_thread_id is not None:
                 self._oap_thread_store[persistent_thread_id] = session.uuid
                 self._oap_runner_store[persistent_thread_id] = runner
@@ -933,16 +933,16 @@ class AgenticObject:
 
         # Store user hooks on the session (clear first, then repopulate)
         # Local hooks are copied fresh from this invocation; transitive from the caller.
-        if "local" in session._user_hook_owner_order or "transitive" in session._user_hook_owner_order:
-            raise ValueError("User hooks already registered for this session")
-        session._user_hook_owner_order.append("local")
-        session._user_hook_owner_order.append("transitive")
+        if "local" in runner._hook_owner_order or "transitive" in runner._hook_owner_order:
+            raise ValueError("Hooks already registered for this runner")
+        runner._hook_owner_order.append("local")
+        runner._hook_owner_order.append("transitive")
         for hook_point, hook_list in self._oap_local_hooks.items():
-            session.user_hooks["local", hook_point] = list(hook_list)
+            runner.hooks["local", hook_point] = list(hook_list)
         if hooks is not None:
             for hook_point, hook_list in hooks.items():
-                session.user_hooks["transitive", hook_point] = list(hook_list)
-        _logger.debug("invoke_agent[%s]: stored %d hooks on session %s", self.__class__.__name__, len(session.user_hooks.hook_points()), session.uuid)
+                runner.hooks["transitive", hook_point] = list(hook_list)
+        _logger.debug("invoke_agent[%s]: stored %d hooks on runner %s", self.__class__.__name__, len(runner.hooks.hook_points()), session.uuid)
 
         # Fire on_invoke hooks — first non-None string prevents invocation
         _invocation_prevented: str | None = None
@@ -1022,7 +1022,7 @@ class AgenticObject:
                 return None
 
             if output_schema is not None and output_schema is not Any:
-                session.user_hooks["local", "after_step"].append(
+                runner.hooks["local", "after_step"].append(
                     lambda status: _on_step_done(runner, status)
                 )
                 _logger.debug(
@@ -1215,11 +1215,15 @@ class AgenticObject:
             except KeyError:
                 pass
 
+        if runner is not None:
+            runner._hook_owners.pop("local", None)
+            runner._hook_owners.pop("transitive", None)
+            runner._hook_owner_order.remove("local")
+            runner._hook_owner_order.remove("transitive")
+
         # Deactivate the session and save it for reuse on the next invocation.
         if session is not None:
             session.is_active = False
-            session._user_hook_owners.pop("local", None)
-            session._user_hook_owners.pop("transitive", None)
             if session._autosave:
                 session.save()
             _logger.debug(

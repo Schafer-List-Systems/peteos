@@ -134,8 +134,12 @@ class TestSessionHooks:
         assert hook_id == expected
 
     def test_merged_hooks_local_runs_before_transitive(self):
-        session = Session.create("/some/path")
-        call_order: list = []
+        from peteos.engine.runner import _Hooks
+
+        runner = MagicMock()
+        runner._hook_owners = {}
+        runner._hook_owner_order = []
+        hooks = _Hooks(runner)
 
         def local_hook():
             call_order.append("local")
@@ -145,15 +149,18 @@ class TestSessionHooks:
             call_order.append("transitive")
             return None
 
-        session.user_hooks["local", "test_key"] = [local_hook]
-        session.user_hooks["transitive", "test_key"] = [transitive_hook]
+        hooks["local", "test_key"] = [local_hook]
+        hooks["transitive", "test_key"] = [transitive_hook]
 
-        merged = session.user_hooks
-        assert merged.get("test_key") == [local_hook, transitive_hook]
+        assert hooks.get("test_key") == [local_hook, transitive_hook]
 
     def test_merged_hooks_multiple_per_key(self):
-        session = Session.create("/some/path")
-        call_order: list = []
+        from peteos.engine.runner import _Hooks
+
+        runner = MagicMock()
+        runner._hook_owners = {}
+        runner._hook_owner_order = []
+        hooks = _Hooks(runner)
 
         def local_a():
             call_order.append("local_a")
@@ -171,11 +178,10 @@ class TestSessionHooks:
             call_order.append("transitive_y")
             return None
 
-        session.user_hooks["local", "key"] = [local_a, local_b]
-        session.user_hooks["transitive", "key"] = [transitive_x, transitive_y]
+        hooks["local", "key"] = [local_a, local_b]
+        hooks["transitive", "key"] = [transitive_x, transitive_y]
 
-        merged = session.user_hooks.get("key")
-        # local hooks always first, then transitive
+        merged = hooks.get("key")
         assert merged == [local_a, local_b, transitive_x, transitive_y]
 
 
