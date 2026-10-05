@@ -372,12 +372,6 @@ class TestToolPolicyDispatcher:
         ctx = {"tool_name": "anything", "arguments": {}}
         assert await _tool_policy_dispatcher(obj, ctx) is None
 
-    def test_dispatcher_is_registered_in_local_hooks(self):
-        obj = self._BashLike()
-        on_tool_hooks = obj._oap_local_hooks.get("on_tool_call", [])
-        assert len(on_tool_hooks) >= 1
-        assert all(callable(h) for h in on_tool_hooks)
-
     @pytest.mark.asyncio
     async def test_policy_uses_outer_scope_local_const(self):
         """A policy that reads a local const defined outside the policy but in the method body.

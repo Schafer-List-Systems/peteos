@@ -296,9 +296,6 @@ class AgenticObject:
         }
         self._oap_tool_policies: dict[str, dict[str, Callable]] = {}
         self._register_tools()
-        self._oap_local_hooks.setdefault("on_tool_call", []).append(
-            lambda ctx: _tool_policy_dispatcher(self, ctx)
-        )
         self._register_output_schema_hook()
         self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
         self._register_sandbox_tool()
@@ -916,6 +913,9 @@ class AgenticObject:
         if session is None or runner is None:
             _logger.debug("invoke_agent[%s]: creating new session and runner", self.__class__.__name__)
             session = await self._oap_agent.create_session()
+            session.user_hooks["policy", "on_tool_call"] = [
+                lambda ctx: _tool_policy_dispatcher(self, ctx)
+            ]
             system_prompt_msg = session.active_context.system_prompt_message
             for name, callback in self._oap_system_prompt_hooks.items():
                 session.register_hook(system_prompt_msg, name, callback)
