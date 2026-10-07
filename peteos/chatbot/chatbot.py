@@ -113,6 +113,7 @@ class ChatBot(ABC):
                 failed_size = context.total_token_count() + self._config.max_tokens
                 if failed_size < self._config.context_limit_ceil:
                     self._config.context_limit_ceil = failed_size
+                _probe_attempt = 0
                 raise ContextOverflowError(
                     f"HTTP {status_code} after probe on retry #2 — context overflow",
                 )
