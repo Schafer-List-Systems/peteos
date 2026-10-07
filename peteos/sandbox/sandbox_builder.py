@@ -12,20 +12,22 @@ from peteos.sandbox.scope import Scope
 ################################################################################
 # Source Code Compilation
 
-def _extract_func_name_and_params(func_obj: Callable) -> tuple[str, dict, bool]:
-    """Extract function name, parameters, and whether self is unbound.
+def _extract_func_name_and_params(func_obj: Callable) -> tuple[str, dict, bool, bool]:
+    """Extract function name, parameters, whether self is unbound, and if async.
 
     Args:
         func_obj: A Python callable to introspect.
 
     Returns:
-        A tuple of (func_name, parameters_schema, has_unbound_self).
+        A tuple of (func_name, parameters_schema, has_unbound_self, is_async).
         ``has_unbound_self`` is True only when the callable has a self
         argument that has not yet been bound (i.e. it is not a bound method).
+        ``is_async`` is True when the callable is a coroutine function.
 
     Raises:
         ValueError: If the signature cannot be introspected.
     """
+    import asyncio
     import inspect
 
     func_name = func_obj.__name__
@@ -45,6 +47,9 @@ def _extract_func_name_and_params(func_obj: Callable) -> tuple[str, dict, bool]:
         params = list(sig.parameters.items())
         has_unbound_self = params and params[0][0] == "self"
 
+    # Detect if the function is a coroutine function.
+    is_async = asyncio.iscoroutinefunction(func_obj)
+
     # Build parameter schema, skipping the self parameter.
     parameters = {}
     for param_name, param in sig.parameters.items():
@@ -63,7 +68,7 @@ def _extract_func_name_and_params(func_obj: Callable) -> tuple[str, dict, bool]:
             param_info["default"] = param.default
         parameters[param_name] = param_info
 
-    return func_name, parameters, has_unbound_self
+    return func_name, parameters, has_unbound_self, is_async
 
 
 def _compile_and_extract(
@@ -104,7 +109,7 @@ def _compile_and_extract(
     for key in set(globals_dict.keys()) - original_keys:
         obj = globals_dict[key]
         if callable(obj) and hasattr(obj, "__code__"):
-            _, _, has_unbound_self = _extract_func_name_and_params(obj)
+            _, _, has_unbound_self, _is_async = _extract_func_name_and_params(obj)
             if has_unbound_self:
                 member_functions.append(obj)
             else:
@@ -194,6 +199,7 @@ class SandboxBuilder:
         self._name_to_entry: dict[str, int] = {}  # maps function name -> source code id
         self._source_code_counter: int = 0
         self._hooks: dict[str, list[Callable]] = {}  # op name -> handler functions
+        self._async_member_names: set[str] = set()  # names of async functions in sandbox_namespace
 
     @property
     def sandbox_namespace(self) -> dict[str, Callable]:
@@ -276,6 +282,14 @@ class SandboxBuilder:
                 if hasattr(self._compilation_globals[name], "__name__")
             )
             prompt += f" Imported modules: {mods_list}."
+        all_async_names: set[str] = set()
+        builder: SandboxBuilder | None = self
+        while builder is not None:
+            all_async_names.update(builder._async_member_names)
+            builder = builder._base
+        if all_async_names:
+            async_list = ", ".join(sorted(all_async_names))
+            prompt += f" Async functions (await the result): {async_list}."
         return prompt
 
     def add_import(
@@ -387,7 +401,7 @@ class SandboxBuilder:
         if name in self._sandbox_namespace:
             raise ValueError(f"proxy name {name!r} already registered")
 
-        _, _, has_unbound_self = _extract_func_name_and_params(func)
+        _, _, has_unbound_self, _is_async = _extract_func_name_and_params(func)
 
         def make_proxy():
             def proxy(self: Sandbox, *args, **kwargs):
@@ -460,34 +474,54 @@ class SandboxBuilder:
 
         ns_name = self._name
 
-        def make_proxy(compiled_function, has_unbound_self: bool):
-            def proxy(self: Sandbox, *args, **kwargs):
-                # Find this builder's Scope in the chain and push it.
-                caller_scope: Scope = self._scope
-                while caller_scope is not None and caller_scope.name != ns_name:
-                    caller_scope = caller_scope.parent
-                if caller_scope is None:
-                    raise RuntimeError(
-                        f"Scope '{ns_name}' not found in sandbox chain — this should not happen"
-                    )
-                token = Sandbox._calling_ns.set(caller_scope)
-                try:
-                    if has_unbound_self:
-                        return compiled_function(self, *args, **kwargs)
-                    else:
-                        return compiled_function(*args, **kwargs)
-                finally:
-                    Sandbox._calling_ns.reset(token)
+        def make_proxy(compiled_function, has_unbound_self: bool, is_async: bool):
+            if is_async:
+                async def proxy(self: Sandbox, *args, **kwargs):
+                    caller_scope: Scope = self._scope
+                    while caller_scope is not None and caller_scope.name != ns_name:
+                        caller_scope = caller_scope.parent
+                    if caller_scope is None:
+                        raise RuntimeError(
+                            f"Scope '{ns_name}' not found in sandbox chain — this should not happen"
+                        )
+                    token = Sandbox._calling_ns.set(caller_scope)
+                    try:
+                        if has_unbound_self:
+                            return await compiled_function(self, *args, **kwargs)
+                        else:
+                            return await compiled_function(*args, **kwargs)
+                    finally:
+                        Sandbox._calling_ns.reset(token)
 
-            # TODO: copy docstring of compiled function to the proxy
-            return proxy
+                return proxy
+            else:
+                def proxy(self: Sandbox, *args, **kwargs):
+                    caller_scope: Scope = self._scope
+                    while caller_scope is not None and caller_scope.name != ns_name:
+                        caller_scope = caller_scope.parent
+                    if caller_scope is None:
+                        raise RuntimeError(
+                            f"Scope '{ns_name}' not found in sandbox chain — this should not happen"
+                        )
+                    token = Sandbox._calling_ns.set(caller_scope)
+                    try:
+                        if has_unbound_self:
+                            return compiled_function(self, *args, **kwargs)
+                        else:
+                            return compiled_function(*args, **kwargs)
+                    finally:
+                        Sandbox._calling_ns.reset(token)
+
+                return proxy
 
         result: list[tuple[str, dict]] = []
         for mf in member_functions:
-            func_name, params, has_unbound_self = _extract_func_name_and_params(mf)
+            func_name, params, has_unbound_self, is_async = _extract_func_name_and_params(mf)
             result.append((func_name, params))
-            self._sandbox_namespace[func_name] = make_proxy(mf, has_unbound_self)
+            self._sandbox_namespace[func_name] = make_proxy(mf, has_unbound_self, is_async)
             self._name_to_entry[func_name] = key
+            if is_async:
+                self._async_member_names.add(func_name)
             self._fire_hook("on_add_member", func_name, params)
 
         return result
@@ -515,6 +549,7 @@ class SandboxBuilder:
         for n in to_remove:
             del self._sandbox_namespace[n]
             del self._name_to_entry[n]
+            self._async_member_names.discard(n)
             self._fire_hook("on_remove_member", n)
         return True
 
@@ -675,7 +710,7 @@ class SandboxBuilder:
         Returns:
             A compiled proxy function ready for use in sandboxed code.
         """
-        func_name, _parameters, has_unbound_self = _extract_func_name_and_params(func)
+        func_name, _parameters, has_unbound_self, _is_async = _extract_func_name_and_params(func)
 
         if has_unbound_self:
             assert real_self is not None

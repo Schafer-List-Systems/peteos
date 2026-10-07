@@ -483,6 +483,7 @@ class AgenticObject:
         Returns a list of dicts, one per method, with name, parameters, return type, and docstring.
         Suitable for use by a DocumentationProvider to render into a TextBuffer.
         """
+        import asyncio
         import inspect
 
         members = self._gather_sandbox_members()
@@ -495,6 +496,7 @@ class AgenticObject:
             doc = (method.__doc__ or "").strip()
             params: list[dict] = []
             returns = "unknown"
+            is_async = asyncio.iscoroutinefunction(method)
             if sig:
                 return_annotation = sig.return_annotation
                 if return_annotation is not inspect.Parameter.empty:
@@ -516,6 +518,7 @@ class AgenticObject:
                 "parameters": params,
                 "returns": returns,
                 "doc": doc,
+                "is_async": is_async,
             })
         return catalog
 
