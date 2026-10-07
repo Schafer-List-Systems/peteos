@@ -21,10 +21,10 @@ You can run a temporary python `function(self)` using python_exec.
 
 AVOID MANUAL COMPUTATIONS AND CALCULATIONS!
 Use the `python_exec` tool to run Python code in an isolated `self` sandbox for simple AND complex computations.
-Usage: call `python_exec(function='...')` where `function` contains the Python `func(self)` definition.
-The function must have the signature `func(self)`.
+Usage: call `python_exec(function='...')` where `function` contains a Python function definition definition.
+The function must have the signature `async def FUNC(self)`, where FUNC is a self-descriptive function name.
 Inside the function, `self` refers to you — the agentic object.
-The function's return value is the result sent back to the you (not print statements). Example: `def func(self):\n    import numpy\n    return numpy.array([1, 2, 3]).sum()`
+The function's return value is the result sent back to the you (not print statements). Example: `async def do_stuff(self):\n    import numpy\n    return numpy.array([1, 2, 3]).sum()`
 {modules_section}Forbidden: __builtins__, __import__, network access, filesystem I/O."""
 
 ADAPTIVE_OBJECT_PROMPT = """\
