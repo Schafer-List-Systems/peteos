@@ -84,12 +84,13 @@ def _register_tool_policy_for(
     policies.setdefault(tool_name, {})["_nested"] = policy_func
 
 
-async def _tool_policy_dispatcher(agent, ctx: dict) -> bool | None:
+async def _tool_policy_dispatcher(agent, ctx: dict) -> bool | tuple[bool, str] | None:
     """Policy-executor hook for on_tool_call.
 
     Looks up ctx["tool_name"] in agent._oap_tool_policies and evaluates each
     policy in order, short-circuiting on the first DENIED vote. Supports
     async policies — awaitable results are resolved before evaluating the vote.
+    A policy may return False (deny), a string (deny with reason), or True (approve).
     Returns True/False/None (merged by the outer hook chain) or None if no
     policies are registered (IGNORED).
     """
@@ -158,9 +159,12 @@ async def _tool_policy_dispatcher(agent, ctx: dict) -> bool | None:
             tool_name,
             result,
         )
-        # DENIED short-circuits immediately — a single denial is conclusive
+        # DENIED short-circuits immediately — a single denial is conclusive.
+        # A string is treated as a denial with the string as the reason.
         if result is False:
             return False
+        if isinstance(result, str):
+            return (False, result)
 
         # Approved — record the vote, keep checking remaining policies
         if result is True:
