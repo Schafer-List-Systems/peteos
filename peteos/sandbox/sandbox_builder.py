@@ -519,8 +519,6 @@ class SandboxBuilder:
 
                 # Mirror the compiled function's signature so callers see the real interface.
                 proxy.__signature__ = inspect.signature(compiled_function)
-                proxy.__name__ = compiled_function.__name_
-                proxy.__doc__ = getattr(compiled_function, "__doc__", "")
                 return proxy
 
         result: list[tuple[str, dict]] = []
