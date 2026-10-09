@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextvars
-from typing import Any
 
 from peteos.sandbox.scope import Scope
 
@@ -24,7 +23,13 @@ class Sandbox:
         ns = caller_ns if caller_ns is not None else self._scope
         obj = getattr(ns, name)
         if callable(obj):
-            return lambda *args, **kwargs: obj(self, *args, **kwargs)
+            # Mirror the object's signature so that callers see the real interface.
+            wrapper = lambda *args, **kwargs: obj(self, *args, **kwargs)
+            if hasattr(obj, "__signature__"):
+                wrapper.__signature__ = obj.__signature__
+                wrapper.__name__ = obj.__name__
+                wrapper.__doc__ = getattr(obj, "__doc__", "")
+            return wrapper
         return obj
 
     def __repr__(self) -> str:
