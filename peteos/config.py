@@ -272,7 +272,7 @@ class ConfigManager:
             RuntimeError: If backend loading or detection fails.
         """
         # Guard against repeated initialization — singleton semantics
-        if cls._config_file is not None:
+        if "CONFIG" in cls._variables:
             _logger.debug("ConfigManager.init() skipped — already initialized")
             return False
 
