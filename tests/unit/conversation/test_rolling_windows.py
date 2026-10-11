@@ -9,6 +9,14 @@ from peteos.conversation.system_prompt_message import SystemPromptMessage
 from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 
 
+@pytest.fixture(autouse=True)
+def _session_dir(tmp_path):
+    """Set CONFIG_DIR and SESSIONS_DIR before each test so Session creates its dir in the temp location."""
+    from peteos.config import ConfigManager
+    ConfigManager.set_variable("CONFIG_DIR", str(tmp_path), overwrite=True)
+    ConfigManager.set_variable("SESSIONS_DIR", str(tmp_path / "sessions"), overwrite=True)
+
+
 class TestContextRollingTokenWindow:
     """Tests for Context.rolling_token_window."""
 
@@ -113,7 +121,7 @@ class TestSessionRollingTokenWindow:
 
     def _make_session(self) -> Session:
         """Create a session with a context containing a few messages."""
-        session = Session.create(parent_dir="/tmp/test_session")
+        session = Session.create()
         return session
 
     def _count_ctx_tokens(self, ctx: Context) -> int:
@@ -143,6 +151,6 @@ class TestSessionRollingTokenWindow:
         assert self._count_ctx_tokens(result) <= 55
 
     def test_no_active_context_returns_none(self):
-        session = Session("/tmp/test_nocx")
+        session = Session()
         assert session.rolling_sequence_window(2) is None
         assert session.rolling_token_window(100) is None

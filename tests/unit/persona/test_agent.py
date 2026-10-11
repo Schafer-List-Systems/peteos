@@ -1,17 +1,31 @@
 """Unit tests for the persona Agent class."""
 
-import asyncio
-import uuid
-from pathlib import Path
-
 import pytest
 
-from peteos.utils import json
-
+from peteos.config import ConfigManager
 from peteos.persona.agent import Agent
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 
+
+def _reset_config_state():
+    """Reset ConfigManager state for clean test isolation."""
+    ConfigManager._config_file = None
+    ConfigManager._config_dir = None
+    ConfigManager._variables.clear()
+    ConfigManager._on_reloaded_hooks.clear()
+    ConfigManager._file_observer = None
+    ConfigManager._file_observer_thread = None
+
+
+@pytest.fixture(autouse=True)
+def config_for_agent_tests(tmp_path):
+    """Set up minimum ConfigManager state for session-dependent tests."""
+    _reset_config_state()
+    ConfigManager._variables["CONFIG_DIR"] = str(tmp_path / "peteos")
+    ConfigManager.set_variable("SESSIONS_DIR", "{CONFIG_DIR}/sessions")
+    yield
+    _reset_config_state()
 
 
 @pytest.fixture
@@ -19,27 +33,14 @@ def agent():
     """Create a fresh Agent for each test."""
     role = Role(name="test", description="Test role", model=".*")
     tool_manager = ToolManager()
-    return Agent(role, tool_manager, agent_base="/tmp/agent_test")
-
-
-@pytest.fixture
-def agent_with_sessions():
-    """Create a fresh Agent with auto-cleanup."""
-    role = Role(name="test", description="Test role", model=".*")
-    tool_manager = ToolManager()
-    ag = Agent(role, tool_manager, agent_base="/tmp/agent_test")
-    yield ag
-    # No is_running()/stop() on persona Session — just clear dict
-    ag._sessions.clear()
+    return Agent(role, tool_manager)
 
 
 @pytest.fixture
 def agent_with_assistant_role():
     role = Role(name="assistant", description="Assistant role", model=".*")
     tool_manager = ToolManager()
-    ag = Agent(role, tool_manager, agent_base="/tmp/agent_test")
-    yield ag
-    ag._sessions.clear()
+    return Agent(role, tool_manager)
 
 
 @pytest.fixture
@@ -51,9 +52,7 @@ def agent_with_auto_approve():
         auto_approve_tools=["web_fetch"]
     )
     tool_manager = ToolManager()
-    ag = Agent(role, tool_manager, agent_base="/tmp/agent_test")
-    yield ag
-    ag._sessions.clear()
+    return Agent(role, tool_manager)
 
 
 class TestAgentInit:
@@ -61,10 +60,6 @@ class TestAgentInit:
 
     def test_agent_creation(self, agent):
         assert agent._role.name == "test"
-        assert len(agent._sessions) == 0
-
-    def test_agent_dir_property(self, agent):
-        assert agent.agent_dir == "/tmp/agent_test/test"
 
     def test_role_property(self, agent):
         assert agent.role.name == "test"
@@ -86,149 +81,61 @@ class TestAgentChannelRegistry:
         assert not hasattr(agent, "list_channels")
 
 
-class TestAgentSessionManagement:
-    """Test Agent session lifecycle."""
-
-    @pytest.mark.asyncio
-    async def test_create_session(self, agent_with_sessions):
-        session = await agent_with_sessions.create_session()
-        assert session.uuid in agent_with_sessions._sessions
-        assert session.active_context is not None
-        # Session should have system_prompt_message and tool_definitions_message
-        assert session.active_context.system_prompt_message is not None
-        assert session.active_context.tool_definitions_message is not None
-
-    @pytest.mark.asyncio
-    async def test_get_session(self, agent_with_sessions):
-        session = await agent_with_sessions.create_session()
-        retrieved = agent_with_sessions.get_session(session.uuid)
-        assert retrieved is session
-
-    @pytest.mark.asyncio
-    async def test_get_session_not_found(self, agent_with_sessions):
-        assert agent_with_sessions.get_session(str(uuid.uuid4())) is None
-
-    @pytest.mark.asyncio
-    async def test_list_sessions(self, agent_with_sessions):
-        s1 = await agent_with_sessions.create_session()
-        s2 = await agent_with_sessions.create_session()
-        sessions = agent_with_sessions.list_sessions()
-        assert len(sessions) == 2
-        assert s1.uuid in sessions
-        assert s2.uuid in sessions
-
-    @pytest.mark.asyncio
-    async def test_destroy_session_stops_session(self, agent_with_sessions):
-        """destroy_session calls session.stop() (which may fail on simple Session)."""
-        session = await agent_with_sessions.create_session()
-        # destroy_session calls await session.stop()
-        # If the persona Session doesn't have stop(), this will raise
-        # The TODO comment in the code acknowledges this inconsistency
-        try:
-            result = await agent_with_sessions.destroy_session(session.uuid)
-            assert result is True
-            assert session.uuid not in agent_with_sessions._sessions
-        except AttributeError:
-            # Expected: persona Session has no stop() method
-            pass
-
-    @pytest.mark.asyncio
-    async def test_destroy_session_not_found(self, agent_with_sessions):
-        result = await agent_with_sessions.destroy_session(uuid.uuid4())
-        assert result is False
-
-
 class TestAgentHooks:
     """Test Agent hook registration and behavior."""
 
     @pytest.mark.asyncio
-    async def test_session_has_hooks_registered(self, agent_with_sessions):
-        session = await agent_with_sessions.create_session()
-        # The Session should have hooks registered for tool list and tool filter
-        # These are registered on the tool_definitions_message
+    async def test_session_has_hooks_registered(self, agent):
+        """create_session registers hooks on the session's tool_definitions_message."""
+        session = await agent.create_session()
         assert len(session._message_hooks) > 0
 
     @pytest.mark.asyncio
-    async def test_on_before_notification_publish_not_implemented(self, agent_with_sessions):
+    async def test_on_before_notification_publish_not_implemented(self, agent):
         """The persona Agent does not yet have _on_before_notification_publish.
 
         The code has a TODO in create_session about registering these hooks
         on the environment. This test documents the current state.
         """
-        assert not hasattr(agent_with_sessions, "_on_before_notification_publish")
+        assert not hasattr(agent, "_on_before_notification_publish")
 
 
 class TestAgentToolHooks:
     """Test Agent tool list and tool filter hooks."""
 
-    @pytest.mark.asyncio
-    async def test_tool_list_hook_returns_json(self, agent_with_sessions):
+    def test_tool_list_hook_returns_json(self):
+        """_tool_list_hook returns a JSON list of tool definitions."""
         tool_manager = ToolManager()
-        tool_manager.register_tool(Tool(name="calc", description="calculator", func=lambda: None))
+        tool_manager.register_tool(
+            Tool(name="calc", description="calculator", func=lambda: None)
+        )
         role = Role(name="test", description="Test role", model=".*")
-        agent = Agent(role, tool_manager, agent_base="/tmp/agent_test")
-        session = await agent.create_session()
+        agent = Agent(role, tool_manager)
         result = agent._tool_list_hook()
-        parsed = json.loads(result)
+        parsed = pytest.importorskip("json").loads(result)
         assert len(parsed) == 1
         assert parsed[0]["name"] == "calc"
         assert "description" in parsed[0]
         assert "parameters" in parsed[0]
 
-    @pytest.mark.asyncio
-    async def test_tool_list_hook_empty_when_no_tools(self, agent_with_sessions):
-        result = agent_with_sessions._tool_list_hook()
-        parsed = json.loads(result)
+    def test_tool_list_hook_empty_when_no_tools(self, agent):
+        """_tool_list_hook returns an empty list when no tools are registered."""
+        result = agent._tool_list_hook()
+        parsed = pytest.importorskip("json").loads(result)
         assert parsed == []
 
-    @pytest.mark.asyncio
-    async def test_tool_filter_hook_returns_empty_list(self, agent_with_sessions):
-        result = agent_with_sessions._tool_filter_hook()
-        parsed = json.loads(result)
+    def test_tool_filter_hook_returns_empty_list(self, agent):
+        """_tool_filter_hook returns an empty list when no role filter is set."""
+        result = agent._tool_filter_hook()
+        parsed = pytest.importorskip("json").loads(result)
         assert parsed == []
 
     @pytest.mark.asyncio
     async def test_tool_filter_hook_returns_role_filter(self):
+        """_tool_filter_hook returns the role's tool filter."""
         role = Role(name="filtered", description="F", tool_filter=["calc.*", "read.*"])
         tool_manager = ToolManager()
-        agent = Agent(role, tool_manager, agent_base="/tmp/agent_test")
-        session = await agent.create_session()
+        agent = Agent(role, tool_manager)
         result = agent._tool_filter_hook()
-        parsed = json.loads(result)
+        parsed = pytest.importorskip("json").loads(result)
         assert parsed == ["calc.*", "read.*"]
-
-    @pytest.mark.asyncio
-    async def test_session_has_tool_hooks_registered(self, agent_with_sessions):
-        """Verify tool hooks are registered on the session."""
-        session = await agent_with_sessions.create_session()
-        # Check that the tool_definitions_message has hook_ids registered
-        tool_defs = session.active_context.tool_definitions_message
-        assert len(tool_defs.raw_dict.get("_hook_ids", [])) >= 2
-
-
-class TestAgentLoad:
-    """Test Agent.load — loading a session from disk."""
-
-    @pytest.mark.asyncio
-    async def test_load_returns_session(self, agent_with_sessions):
-        created = await agent_with_sessions.create_session()
-        created.save()  # Persist to disk so load can find it
-        loaded = agent_with_sessions.load(str(created.uuid))
-        assert loaded.uuid == created.uuid
-
-    @pytest.mark.asyncio
-    async def test_load_registers_tool_hooks(self, agent_with_sessions):
-        """Load re-registers tool hooks on the session."""
-        session = await agent_with_sessions.create_session()
-        session.save()
-        loaded = agent_with_sessions.load(str(session.uuid))
-        # Hooks should still be registered (re-registered by load)
-        assert len(loaded._message_hooks) > 0
-
-    @pytest.mark.asyncio
-    async def test_load_stores_session_in_dict(self, agent_with_sessions):
-        session = await agent_with_sessions.create_session()
-        session.save()
-        loaded = agent_with_sessions.load(str(session.uuid))
-        assert loaded.uuid in agent_with_sessions._sessions
-        assert agent_with_sessions.get_session(loaded.uuid) is loaded

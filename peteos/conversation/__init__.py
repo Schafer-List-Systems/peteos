@@ -9,6 +9,11 @@ Classes: ``ContentPart``, ``Message``, ``MessageRegistry``, ``Context``,
 ``Session``, ``SystemPromptMessage``, ``ToolDefinitionsMessage``.
 """
 
+from peteos.config import ConfigManager
+
+# Set SESSIONS_DIR once on first import — used by Session for its session_dir
+ConfigManager.set_variable("SESSIONS_DIR", "{CONFIG_DIR}/sessions")
+
 from peteos.conversation.message import ContentPart, Message
 from peteos.conversation.message_registry import MessageRegistry
 from peteos.conversation.context import Context

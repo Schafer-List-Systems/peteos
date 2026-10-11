@@ -29,20 +29,23 @@ class TestConfigVariables:
         _reset_config_state()
 
     def test_set_variable_basic(self):
-        """set_variable stores the key-value pair."""
-        ConfigManager.set_variable("FOO", "bar")
+        """set_variable stores the key-value pair and returns True."""
+        result = ConfigManager.set_variable("FOO", "bar")
+        assert result is True
         assert ConfigManager._variables["FOO"] == "bar"
 
-    def test_set_variable_raises_on_duplicate(self):
-        """set_variable raises ValueError when key exists and overwrite is False."""
+    def test_set_variable_no_overwrite_returns_False(self):
+        """set_variable returns False when key exists and overwrite is False."""
         ConfigManager.set_variable("FOO", "bar")
-        with pytest.raises(ValueError, match="FOO"):
-            ConfigManager.set_variable("FOO", "baz")
+        result = ConfigManager.set_variable("FOO", "baz", overwrite=False)
+        assert result is False
+        assert ConfigManager._variables["FOO"] == "bar"
 
     def test_set_variable_overwrites_when_allowed(self):
-        """set_variable replaces value when overwrite=True."""
+        """set_variable replaces value and returns True when overwrite=True."""
         ConfigManager.set_variable("FOO", "bar")
-        ConfigManager.set_variable("FOO", "baz", overwrite=True)
+        result = ConfigManager.set_variable("FOO", "baz", overwrite=True)
+        assert result is True
         assert ConfigManager._variables["FOO"] == "baz"
 
     def test_get_variable_returns_value(self):
@@ -323,7 +326,9 @@ class TestConfigInit:
         assert result is True
         assert ConfigManager._config_file == str(config_file)
         assert ConfigManager._config_dir == config_dir
-        assert "test-backend" in ConfigManager._config_file  # spot-check: set on class
+        # spot-check: backend was loaded into ChatBotManager
+        from peteos.chatbot import ChatBotManager
+        assert "test-backend" in ChatBotManager._backends
 
     @pytest.mark.asyncio
     async def test_init_is_idempotent(self, tmp_path):

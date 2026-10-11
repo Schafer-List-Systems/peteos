@@ -90,7 +90,7 @@ class Runner(ActiveClass):
     each reasoning iteration.
     """
 
-    def __init__(self, agent: "Agent", session_uuid: "_uuid.UUID", chatbot: "ChatBot | None" = None) -> None:
+    def __init__(self, agent: "Agent", session: Session, chatbot: "ChatBot | None" = None) -> None:
         """Initialize the runner for a specific session.
 
         Grabs role, tool manager from the agent.
@@ -98,22 +98,18 @@ class Runner(ActiveClass):
 
         Args:
             agent: The Agent owning this session.
-            session_uuid: The UUID of the session this runner controls.
+            session: The Session this runner controls.
             chatbot: Optional chatbot; if None, selects from manager based on role.model.
         """
         super().__init__()
         self._agent = agent
-        self._session_uuid = session_uuid
-        self.uuid = session_uuid
+        self._session: Session = session
+        self._session_uuid = session.uuid
+        self.uuid = session.uuid
         self._channels: set[Channel] = set()
         self._critical_error: BaseException | None = None
         self._idle: asyncio.Event = asyncio.Event()
         self._activity_state: ActivityState = ActivityState.STOPPED
-
-        # Pull configuration from the agent (not the session data model)
-        self._session: Session = agent.get_session(session_uuid)
-        if self._session is None:
-            raise ValueError(f"Session {session_uuid} not found in agent")
 
         self._execution_environment = ExecutionEnvironment(
             tool_manager=agent._tool_manager,

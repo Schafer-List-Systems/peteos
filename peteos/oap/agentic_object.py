@@ -293,6 +293,7 @@ class AgenticObject:
         self._oap_system_prompt_hooks: dict[str, Callable[[], str]] = {}
         self._oap_thread_store: dict[str, str] = {}
         self._oap_runner_store: dict[str, Runner] = {}
+        self._oap_session_store: dict[str, Session] = {}
         self._oap_auto_approve_tools: list[str] = []
         self._oap_local_hooks: dict[str, list[Callable]] = {
             "before_send_to_chatbot": [_context_reduction_hook],
@@ -842,7 +843,7 @@ class AgenticObject:
         return self._oap_role
 
     async def _start_session(self, session: Session) -> Runner:
-        runner = Runner(self._oap_agent, session.uuid)
+        runner = Runner(self._oap_agent, session)
         runner._execution_environment.auto_approve_tools = list(self._oap_auto_approve_tools)
         runner.sandbox_builder = self._create_sandbox_builder(
             _collect_oap_config(self.__class__), runner
@@ -907,7 +908,7 @@ class AgenticObject:
             stored_uuid = self._oap_thread_store.get(persistent_thread_id)
             if stored_uuid is not None:
                 _logger.debug("invoke_agent[%s]: reusing thread %s", self.__class__.__name__, persistent_thread_id)
-                session = self._oap_agent.get_session(stored_uuid)
+                session = self._oap_session_store.get(stored_uuid)
                 if session is not None:
                     if session.is_active:
                         return Error(
@@ -933,6 +934,7 @@ class AgenticObject:
             else:
                 self._oap_thread_store[str(session.uuid)] = session.uuid
                 self._oap_runner_store[str(session.uuid)] = runner
+            self._oap_session_store[str(session.uuid)] = session
 
         if persistent_thread_id is not None:
             if runner.state.get("_persistent_thread_id") is None:
@@ -1180,9 +1182,10 @@ class AgenticObject:
                     session_uuid_str = str(session.uuid)
                     await self.suspend_thread(session_uuid_str)
                     self._oap_runner_store.pop(session_uuid_str, None)
+                    self._oap_session_store.pop(session_uuid_str, None)
                     self._oap_thread_store.pop(session_uuid_str, None)
                     if session is not None:
-                        await self._oap_agent.destroy_session(session.uuid)
+                        session.save()
 
                 # Park persistent threads for reuse without stopping the runner.
                 else:
@@ -1244,7 +1247,7 @@ class AgenticObject:
         stored_uuid = self._oap_thread_store.get(thread_id)
         if stored_uuid is None:
             return
-        session = self._oap_agent.get_session(stored_uuid)
+        session = self._oap_session_store.get(stored_uuid)
         runner = self._oap_runner_store.get(thread_id)
         if runner is None and session is None:
             return

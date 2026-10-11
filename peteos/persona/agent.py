@@ -1,10 +1,5 @@
 """Agent - Central hub for session management and notifications."""
 
-import asyncio
-import uuid
-from pathlib import Path
-from typing import Dict, Optional
-
 from peteos.utils import get_logger, json
 
 from peteos.conversation.system_prompt_message import SystemPromptMessage
@@ -29,34 +24,26 @@ class Agent:
 
     The session's event loop runs in a background task (created by start()).
 
-    The ``agent_base`` class attribute must be set by ``ConfigManager.init()``
-    before any Agent instances are created.
+    Session storage is the responsibility of the caller, not the Agent class.
     """
-
-    agent_base: str = ""
 
     def __init__(
         self,
         role: Role,
         tool_manager: ToolManager,
-        agent_base: str | None = None,
     ):
         self._role = role
         self._tool_manager = tool_manager
-        base = agent_base or self.__class__.agent_base
-        self._agent_dir = str(Path(base) / role.name)
-        Path(self._agent_dir).mkdir(parents=True, exist_ok=True)
-
-        # Session management
-        self._sessions: Dict[str, Session] = {}
 
     async def create_session(self) -> Session:
-        """Create a new session for this agent."""
+        """Create a new session for this agent.
+
+        The session resolves its own session directory via ConfigManager.
+        The caller is responsible for storing the session reference.
+        """
         system_prompt_msg = SystemPromptMessage.create(self._role.system_prompt)
         tool_defs_msg = ToolDefinitionsMessage()
-        session = Session.create(self._agent_dir, system_prompt_msg, tool_defs_msg)
-        session.session_dir.mkdir(exist_ok=True)
-        self._sessions[session.uuid] = session
+        session = Session.create(system_prompt_msg, tool_defs_msg)
 
         session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_LIST_HOOK_NAME, self._tool_list_hook)
         session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_FILTER_HOOK_NAME, self._tool_filter_hook)
@@ -66,28 +53,10 @@ class Agent:
 
         return session
 
-    def get_session(self, session_uuid: str) -> Session | None:
-        """Get a session by its UUID."""
-        return self._sessions.get(session_uuid)
-
-    def list_sessions(self) -> Dict[str, Session]:
-        """List all sessions."""
-        return dict(self._sessions)
-
-    @property
-    def agent_dir(self) -> str:
-        """Return the agent's directory path."""
-        return self._agent_dir
-
     @property
     def role(self) -> Role:
         """Return this agent's role."""
         return self._role
-
-    @property
-    def tool_manager(self) -> ToolManager:
-        """Return this agent's tool manager."""
-        return self._tool_manager
 
     def _tool_list_hook(self) -> str:
         """Hook callback that returns the tool list as a JSON string."""
@@ -108,43 +77,4 @@ class Agent:
     def _tool_filter_hook(self) -> str:
         """Hook callback that returns the tool filter as a JSON string."""
         return json.dumps(self._role.tool_filter or [])
-
-    def load(self, session_uuid: str) -> Session:
-        """Load a session from disk.
-
-        The session is loaded from ``{agent_dir}/{session_uuid}/session.json``.
-
-        Args:
-            session_uuid: The session's UUID or subdirectory name.
-
-        Returns:
-            A new Session instance.
-        """
-        session = Session.load(self._agent_dir, session_uuid)
-        self._sessions[session.uuid] = session
-
-        # Register tool hooks
-        tool_defs_msg = session.active_context.tool_definitions_message
-        session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_LIST_HOOK_NAME, self._tool_list_hook)
-        session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_FILTER_HOOK_NAME, self._tool_filter_hook)
-
-        # hooks can resolve tool definitions. Options: session setter or
-        # agent method like session.register_tool_hook(tool_manager).
-        return session
-
-    async def destroy_session(self, session_uuid: uuid.UUID) -> bool:
-        """Destroy a session by its UUID.
-
-        Stops the session's event loop.
-        """
-        if session_uuid in self._sessions:
-            session = self._sessions[session_uuid]
-            # TODO: this is inconsistent: the persona package should not know about engine properties
-            #await session.stop()
-
-            if session._autosave:
-                session.save()
-            del self._sessions[session_uuid]
-            return True
-        return False
 

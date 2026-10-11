@@ -14,51 +14,61 @@ from peteos.conversation.system_prompt_message import SystemPromptMessage
 from peteos.conversation.tool_definitions_message import ToolDefinitionsMessage
 
 
+@pytest.fixture(autouse=True)
+def _session_dir(tmp_path):
+    """Set CONFIG_DIR and SESSIONS_DIR before each test so Session creates its dir in the temp location."""
+    from peteos.config import ConfigManager
+    ConfigManager.set_variable("CONFIG_DIR", str(tmp_path), overwrite=True)
+    ConfigManager.set_variable("SESSIONS_DIR", str(tmp_path / "sessions"), overwrite=True)
+
+
 class TestSessionCreation:
     """Tests for Session initialization and factory methods."""
 
     def test_init_empty(self):
-        session = Session("/some/path")
+        session = Session()
         assert session.uuid != ""
         assert session.active_context is None
         assert session.active_context_id is None
 
     def test_init_with_json_dict(self):
         sd = {"uuid": "test-uuid-123", "active_context_id": None}
-        session = Session("/some/path", sd)
+        session = Session(sd)
         assert session.uuid == "test-uuid-123"
 
     def test_init_default_uuid(self):
-        session = Session("/some/path", {})
+        session = Session({})
         assert session.uuid != ""
 
-    def test_session_dir(self):
-        session = Session("/tmp", {"uuid": "abc123"})
-        assert session.session_dir == Path("/tmp/abc123")
+    def test_session_dir(self, tmp_path):
+        sd = {"uuid": "abc123"}
+        session = Session(sd)
+        expected = tmp_path / "sessions" / "abc123"
+        assert session.session_dir == expected
 
     def test_raw_dict(self):
-        session = Session("/some/path")
+        session = Session()
         assert isinstance(session.raw_dict, dict)
         assert "uuid" in session.raw_dict
 
     def test_auto_approve_tools_default_empty(self):
-        session = Session("/some/path")
+        session = Session()
         assert session.auto_approve_tools == []
 
     def test_create_empty(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         assert session.active_context is not None
         assert session.active_context_id == session.active_context.id
         assert len(session.active_context.messages) == 0
 
     def test_create_with_system_prompt(self):
         sys_msg = SystemPromptMessage.create("You are helpful.")
-        session = Session.create("/some/path", system_prompt_message=sys_msg)
+        session = Session.create(system_prompt_message=sys_msg)
         assert session.active_context.system_prompt_message is sys_msg
 
     def test_create_with_tool_definitions(self):
         tools_msg = ToolDefinitionsMessage()
-        session = Session.create("/some/path", tool_definitions_message=tools_msg)
+        session = Session.create(tool_definitions_message=tools_msg)
         assert session.active_context.tool_definitions_message is tools_msg
 
 
@@ -66,7 +76,7 @@ class TestSessionActiveContext:
     """Tests for active_context property and set_active_context."""
 
     def test_set_active_context(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         assert session.active_context is not None
 
         new_ctx = Context.create()
@@ -75,7 +85,7 @@ class TestSessionActiveContext:
         assert session.raw_dict["active_context_id"] == new_ctx.id
 
     def test_set_active_context_updates_json_dict(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         old_id = session.active_context_id
         new_ctx = Context.create()
         session.set_active_context(new_ctx)
@@ -83,7 +93,7 @@ class TestSessionActiveContext:
         assert session.raw_dict["active_context_id"] != old_id
 
     def test_active_context_is_none_when_not_set(self):
-        session = Session("/some/path", {})
+        session = Session({})
         assert session.active_context is None
         assert session.active_context_id is None
 
@@ -92,7 +102,7 @@ class TestSessionHooks:
     """Tests for Session hook registration and materialization."""
 
     def test_register_hook(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         msg = Message.create("user", [ContentPart.create_text("test")])
         hook_id = session.register_hook(msg, "test_hook", lambda: "callback result")
         assert hook_id is not None
@@ -100,7 +110,7 @@ class TestSessionHooks:
         assert hook_id in msg.hook_ids
 
     def test_register_hook_deterministic_id(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         msg1 = Message.create("user", [ContentPart.create_text("a")])
         msg2 = Message.create("user", [ContentPart.create_text("b")])
         hook1 = session.register_hook(msg1, "same_name", lambda: "a")
@@ -109,7 +119,7 @@ class TestSessionHooks:
         assert hook1 == hook2
 
     def test_register_hook_updates_hook_index(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         ctx = session.active_context
         assert len(ctx.hook_index) == 0
 
@@ -122,13 +132,13 @@ class TestSessionHooks:
 
     def test_register_hook_on_non_active_context_noop(self):
         """If no active context, register_hook should not crash."""
-        session = Session("/some/path", {})
+        session = Session({})
         msg = Message.create("user", [ContentPart.create_text("test")])
         hook_id = session.register_hook(msg, "hook", lambda: "result")
         assert hook_id is not None
 
     def test_hook_id_is_sha256(self):
-        session = Session("/some/path")
+        session = Session()
         hook_id = session._make_hook_id("test_name")
         expected = hashlib.sha256("test_name".encode("utf-8")).hexdigest()
         assert hook_id == expected
@@ -189,7 +199,7 @@ class TestSessionMaterialize:
     """Tests for Session.materialize()."""
 
     def test_materialize_runs_hooks(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         ctx = session.active_context
         calls = []
 
@@ -204,7 +214,7 @@ class TestSessionMaterialize:
         assert len(calls) == 1
 
     def test_materialize_stores_content_in_content_map(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         ctx = session.active_context
         hook_output = "dynamic content text"
 
@@ -218,7 +228,7 @@ class TestSessionMaterialize:
 
     def test_materialize_calls_message_materialize(self):
         """Materialize calls msg.materialize() with the right arguments."""
-        session = Session.create("/some/path")
+        session = Session.create()
         ctx = session.active_context
 
         msg = Message.create("user", [ContentPart.create_text("hooked")])
@@ -237,7 +247,7 @@ class TestSessionMaterialize:
         assert call_count[0] == 1
 
     def test_materialize_with_multiple_hooks(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         ctx = session.active_context
 
         msg1 = Message.create("user", [ContentPart.create_text("hooked1")])
@@ -253,7 +263,7 @@ class TestSessionMaterialize:
         assert hash2 in session.active_context.content_map
 
     def test_materialize_with_static_messages_only(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         session.active_context.append(Message.create("user", [ContentPart.create_text("static")]))
 
         # Should not crash — no hooks to materialize
@@ -262,7 +272,6 @@ class TestSessionMaterialize:
     def test_materialize_system_prompt_materialization(self):
         """SystemPromptMessage should be materialized if it has hook IDs."""
         session = Session.create(
-            "/some/path",
             system_prompt_message=SystemPromptMessage.create("static base"),
         )
 
@@ -280,7 +289,7 @@ class TestSessionMaterialize:
 
     def test_materialize_hook_output_hashed(self):
         """Verify the hook output is hashed and stored correctly."""
-        session = Session.create("/some/path")
+        session = Session.create()
         hook_text = "my dynamic text"
 
         msg = Message.create("user", [ContentPart.create_text("hooked")])
@@ -299,19 +308,19 @@ class TestSessionSaveLoad:
     def test_save_creates_session_file(self):
         with patch("pathlib.Path.mkdir"):
             with patch("builtins.open", MagicMock()):
-                session = Session.create("/tmp", system_prompt_message=SystemPromptMessage.create("hello"))
+                session = Session.create(system_prompt_message=SystemPromptMessage.create("hello"))
                 session.save()
                 # Should not crash
 
     def test_save_creates_context_file(self):
         with patch("pathlib.Path.mkdir"):
             with patch("builtins.open", MagicMock()):
-                session = Session.create("/tmp")
+                session = Session.create()
                 session.save()
                 # Should not crash
 
     def test_save_includes_auto_approve_tools(self):
-        session = Session.create("/tmp")
+        session = Session.create()
         session._json_dict["auto_approve_tools"] = ["tool_a", "tool_b"]
         with patch("pathlib.Path.mkdir"):
             with patch("builtins.open", MagicMock()):
@@ -319,19 +328,19 @@ class TestSessionSaveLoad:
 
     def test_load_missing_file_raises(self):
         with pytest.raises(FileNotFoundError, match="session.json not found"):
-            Session.load("/nonexistent/path", "abc123")
+            Session.load("abc123")
 
 
 class TestSessionActiveContextPersistence:
     """Tests for active_context_id in session state."""
 
     def test_active_context_id_set_on_create(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         assert session.active_context_id is not None
         assert session.active_context_id == session.active_context.id
 
     def test_active_context_id_updated_on_set(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         original_id = session.active_context_id
         new_ctx = Context.create()
         session.set_active_context(new_ctx)
@@ -339,7 +348,7 @@ class TestSessionActiveContextPersistence:
         assert session.active_context_id != original_id
 
     def test_active_context_property_matches_json_dict(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         assert session.active_context is not None
         assert session.active_context_id == session.active_context.id
 
@@ -348,14 +357,14 @@ class TestSessionRegisterHookEdgeCases:
     """Edge cases for hook registration."""
 
     def test_register_hook_with_empty_name(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         msg = Message.create("user", [ContentPart.create_text("test")])
         hook_id = session.register_hook(msg, "", lambda: "result")
         assert hook_id is not None
         assert hook_id in msg.hook_ids
 
     def test_register_multiple_hooks_same_message(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         msg = Message.create("user", [ContentPart.create_text("multi")])
         h1 = session.register_hook(msg, "hook_one", lambda: "a")
         h2 = session.register_hook(msg, "hook_two", lambda: "b")
@@ -364,7 +373,7 @@ class TestSessionRegisterHookEdgeCases:
         assert h2 in msg.hook_ids
 
     def test_register_hook_updates_hook_index_for_same_message(self):
-        session = Session.create("/some/path")
+        session = Session.create()
         ctx = session.active_context
         msg = Message.create("user", [ContentPart.create_text("test")])
         ctx.append(msg)
@@ -379,7 +388,7 @@ class TestSessionHooksMaterializeContent:
 
     def test_full_materialization_chain(self):
         """End-to-end: register hook → materialize → verify content map."""
-        session = Session.create("/some/path")
+        session = Session.create()
         hook_output = "the quick brown fox"
 
         msg = Message.create("user", [ContentPart.create_text("test")])
@@ -396,7 +405,7 @@ class TestSessionHooksMaterializeContent:
 
     def test_materialize_gathers_dynamic_messages(self):
         """Verify only messages with hooks get materialized."""
-        session = Session.create("/some/path")
+        session = Session.create()
         ctx = session.active_context
 
         static_msg = Message.create("user", [ContentPart.create_text("static")])

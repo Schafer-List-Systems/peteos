@@ -105,8 +105,7 @@ class TestHooksOnSystemPromptMessage:
     def _make_session_with_hooks(self, obj: AgenticObject) -> Session:
         """Create a session and register the object's system prompt hooks."""
         spm = SystemPromptMessage.create("static prompt")
-        session = Session.create(obj._oap_agent.agent_dir, spm, None)
-        session.session_dir.mkdir(exist_ok=True)
+        session = Session.create(system_prompt_message=spm, tool_definitions_message=None)
         for name, callback in obj._oap_system_prompt_hooks.items():
             session.register_hook(spm, name, callback)
         return session

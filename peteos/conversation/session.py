@@ -87,21 +87,21 @@ class Session:
     Wraps a JSON dict as the source of truth.
     """
 
-    def __init__(self, parent_dir: str, json_dict: dict | None = None) -> None:
+    def __init__(self, json_dict: dict | None = None) -> None:
         """
         Args:
-            parent_dir: The agent directory (parent of the session subdirectory).
             json_dict: The raw serialized session dict.
         """
         if json_dict is None:
             json_dict = {}
 
-        self._parent_dir = parent_dir
         self._json_dict = json_dict
         self._json_dict.setdefault(
             "uuid",
             f"{datetime.date.today().strftime('%Y%m%d')}-{uuid.uuid4()}",
         )
+        # Session owns its directory — create it immediately
+        self.session_dir.mkdir(parents=True, exist_ok=True)
         self._json_dict.setdefault("active_context_id", None)
         self._json_dict.setdefault("auto_approve_tools", [])
         self._json_dict.setdefault("state_data", {})
@@ -115,8 +115,9 @@ class Session:
 
     @property
     def session_dir(self) -> Path:
-        """Return the session directory path (parent_dir / uuid)."""
-        return Path(self._parent_dir) / self.uuid
+        """Return the session directory path (resolved from SESSIONS_DIR)."""
+        from peteos.config import ConfigManager
+        return ConfigManager.resolve_path("{SESSIONS_DIR}/" + self.uuid)
 
     def register_hook(self, message: Message, name: str, callback: Callable[[], str]) -> str:
         """Register a hook on a message in the active context."""
@@ -261,21 +262,19 @@ class Session:
     @classmethod
     def create(
         cls,
-        parent_dir: str,
         system_prompt_message: SystemPromptMessage | None = None,
         tool_definitions_message: ToolDefinitionsMessage | None = None,
     ) -> "Session":
         """Create a new session with a freshly created context.
 
         Args:
-            parent_dir: The agent directory.
             system_prompt_message: Optional system prompt for this session.
             tool_definitions_message: Optional tool definitions for this session.
 
         Returns:
             A new Session instance with the active context set.
         """
-        session = cls(parent_dir)
+        session = cls()
         session._active_context = Context.create(
             system_prompt_message=system_prompt_message,
             tool_definitions_message=tool_definitions_message,
@@ -285,26 +284,29 @@ class Session:
         return session
 
     @classmethod
-    def load(cls, parent_dir: str, session_uuid: str) -> "Session":
-        """Load a session from a directory containing session.json.
+    def load(cls, session_uuid: str) -> "Session":
+        """Load a session from its session.json file.
 
-        The session directory is ``parent_dir / session_uuid``.
+        The session is resolved from SESSIONS_DIR using the session UUID.
 
         Args:
-            parent_dir: The agent directory.
             session_uuid: The session's UUID (also the subdirectory name).
 
         Raises:
             FileNotFoundError: If session.json does not exist in the directory.
         """
-        session_path = Path(parent_dir) / session_uuid / "session.json"
+        from peteos.config import ConfigManager
+
+        session_path = ConfigManager.resolve_path(
+            "{SESSIONS_DIR}/" + session_uuid + "/session.json"
+        )
         if not session_path.exists():
             raise FileNotFoundError(f"session.json not found in {session_path}")
 
         with open(session_path, "r") as f:
             json_dict = json.load(f)
 
-        session = cls(parent_dir, json_dict)
+        session = cls(json_dict)
         if json_dict.get("active_context_id"):
             context_path = session.session_dir / (json_dict["active_context_id"] + ".json")
             session._active_context = Context.load(context_path)

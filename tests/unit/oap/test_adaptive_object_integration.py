@@ -130,8 +130,7 @@ def _make_session_with_agent(obj: AdaptiveObject) -> tuple[Session, Agent, Role]
 
     system_prompt_msg = SystemPromptMessage.create(role.system_prompt)
     tool_defs_msg = ToolDefinitionsMessage()
-    session = Session.create(agent.agent_dir, system_prompt_msg, tool_defs_msg)
-    session.session_dir.mkdir(exist_ok=True)
+    session = Session.create(system_prompt_message=system_prompt_msg, tool_definitions_message=tool_defs_msg)
     session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_LIST_HOOK_NAME, agent._tool_list_hook)
     session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_FILTER_HOOK_NAME, agent._tool_filter_hook)
 

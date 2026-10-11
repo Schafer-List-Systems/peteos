@@ -116,23 +116,26 @@ class ConfigManager:
     _file_observer_thread: Optional[threading.Thread] = None
 
     @classmethod
-    def set_variable(cls, key: str, value: str, overwrite: bool = False) -> None:
+    def set_variable(cls, key: str, value: str, overwrite: bool = False) -> bool:
         """Add a variable to the shared variable dictionary.
 
-        Preconditions
-        The key must not already exist unless overwrite is True.
+        When overwrite is False, the operation is a no-op if the key already
+        exists and this method returns False. When overwrite is True, the
+        value is always written and this method always returns True.
 
         Args:
             key: Variable name, used as ``{key}`` in templates.
             value: Expansion value for this variable.
-            overwrite: If False, raise ValueError when overwriting an existing key.
+            overwrite: If True, always write the value and return True.
 
-        Raises:
-            ValueError: If key exists and overwrite is False.
+        Returns:
+            True if the value was written, False if it was not written
+            because the key already exists and overwrite is False.
         """
         if key in cls._variables and not overwrite:
-            raise ValueError(f"variable '{key}' is already set; overwrite=True to replace")
+            return False
         cls._variables[key] = value
+        return True
 
     @classmethod
     def get_variable(cls, key: str) -> str:
@@ -291,8 +294,10 @@ class ConfigManager:
         if config_file is None:
             _logger.warning("No peteos.json config file found in standard locations")
             return True
-
         _logger.debug("Using peteos.json config from: %s", config_file)
+
+        # Set CONFIG_DIR variable — used by resolve_path as {CONFIG_DIR} in templates
+        cls.set_variable("CONFIG_DIR", config_dir, overwrite=False)
 
         # Persist resolved config file and its dedicated directory to the singleton class
         cls._config_file = config_file
@@ -306,11 +311,6 @@ class ConfigManager:
         await ChatBotManager.load_from_json(json_obj)
         loaded_backends = list(ChatBotManager._backends.keys())
         _logger.info("Loaded %d backend(s) from peteos.json", len(loaded_backends))
-
-        # Set Agent.agent_base — used by Agent.__init__ to derive the session directory
-        agent_base = os.path.join(cls._config_dir, "agents")
-        from peteos.persona.agent import Agent
-        Agent.agent_base = agent_base
 
         # Bootstrap roles from {config_dir}/roles/ into RoleManager
         roles_dir = os.path.join(cls._config_dir, "roles")

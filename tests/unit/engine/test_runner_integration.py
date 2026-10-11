@@ -92,8 +92,9 @@ def _make_runner_with_chatbot(
     agent = MagicMock()
     agent._tool_manager = role._tool_manager
     agent.role = role
-    sid = _uuid.uuid4()
-    return Runner(agent=agent, session_uuid=sid, chatbot=bot)
+    mock_session = MagicMock()
+    mock_session.uuid = str(_uuid.uuid4())
+    return Runner(agent=agent, session=mock_session, chatbot=bot)
 
 
 # ---------------------------------------------------------------------------
@@ -114,8 +115,10 @@ class TestRunnerInit:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
 
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
         assert runner._chatbot is bot
 
     @pytest.mark.asyncio
@@ -128,9 +131,11 @@ class TestRunnerInit:
 
         ChatBotManager.reset()  # empty manager
         sid = _uuid.uuid4()
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
 
         with pytest.raises(ValueError, match="No ChatBot found"):
-            Runner(agent=agent, session_uuid=sid)
+            Runner(agent=agent, session=mock_session)
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +157,9 @@ class TestRunnerStepChains:
         msg = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
         runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
@@ -170,7 +177,9 @@ class TestRunnerStepChains:
         msg2 = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
         runner._session.active_context.total_token_count.return_value = 4096
 
         # First call: reasoning only → CONTINUE
@@ -199,7 +208,9 @@ class TestRunnerStepChains:
         msg2 = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
         runner._session.active_context.total_token_count.return_value = 4096
 
         # Step 1: tool_use → CONTINUE, foreground group created
@@ -239,7 +250,9 @@ class TestRunnerStepChains:
         ])
         bot = SimpleMockChatBot([msg1])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
         runner._session.active_context.total_token_count.return_value = 4096
 
         status, resp = await runner.step()
@@ -259,7 +272,9 @@ class TestRunnerStepChains:
 
         bot = SimpleMockChatBot([])  # empty → RuntimeError
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         with pytest.raises(RuntimeError, match="HTTP 503"):
             await runner.step()
@@ -278,7 +293,9 @@ class TestRunnerStepChains:
         ])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
         runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
@@ -298,7 +315,9 @@ class TestRunnerStepChains:
         msg2 = _make_message("assistant", [ContentPart.create_text("still going")])
         bot = SimpleMockChatBot([msg, msg2])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
         runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
@@ -321,7 +340,9 @@ class TestRunnerStepChains:
 
         bot = SimpleMockChatBot([])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         with pytest.raises(RuntimeError, match="HTTP 503"):
             await runner.step()
@@ -346,7 +367,9 @@ class TestRunnerRunLoop:
         msg = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         test_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.queue_message(test_msg)
@@ -369,7 +392,9 @@ class TestRunnerRunLoop:
         msg2 = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         test_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.queue_message(test_msg)
@@ -388,7 +413,9 @@ class TestRunnerRunLoop:
 
         bot = SimpleMockChatBot([])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         test_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.queue_message(test_msg)
@@ -416,7 +443,9 @@ class TestRunnerMessageQueue:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         user_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.queue_message(user_msg)
@@ -435,7 +464,9 @@ class TestRunnerMessageQueue:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         assert not runner.is_running()
         user_msg = _make_message("user", [ContentPart.create_text("hello")])
@@ -453,7 +484,9 @@ class TestRunnerMessageQueue:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         user_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.queue_message(user_msg)
@@ -482,7 +515,9 @@ class TestHandleToolGroup:
         msg = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
@@ -511,7 +546,9 @@ class TestHandleToolGroup:
         msg = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
@@ -535,7 +572,9 @@ class TestHandleToolGroup:
         msg = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         tc = ContentPart.create_tool_use("tc1", "add", '{"a":1,"b":2}')
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
@@ -558,7 +597,9 @@ class TestHandleToolGroup:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         result = await runner._handle_tool_group()
         assert result is False
@@ -574,7 +615,9 @@ class TestHandleToolGroup:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         tc = ContentPart.create_tool_use("tc1", "nonexistent", "{}")
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
@@ -611,7 +654,9 @@ class TestRunnerNotifications:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         ch = AsyncMock()
         runner.subscribe(ch)
@@ -636,13 +681,21 @@ class TestRunnerNotifications:
 
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
-            session = Session.create(parent_dir=tmpdir, system_prompt_message=None)
-            agent.get_session.return_value = session
+            _ctx_messages = []
+            mock_ctx = MagicMock()
+            mock_ctx.messages = _ctx_messages
+            mock_ctx.append = lambda msg: _ctx_messages.append(msg)
+            mock_ctx.total_token_count = MagicMock(return_value=0)
+            mock_session = MagicMock()
+            mock_session.uuid = str(_uuid.uuid4())
+            from pathlib import Path
+            mock_session.session_dir = Path(tmpdir) / mock_session.uuid
+            mock_session.active_context = mock_ctx
 
             msg = _make_message("assistant", [ContentPart.create_text("hi")])
             bot = SimpleMockChatBot([msg])
-            sid = session.uuid
-            runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+
+            runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
             ch = AsyncMock()
             runner.subscribe(ch)
@@ -676,7 +729,9 @@ class TestForegroundGroupStates:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         fg = runner.execution_environment.get_foreground_group()
@@ -696,7 +751,9 @@ class TestForegroundGroupStates:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -717,7 +774,9 @@ class TestForegroundGroupStates:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -741,7 +800,9 @@ class TestForegroundGroupStates:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "nonexistent", "{}")
@@ -764,7 +825,9 @@ class TestForegroundGroupStates:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc1 = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -789,7 +852,9 @@ class TestForegroundGroupStates:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -814,7 +879,9 @@ class TestForegroundGroupStates:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -834,7 +901,9 @@ class TestForegroundGroupStates:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         assert runner.execution_environment.get_foreground_group() is not None
@@ -862,7 +931,9 @@ class TestToolCallRecordLifecycle:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -887,7 +958,9 @@ class TestToolCallRecordLifecycle:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc1 = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -915,7 +988,9 @@ class TestToolCallRecordLifecycle:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -936,7 +1011,9 @@ class TestToolCallRecordLifecycle:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -956,7 +1033,9 @@ class TestToolCallRecordLifecycle:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc1 = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')  # auto-approved
@@ -984,7 +1063,9 @@ class TestToolCallRecordLifecycle:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart({"type": "tool_use", "name": "search", "arguments": "{}"})
@@ -1101,9 +1182,9 @@ class TestEEExecuteTool:
 
         sid = _uuid.uuid4()
         session = MagicMock()
-        agent.get_session = MagicMock(return_value=session)
+        session.uuid = str(sid)
 
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=MagicMock())
+        runner = Runner(agent=agent, session=session, chatbot=MagicMock())
         runner._hook_owners = {"transitive": {"before_tool_execution": [lambda *a: (False, "not allowed")]}}
         runner._hook_owner_order = ["transitive"]
 
@@ -1248,7 +1329,9 @@ class TestRunnerFullCycle:
         msg2 = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         user_msg = _make_message("user", [ContentPart.create_text("hello")])
         await runner.queue_message(user_msg)
@@ -1271,7 +1354,9 @@ class TestRunnerFullCycle:
         msg2 = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         def deny_add(ctx):
             return "denied by hook"
@@ -1296,7 +1381,9 @@ class TestRunnerFullCycle:
         msg = _make_message("assistant", [ContentPart.create_text("hi")])
         bot = SimpleMockChatBot([msg])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
         tc = ContentPart.create_tool_use("tc1", "search", '{"q":"x"}')
@@ -1325,7 +1412,9 @@ class TestRunnerFullCycle:
         msg2 = _make_message("assistant", [ContentPart.create_text("done")])
         bot = SimpleMockChatBot([msg1, msg2])
         sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+        mock_session = MagicMock()
+        mock_session.uuid = str(sid)
+        runner = Runner(agent=agent, session=mock_session, chatbot=bot)
         runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
@@ -1353,13 +1442,21 @@ class TestRunnerFullCycle:
 
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
-            session = Session.create(parent_dir=tmpdir, system_prompt_message=None)
-            agent.get_session.return_value = session
+            _ctx_messages = []
+            mock_ctx = MagicMock()
+            mock_ctx.messages = _ctx_messages
+            mock_ctx.append = lambda msg: _ctx_messages.append(msg)
+            mock_ctx.total_token_count = MagicMock(return_value=0)
+            mock_session = MagicMock()
+            mock_session.uuid = str(_uuid.uuid4())
+            from pathlib import Path
+            mock_session.session_dir = Path(tmpdir) / mock_session.uuid
+            mock_session.active_context = mock_ctx
 
             msg = _make_message("assistant", [ContentPart.create_text("hi")])
             bot = SimpleMockChatBot([msg])
-            sid = session.uuid
-            runner = Runner(agent=agent, session_uuid=sid, chatbot=bot)
+
+            runner = Runner(agent=agent, session=mock_session, chatbot=bot)
 
             ch = AsyncMock()
             runner.subscribe(ch)

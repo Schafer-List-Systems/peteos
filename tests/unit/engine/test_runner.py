@@ -161,6 +161,7 @@ def _make_mock_session(
     ctx.messages = []
 
     session = MagicMock()
+    session.uuid = str(_uuid.uuid4())
     session.role = role
     session.tool_manager = tm
     session.auto_approve_tools = list(role.auto_approve_tools)
@@ -172,7 +173,6 @@ def _make_mock_session(
 
 def _make_mock_agent(session: MagicMock) -> MagicMock:
     agent = MagicMock()
-    agent.get_session.return_value = session
     agent._tool_manager = session.tool_manager
     agent.role = session.role
     return agent
@@ -218,39 +218,38 @@ def chatbot_manager_mock():
 
 
 class TestRunnerInit:
-    def test_init_raises_on_missing_session(self):
+    def test_init_sets_session(self, chatbot_manager_mock):
+        """Runner stores the session passed to it directly."""
+        session = _make_mock_session()
         agent = MagicMock()
-        agent.get_session.return_value = None
-        with pytest.raises(ValueError, match="not found"):
-            Runner(
-                agent=agent,
-                session_uuid=_uuid.uuid4(),
-            )
+        runner = Runner(agent=agent, session=session)
+        assert runner.session is session
 
     def test_init_sets_uuid(self, chatbot_manager_mock):
         session = _make_mock_session()
+        session.uuid = str(_uuid.uuid4())
         agent = _make_mock_agent(session)
-        sid = _uuid.uuid4()
-        runner = Runner(agent=agent, session_uuid=sid)
+        sid = session.uuid
+        runner = Runner(agent=agent, session=session)
         assert runner.session_uuid == sid
         assert runner.uuid == sid
 
     def test_init_creates_state(self, chatbot_manager_mock):
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         assert isinstance(runner.state, SessionState)
 
     def test_init_creates_execution_environment(self, chatbot_manager_mock):
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         assert isinstance(runner.execution_environment, ExecutionEnvironment)
 
     def test_init_properties(self, chatbot_manager_mock):
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         assert runner.agent is agent
         assert runner.role is session.role
 
@@ -264,7 +263,7 @@ class TestRunnerStepTextOnly:
         """Agent replies with text only → FINISHED."""
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         runner._chatbot = _make_mock_chatbot(
             content=[{"type": "text", "content": "done"}],
         )
@@ -276,7 +275,7 @@ class TestRunnerStepTextOnly:
         """Agent replies with reasoning (thinking) only → CONTINUE."""
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         runner._chatbot = _make_mock_chatbot(
             content=[{"type": "thinking", "content": "let me think"}],
         )
@@ -288,7 +287,7 @@ class TestRunnerStepTextOnly:
         """Continuous behavior_policy → CONTINUE even with text output."""
         session = _make_mock_session(behavior_policy="continuous")
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         runner._chatbot = _make_mock_chatbot(
             content=[{"type": "text", "content": "thinking..."}],
         )
@@ -300,7 +299,7 @@ class TestRunnerStepTextOnly:
         """ChatBot returns error → ERROR status."""
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         runner._chatbot = _make_mock_chatbot(
             error="API error",
         )
@@ -318,7 +317,7 @@ class TestRunnerStepToolCalls:
         """Pre-setup with PENDING tool call, chatbot returns text → PENDING."""
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
 
         # Register a real tool so the tool call isn't auto-denied
         tool_mock = MagicMock()
@@ -381,7 +380,7 @@ class TestRunnerStepToolCalls:
         agent.get_session.return_value = session
         agent._tool_manager = tm
         agent.role = role
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner = Runner(agent=agent, session=session, chatbot=chatbot)
 
         # Step will: call chatbot → get tool_use → create group → add_tool_call
         # → returns CONTINUE (has_text_part=False from tool_use-only response)
@@ -426,7 +425,7 @@ class TestRunnerStepToolCalls:
         agent.get_session.return_value = session
         agent._tool_manager = tm
         agent.role = role
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner = Runner(agent=agent, session=session, chatbot=chatbot)
 
         status, _ = await runner.step()
         event = runner.event_queue.get_nowait()
@@ -468,7 +467,7 @@ class TestRunnerStepToolCalls:
         agent.get_session.return_value = session
         agent._tool_manager = tm
         agent.role = role
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner = Runner(agent=agent, session=session, chatbot=chatbot)
 
         def deny_hook(tool_call):
             return (False, "denied by hook")
@@ -499,7 +498,7 @@ class TestRunnerEventHandling:
     async def test_queue_message_pushes_event(self, chatbot_manager_mock):
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         msg = MagicMock()
         runner.push_event(msg)
         assert not runner.event_queue.empty()
@@ -508,7 +507,7 @@ class TestRunnerEventHandling:
         """ApprovalEvent pushes to queue and is handled in run()."""
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
 
         # Create a group with a pending tool call
         runner.execution_environment.create_tool_group("g1", "g1:tool_result")
@@ -530,7 +529,7 @@ class TestRunnerSubscriptions:
     def test_subscribe_returns_true(self, chatbot_manager_mock):
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         channel = MagicMock()
         assert runner.subscribe(channel) is True
         assert channel in runner._channels
@@ -538,7 +537,7 @@ class TestRunnerSubscriptions:
     def test_subscribe_duplicate_returns_false(self, chatbot_manager_mock):
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         channel = MagicMock()
         runner.subscribe(channel)
         assert runner.subscribe(channel) is False
@@ -546,7 +545,7 @@ class TestRunnerSubscriptions:
     def test_unsubscribe_returns_true(self, chatbot_manager_mock):
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         channel = MagicMock()
         runner.subscribe(channel)
         assert runner.unsubscribe(channel) is True
@@ -555,7 +554,7 @@ class TestRunnerSubscriptions:
     def test_unsubscribe_unknown_returns_false(self, chatbot_manager_mock):
         session = _make_mock_session()
         agent = _make_mock_agent(session)
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4())
+        runner = Runner(agent=agent, session=session)
         channel = MagicMock()
         assert runner.unsubscribe(channel) is False
 
@@ -599,7 +598,7 @@ class TestRunnerOnToolCallHook:
         agent.role = role
 
         cb = _make_mock_chatbot(content=[{"type": "text", "content": "done"}])
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=cb)
+        runner = Runner(agent=agent, session=session, chatbot=cb)
         runner._execution_environment = ExecutionEnvironment(
             tool_manager=tm, role=role, auto_approve_tools=list(role.auto_approve_tools),
             tool_failure_policy="abort",
@@ -927,6 +926,7 @@ def _make_runner_with_exec_env(auto_approve_tools=None):
     ctx.messages = []
 
     session = MagicMock()
+    session.uuid = str(_uuid.uuid4())
     session.role = role
     session.tool_manager = tm
     session.auto_approve_tools = list(role.auto_approve_tools)
@@ -934,12 +934,11 @@ def _make_runner_with_exec_env(auto_approve_tools=None):
     session.active_context = ctx
 
     agent = MagicMock()
-    agent.get_session.return_value = session
     agent._tool_manager = tm
     agent.role = role
 
     chatbot = _make_mock_chatbot(content=[{"type": "text", "content": "done"}])
-    runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+    runner = Runner(agent=agent, session=session, chatbot=chatbot)
     runner._execution_environment = ExecutionEnvironment(
         tool_manager=tm, role=role, auto_approve_tools=list(role.auto_approve_tools),
         tool_failure_policy="abort",
@@ -1010,7 +1009,7 @@ class TestRunnerExecuteAndInject:
         agent._tool_manager = tm
         agent.role = role
         chatbot = _make_mock_chatbot(content=[{"type": "text", "content": "done"}])
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner = Runner(agent=agent, session=session, chatbot=chatbot)
         runner._execution_environment = ExecutionEnvironment(
             tool_manager=tm, role=role, auto_approve_tools=[], tool_failure_policy="abort"
         )
@@ -1036,7 +1035,7 @@ class TestRunnerExecuteAndInject:
         agent._tool_manager = tm
         agent.role = role
         chatbot = _make_mock_chatbot(content=[{"type": "text", "content": "done"}])
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner = Runner(agent=agent, session=session, chatbot=chatbot)
         runner._execution_environment = ExecutionEnvironment(
             tool_manager=tm, role=role, auto_approve_tools=[], tool_failure_policy="abort"
         )
@@ -1071,7 +1070,7 @@ class TestRunnerAfterReceiveFromChatbot:
         agent.role = role
 
         chatbot = _make_mock_chatbot()
-        runner = Runner(agent=agent, session_uuid=_uuid.uuid4(), chatbot=chatbot)
+        runner = Runner(agent=agent, session=session, chatbot=chatbot)
         if invocation_hooks:
             for hook_point, hook_list in invocation_hooks.items():
                 runner.hooks["transitive", hook_point] = list(hook_list)
