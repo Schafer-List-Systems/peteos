@@ -312,19 +312,14 @@ class ConfigManager:
         loaded_backends = list(ChatBotManager._backends.keys())
         _logger.info("Loaded %d backend(s) from peteos.json", len(loaded_backends))
 
-        # Bootstrap roles from {config_dir}/roles/ into RoleManager
-        roles_dir = os.path.join(cls._config_dir, "roles")
-        try:
-            from peteos.persona.rolemanager import RoleManager
-            loaded_roles = RoleManager.load_from_dir(roles_dir)
-            _logger.info("Loaded %d role(s) from %s", len(loaded_roles), roles_dir)
-        except FileNotFoundError:
-            # roles directory doesn't exist — that's fine
-            pass
-
         # Start watchdog — fires on_reloaded hooks when peteos.json changes on disk
         cls._start_file_watcher(config_file)
 
         # Initialization complete — callers can query ConfigManager._config_file
         return True
+
+
+# Auto-initialize on import
+import asyncio
+asyncio.run(ConfigManager.init())
 

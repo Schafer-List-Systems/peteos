@@ -1,7 +1,5 @@
 # Peteos - Agentic application framework
 
-import asyncio
-
 from peteos.config import ConfigManager
 
 from peteos.conversation import  (
@@ -62,9 +60,3 @@ __all__ = [
     "ApprovalEvent",
     "ToolExecutionEvent",
 ]
-
-# Bootstrap backends and roles from peteos.json at import time.
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    asyncio.run(ConfigManager.init())
