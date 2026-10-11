@@ -9,9 +9,11 @@ import os
 import time
 import types
 import uuid
-from dataclasses import is_dataclass
+from dataclasses import dataclass, is_dataclass
+from pathlib import Path
 from typing import Any, Callable
 
+from peteos.config import ConfigManager
 from peteos.conversation import ContentPart, Message
 from peteos.conversation.context import Context
 from peteos.conversation.session import Session
@@ -24,7 +26,7 @@ from peteos.persona.agent import Agent
 from peteos.persona.role import Role
 from peteos.persona.toolmanager import Tool, ToolManager
 from peteos.sandbox import SandboxBuilder
-from peteos.utils import get_logger
+from peteos.utils import get_logger, json
 from peteos.utils._schema import format_schema_for_prompt, get_schema_description, relaxed_parse_data
 
 
@@ -274,6 +276,13 @@ def _on_truncation_hook(runner, counter: int, max_retries: int) -> None:
         runner.session.set_active_context(reduced)
 
 
+@dataclass
+class RestoreHook:
+    """A hook run during instance restoration, with ordering via dependencies."""
+    callable_: Callable
+    dependencies: list[str]  # names of other RestoreHooks that must run before this one
+
+
 class AgenticObject:
     """ """
 
@@ -283,18 +292,39 @@ class AgenticObject:
         super().__init_subclass__(**kwargs)
         AgenticObjectRegistry.register(cls)
 
-    def __init__(self) -> None:
+    def __init__(self, name: str | None = None, *, persistent: bool = True) -> None:
         super().__init__()
+
+        # Initialize the serializable (the OAP state) part of the object.
+        self._oap_json: dict[str, Any] = {
+            "class": {
+                "module": self.__class__.__module__,
+                "name": self.__class__.__name__,
+            },
+            "name": name or str(uuid.uuid4()),
+            "persistent": persistent,
+            "thread_store": {},
+            "auto_approve_tools": [],
+        }
+
+        # Persist OAP state to disk (unless already present)
+        if self._oap_json["persistent"]:
+            inst_dir = self.instance_dir
+            inst_dir.mkdir(parents=True, exist_ok=True)
+            json_path = inst_dir / "agentic_object.json"
+            if not json_path.exists():
+                with open(json_path, "w") as f:
+                    json.dump(self._oap_json, f, indent=2)
+
+        self._oap_restore_hooks: dict[str, RestoreHook] = {}
         self._oap_role: Role = AgenticObjectRegistry.create_role(self.__class__.__name__)
         self._inject_code_exec_section()
         self._oap_lock: asyncio.Lock = asyncio.Lock()
         self._oap_tool_manager: ToolManager = ToolManager()
         self._oap_current_output_schema: type | None = None
         self._oap_system_prompt_hooks: dict[str, Callable[[], str]] = {}
-        self._oap_thread_store: dict[str, str] = {}
         self._oap_runner_store: dict[str, Runner] = {}
         self._oap_session_store: dict[str, Session] = {}
-        self._oap_auto_approve_tools: list[str] = []
         self._oap_local_hooks: dict[str, list[Callable]] = {
             "before_send_to_chatbot": [_context_reduction_hook],
             "on_truncation": [_on_truncation_hook],
@@ -309,11 +339,53 @@ class AgenticObject:
         tool_names = [t.name for t in self._oap_tool_manager.get_tool_list()]
         _logger.debug("Registered tools for %s: %s", self.__class__.__name__, tool_names)
 
+    def restore(self) -> None:
+        """Run all registered restore hooks in dependency order on this instance.
+
+        Hooks are topologically sorted (Kahn's algorithm) so that every
+        dependency runs before the hook that depends on it. Cycles raise
+        ValueError.
+        """
+        hooks = self._oap_restore_hooks
+        if not hooks:
+            return
+
+        # Compute in-degree: number of unsatisfied dependencies per hook
+        in_degree: dict[str, int] = {
+            name: len(h.dependencies) for name, h in hooks.items()
+        }
+        # Start with all zero-dependency hooks
+        queue = [name for name, deg in in_degree.items() if deg == 0]
+        ordered: list[str] = []
+
+        # Kahn's algorithm: repeatedly pick a zero-in-degree node, emit it,
+        # then decrement the in-degree of each dependent — enqueue dependents
+        # whose in-degree just hit zero
+        while queue:
+            name = queue.pop(0)
+            ordered.append(name)
+
+            # Decrement dependents' in-degree; enqueue if now zero
+            for other_name, hook in hooks.items():
+                if name in hook.dependencies:
+                    in_degree[other_name] -= 1
+                    if in_degree[other_name] == 0:
+                        queue.append(other_name)
+
+        # Anything left = cycle
+        if len(ordered) != len(hooks):
+            cyclic = set(hooks) - set(ordered)
+            raise ValueError(f"RestoreHook cycle detected: {cyclic}")
+
+        # Execute in topological order, passing self so hooks know their target
+        for name in ordered:
+            hooks[name].callable_(self)
+
     def _create_agent(self) -> Agent:
         """Create an Agent wired to this object's role and tool_manager."""
         # Auto-approve all registered tools so they pass Runner.add_tool_call()
         for t in self._oap_tool_manager.get_tool_list():
-            self._oap_auto_approve_tools.append(t.name)
+            self._oap_json["auto_approve_tools"].append(t.name)
         return Agent(
             self._oap_role,
             self._oap_tool_manager,
@@ -842,9 +914,23 @@ class AgenticObject:
         """The Role used for this object's invocations."""
         return self._oap_role
 
+    @property
+    def persistent(self) -> bool:
+        """Whether this object persists its state to disk."""
+        return self._oap_json["persistent"]
+
+    @persistent.setter
+    def persistent(self, value: bool) -> None:
+        self._oap_json["persistent"] = value
+
+    @property
+    def instance_dir(self) -> Path:
+        """The directory for this object's persisted state (derived from INSTANCES_DIR/name/)."""
+        return ConfigManager.resolve_path(f"{{INSTANCES_DIR}}/{self._oap_json["name"]}/")
+
     async def _start_session(self, session: Session) -> Runner:
         runner = Runner(self._oap_agent, session)
-        runner._execution_environment.auto_approve_tools = list(self._oap_auto_approve_tools)
+        runner._execution_environment.auto_approve_tools = list(self._oap_json["auto_approve_tools"])
         runner.sandbox_builder = self._create_sandbox_builder(
             _collect_oap_config(self.__class__), runner
         )
@@ -905,7 +991,7 @@ class AgenticObject:
         session: Session | None = None
         runner: Runner | None = None
         if persistent_thread_id is not None:
-            stored_uuid = self._oap_thread_store.get(persistent_thread_id)
+            stored_uuid = self._oap_json["thread_store"].get(persistent_thread_id)
             if stored_uuid is not None:
                 _logger.debug("invoke_agent[%s]: reusing thread %s", self.__class__.__name__, persistent_thread_id)
                 session = self._oap_session_store.get(stored_uuid)
@@ -929,10 +1015,10 @@ class AgenticObject:
                 lambda ctx: _tool_policy_dispatcher(self, ctx)
             ]
             if persistent_thread_id is not None:
-                self._oap_thread_store[persistent_thread_id] = session.uuid
+                self._oap_json["thread_store"][persistent_thread_id] = session.uuid
                 self._oap_runner_store[persistent_thread_id] = runner
             else:
-                self._oap_thread_store[str(session.uuid)] = session.uuid
+                self._oap_json["thread_store"][str(session.uuid)] = session.uuid
                 self._oap_runner_store[str(session.uuid)] = runner
             self._oap_session_store[str(session.uuid)] = session
 
@@ -1183,7 +1269,7 @@ class AgenticObject:
                     await self.suspend_thread(session_uuid_str)
                     self._oap_runner_store.pop(session_uuid_str, None)
                     self._oap_session_store.pop(session_uuid_str, None)
-                    self._oap_thread_store.pop(session_uuid_str, None)
+                    self._oap_json["thread_store"].pop(session_uuid_str, None)
                     if session is not None:
                         session.save()
 
@@ -1244,7 +1330,7 @@ class AgenticObject:
     async def suspend_thread(self, thread_id: str) -> None:
         """Suspend a thread by thread_id: look up session and runner, clear state, stop runner."""
         _logger.debug("invoke_agent[%s]: suspending thread %s", self.__class__.__name__, thread_id)
-        stored_uuid = self._oap_thread_store.get(thread_id)
+        stored_uuid = self._oap_json["thread_store"].get(thread_id)
         if stored_uuid is None:
             return
         session = self._oap_session_store.get(stored_uuid)

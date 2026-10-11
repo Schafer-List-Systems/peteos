@@ -1,5 +1,9 @@
 """OAP - Object-Agentic Programming for peteos."""
 
+from peteos.config import ConfigManager
+
+ConfigManager.set_variable("INSTANCES_DIR", "{CONFIG_DIR}/instances")
+
 from peteos.oap.agentic_object import AgenticObject
 from peteos.oap.adaptive_object import AdaptiveObject
 from peteos.oap.decorators import agentic_object, sandbox, tool
