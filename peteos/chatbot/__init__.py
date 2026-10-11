@@ -1,3 +1,5 @@
+import asyncio
+
 from peteos.chatbot.manager import ChatBotManager, BackendInfo
 from peteos.chatbot.chatbot import ChatBot, ContextOverflowError
 from peteos.chatbot.openaichatbot import OpenAIChatBot, OpenAIChatBotResponse
@@ -8,6 +10,14 @@ from peteos.chatbot.httpclient import HTTPClient
 from peteos.chatbot.simplemock import SimpleMockChatBot, SimpleMockChatBotResponse, SimpleMockBackendProvider
 from peteos.chatbot.response_types import StopReason, normalize_stop_reason
 from peteos.conversation import ContentPart, Message, MessageRegistry, SystemPromptMessage, ToolDefinitionsMessage
+from peteos.config import ConfigManager
+from peteos.utils import json
+
+# Bootstrap backends from peteos.json — runs after ConfigManager.init() has set CONFIG
+_config_path = ConfigManager.resolve_path("{CONFIG}")
+if _config_path.exists():
+    with open(_config_path) as f:
+        asyncio.run(ChatBotManager.load_from_json(json.load(f)))
 
 __all__ = [
     "ChatBotManager", "BackendInfo",

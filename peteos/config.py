@@ -257,7 +257,7 @@ class ConfigManager:
         _logger.debug("[config] watching config file: %s", filepath)
 
     @classmethod
-    async def init(cls) -> bool:
+    def init(cls) -> bool:
         """Resolve config and bootstrap all subsystems.
 
         Discovers peteos.json, loads backends into ChatBotManager,
@@ -296,30 +296,17 @@ class ConfigManager:
             return True
         _logger.debug("Using peteos.json config from: %s", config_file)
 
-        # Set CONFIG_DIR variable — used by resolve_path as {CONFIG_DIR} in templates
+        # Set CONFIG and CONFIG_DIR variables — used by resolve_path in templates
+        cls.set_variable("CONFIG", config_file, overwrite=False)
         cls.set_variable("CONFIG_DIR", config_dir, overwrite=False)
-
-        # Persist resolved config file and its dedicated directory to the singleton class
-        cls._config_file = config_file
-        cls._config_dir = config_dir
-
-        # Load the JSON file
-        json_obj = _load_config_file(config_file)
-
-        # Bootstrap chatbot backends into ChatBotManager for invoke_agent() model selection
-        from peteos.chatbot import ChatBotManager
-        await ChatBotManager.load_from_json(json_obj)
-        loaded_backends = list(ChatBotManager._backends.keys())
-        _logger.info("Loaded %d backend(s) from peteos.json", len(loaded_backends))
 
         # Start watchdog — fires on_reloaded hooks when peteos.json changes on disk
         cls._start_file_watcher(config_file)
 
-        # Initialization complete — callers can query ConfigManager._config_file
+        # Initialization complete
         return True
 
 
 # Auto-initialize on import
-import asyncio
-asyncio.run(ConfigManager.init())
+ConfigManager.init()
 
