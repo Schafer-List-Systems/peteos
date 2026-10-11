@@ -11,12 +11,17 @@ from peteos.config import _resolve_config_path
 
 def _reset_config_state():
     """Reset singleton state before each test."""
+    import os
     ConfigManager._config_file = None
     ConfigManager._config_dir = None
     ConfigManager._variables.clear()
     ConfigManager._on_reloaded_hooks.clear()
     ConfigManager._file_observer = None
     ConfigManager._file_observer_thread = None
+    # Clear PETEOS_* env vars so re-init uses test fixture
+    for k in list(os.environ):
+        if k.startswith("PETEOS_"):
+            del os.environ[k]
 
 
 class TestConfigVariables:
@@ -291,69 +296,61 @@ class TestConfigInit:
 
     def _reset(self):
         """Reset singleton state before each test."""
+        import os
         ConfigManager._config_file = None
         ConfigManager._config_dir = None
+        ConfigManager._variables.clear()
         ConfigManager.reset() if hasattr(ConfigManager, "reset") else None
+        from peteos.chatbot import ChatBotManager
+        ChatBotManager._backends.clear()
+        # Clear PETEOS_* env vars so re-init uses test fixture
+        for k in list(os.environ):
+            if k.startswith("PETEOS_"):
+                del os.environ[k]
 
-    @pytest.mark.asyncio
-    async def test_init_no_config_file(self):
+    def test_init_no_config_file(self):
         """When no config file exists, returns True and sets no config state."""
         self._reset()
         with patch("peteos.config._resolve_config_path", return_value=(None, None)):
-            result = await ConfigManager.init()
+            result = ConfigManager.init()
 
         assert result is True
-        assert ConfigManager._config_file is None
-        assert ConfigManager._config_dir is None
+        # No config file → CONFIG and CONFIG_DIR not set
+        assert "CONFIG" not in ConfigManager._variables
+        assert "CONFIG_DIR" not in ConfigManager._variables
 
-    @pytest.mark.asyncio
-    async def test_init_loads_backends(self, tmp_path):
-        """ConfigManager.init loads backends and sets _config_file and _config_dir on the singleton."""
+    def test_init_sets_config_variable(self, tmp_path):
+        """ConfigManager.init sets CONFIG and CONFIG_DIR variables."""
         self._reset()
         config_file = tmp_path / "peteos.json"
-        config_file.write_text(
-            '{"backends": [{"name": "test-backend", "url": "http://test:8000"}]}'
-        )
+        config_file.write_text("{}")
         config_dir = str(tmp_path / ".peteos")
 
-        mock_response = {"data": [{"id": "test-model"}]}
-
-        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
-            with patch("peteos.config._resolve_config_path",
-                       return_value=(str(config_file), config_dir)):
-                result = await ConfigManager.init()
+        with patch("peteos.config._resolve_config_path",
+                   return_value=(str(config_file), config_dir)):
+            result = ConfigManager.init()
 
         assert result is True
-        assert ConfigManager._config_file == str(config_file)
-        assert ConfigManager._config_dir == config_dir
-        # spot-check: backend was loaded into ChatBotManager
-        from peteos.chatbot import ChatBotManager
-        assert "test-backend" in ChatBotManager._backends
+        assert ConfigManager.get_variable("CONFIG") == str(config_file)
+        assert ConfigManager.get_variable("CONFIG_DIR") == config_dir
 
-    @pytest.mark.asyncio
-    async def test_init_is_idempotent(self, tmp_path):
-        """Second init() call returns False and does not reload backends."""
+    def test_init_is_idempotent(self, tmp_path):
+        """Second init() call returns False and does not overwrite variables."""
         self._reset()
         config_file = tmp_path / "peteos.json"
-        config_file.write_text(
-            '{"backends": [{"name": "idempotent-backend", "url": "http://id:8000"}]}'
-        )
+        config_file.write_text("{}")
         config_dir = str(tmp_path / ".peteos")
 
-        mock_response = {"data": [{"id": "idempotent-model"}]}
-
-        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
-            with patch("peteos.config._resolve_config_path",
-                       return_value=(str(config_file), config_dir)):
-                first = await ConfigManager.init()
-                second = await ConfigManager.init()
+        with patch("peteos.config._resolve_config_path",
+                   return_value=(str(config_file), config_dir)):
+            first = ConfigManager.init()
+            second = ConfigManager.init()
 
         assert first is True
         assert second is False
-        assert ConfigManager._config_file == str(config_file)
+        assert ConfigManager.get_variable("CONFIG") == str(config_file)
 
-    @pytest.mark.asyncio
-    async def test_init_no_roles_directory(self, tmp_path):
+    def test_init_no_roles_directory(self, tmp_path):
         """ConfigManager.init does not fail when roles directory doesn't exist."""
         self._reset()
         config_file = tmp_path / "peteos.json"
@@ -362,13 +359,12 @@ class TestConfigInit:
 
         with patch("peteos.config._resolve_config_path",
                    return_value=(str(config_file), config_dir)):
-            result = await ConfigManager.init()
+            result = ConfigManager.init()
 
         assert result is True
-        assert ConfigManager._config_dir == config_dir
+        assert ConfigManager.get_variable("CONFIG_DIR") == config_dir
 
-    @pytest.mark.asyncio
-    async def test_init_returns_true_on_success(self, tmp_path):
+    def test_init_returns_true_on_success(self, tmp_path):
         """init() returns True when configuration is loaded successfully."""
         self._reset()
         config_file = tmp_path / "peteos.json"
@@ -377,13 +373,10 @@ class TestConfigInit:
         )
         config_dir = str(tmp_path / ".peteos")
 
-        mock_response = {"data": [{"id": "model1"}]}
-
-        with patch("httpx.AsyncClient", _make_httpx_mock(return_value=mock_response)):
-            with patch("peteos.config._resolve_config_path",
-                       return_value=(str(config_file), config_dir)):
-                result = await ConfigManager.init()
+        with patch("peteos.config._resolve_config_path",
+                   return_value=(str(config_file), config_dir)):
+            result = ConfigManager.init()
 
         assert result is True
-        assert ConfigManager._config_file == str(config_file)
-        assert ConfigManager._config_dir == config_dir
+        assert ConfigManager.get_variable("CONFIG") == str(config_file)
+        assert ConfigManager.get_variable("CONFIG_DIR") == config_dir
