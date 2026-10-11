@@ -9,6 +9,155 @@ from peteos.config import ConfigManager
 from peteos.config import _resolve_config_path
 
 
+def _reset_config_state():
+    """Reset singleton state before each test."""
+    ConfigManager._config_file = None
+    ConfigManager._config_dir = None
+    ConfigManager._variables.clear()
+    ConfigManager._on_reloaded_hooks.clear()
+    ConfigManager._file_observer = None
+    ConfigManager._file_observer_thread = None
+
+
+class TestConfigVariables:
+    """Tests for ConfigManager variable management (set_variable, get_variable)."""
+
+    def setup_method(self):
+        _reset_config_state()
+
+    def teardown_method(self):
+        _reset_config_state()
+
+    def test_set_variable_basic(self):
+        """set_variable stores the key-value pair."""
+        ConfigManager.set_variable("FOO", "bar")
+        assert ConfigManager._variables["FOO"] == "bar"
+
+    def test_set_variable_raises_on_duplicate(self):
+        """set_variable raises ValueError when key exists and overwrite is False."""
+        ConfigManager.set_variable("FOO", "bar")
+        with pytest.raises(ValueError, match="FOO"):
+            ConfigManager.set_variable("FOO", "baz")
+
+    def test_set_variable_overwrites_when_allowed(self):
+        """set_variable replaces value when overwrite=True."""
+        ConfigManager.set_variable("FOO", "bar")
+        ConfigManager.set_variable("FOO", "baz", overwrite=True)
+        assert ConfigManager._variables["FOO"] == "baz"
+
+    def test_get_variable_returns_value(self):
+        """get_variable returns the stored value."""
+        ConfigManager.set_variable("FOO", "bar")
+        assert ConfigManager.get_variable("FOO") == "bar"
+
+    def test_get_variable_raises_if_missing(self):
+        """get_variable raises KeyError when the key is not set."""
+        with pytest.raises(KeyError):
+            ConfigManager.get_variable("DOES_NOT_EXIST")
+
+
+class TestConfigPathResolution:
+    """Tests for ConfigManager.resolve_path() template expansion."""
+
+    def setup_method(self):
+        _reset_config_state()
+
+    def teardown_method(self):
+        _reset_config_state()
+
+    def test_resolve_path_basic(self):
+        """A single {VAR} token is replaced with the variable value."""
+        ConfigManager.set_variable("FOO", "bar")
+        result = ConfigManager.resolve_path("{FOO}")
+        assert result == Path("bar")
+
+    def test_resolve_path_returns_Path(self):
+        """resolve_path returns a Path object, not a string."""
+        ConfigManager.set_variable("BASE", "/home/user")
+        result = ConfigManager.resolve_path("{BASE}/projects")
+        assert isinstance(result, Path)
+        assert result.parts == ("/", "home", "user", "projects")
+
+    def test_resolve_path_multiple_tokens(self):
+        """Multiple tokens in one template are all resolved."""
+        ConfigManager.set_variable("A", "alpha")
+        ConfigManager.set_variable("B", "beta")
+        result = ConfigManager.resolve_path("{A}-{B}-{A}")
+        assert result == Path("alpha-beta-alpha")
+
+    def test_resolve_path_same_token_twice(self):
+        """The same token used twice is resolved independently (no false cycle)."""
+        ConfigManager.set_variable("X", "hello")
+        result = ConfigManager.resolve_path("{X} {X}")
+        assert result == Path("hello hello")
+
+    def test_resolve_path_missing_variable_raises_KeyError(self):
+        """A template with an unset variable raises KeyError."""
+        ConfigManager.set_variable("FOO", "bar")
+        with pytest.raises(KeyError):
+            ConfigManager.resolve_path("{MISSING}")
+
+    def test_resolve_path_nested_expansion(self):
+        """A value referencing another variable is expanded recursively."""
+        ConfigManager.set_variable("A", "{B}")
+        ConfigManager.set_variable("B", "final")
+        result = ConfigManager.resolve_path("{A}")
+        assert result == Path("final")
+
+    def test_resolve_path_deep_nested_expansion(self):
+        """Chains of three or more levels resolve correctly."""
+        ConfigManager.set_variable("TOP", "{MID}")
+        ConfigManager.set_variable("MID", "{BOT}")
+        ConfigManager.set_variable("BOT", "deep-value")
+        result = ConfigManager.resolve_path("{TOP}")
+        assert result == Path("deep-value")
+
+    def test_resolve_path_cycle_raises_RecursionError(self):
+        """A->{B}, B->{A} raises RecursionError."""
+        ConfigManager.set_variable("A", "{B}")
+        ConfigManager.set_variable("B", "{A}")
+        with pytest.raises(RecursionError):
+            ConfigManager.resolve_path("{A}")
+
+    def test_resolve_path_self_cycle_raises_RecursionError(self):
+        """A->{A} raises RecursionError."""
+        ConfigManager.set_variable("A", "{A}")
+        with pytest.raises(RecursionError):
+            ConfigManager.resolve_path("{A}")
+
+    def test_resolve_path_sibling_seen_sets_stay_isolated(self):
+        """Two same tokens in one template don't share seen sets across siblings.
+
+        This is the classic bug: if seen is shared across all branches,
+        a template like {A}, {A} where A contains {B} would falsely detect a
+        cycle. With isolated seen sets per branch, each {A} resolves in its
+        own context.
+        """
+        ConfigManager.set_variable("A", "{B}")
+        ConfigManager.set_variable("B", "leaf")
+        result = ConfigManager.resolve_path("{A}, {A}")
+        assert result == Path("leaf, leaf")
+
+    def test_resolve_path_overrides_take_precedence(self):
+        """The overrides dict shadows variables with the same key."""
+        ConfigManager.set_variable("X", "shared")
+        result = ConfigManager.resolve_path("{X}", overrides={"X": "override"})
+        assert result == Path("override")
+
+    def test_resolve_path_override_has_access_to_all_variables(self):
+        """An override value can reference variables from the shared dict."""
+        ConfigManager.set_variable("BASE", "/home")
+        ConfigManager.set_variable("SUB", "projects")
+        result = ConfigManager.resolve_path("{BASE}/{SUB}", overrides={"BASE": "/opt"})
+        assert result == Path("/opt/projects")
+
+    def test_resolve_path_escaped_braces(self):
+        """{{ and }} are preserved literally in the output."""
+        ConfigManager.set_variable("X", "value")
+        result = ConfigManager.resolve_path("{{ literal }}, {X}")
+        assert result == Path("{ literal }, value")
+
+
 class _MockResponse:
     """Minimal mock HTTP response for httpx.AsyncClient."""
 
@@ -174,6 +323,7 @@ class TestConfigInit:
         assert result is True
         assert ConfigManager._config_file == str(config_file)
         assert ConfigManager._config_dir == config_dir
+        assert "test-backend" in ConfigManager._config_file  # spot-check: set on class
 
     @pytest.mark.asyncio
     async def test_init_is_idempotent(self, tmp_path):

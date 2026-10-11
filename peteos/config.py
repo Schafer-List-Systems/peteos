@@ -2,11 +2,16 @@
 
 Resolves peteos.json from standard locations and bootstraps all
 subsystems that need configuration (chatbot backends, roles, etc.).
+
+Path resolution uses a variable expander — callers pass templates
+with ``{VAR}`` tokens that are expanded against a shared dictionary.
 """
 
 import os
+import threading
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Dict, Optional
+from watchdog.observers import Observer
 
 from peteos.utils import get_logger
 from peteos.utils import json
@@ -69,14 +74,184 @@ def _load_config_file(filepath: str) -> dict:
         return json.load(f)
 
 
-class ConfigManager:
-    """Singleton that resolves the Peteos configuration directory and bootstraps subsystems.
+class _CyclingDict(dict):
+    """dict wrapper that expands values through format_map with cycle detection.
 
-    Class variables hold the resolved config state after init().
+    When a key is retrieved via __getitem__, the value is passed through
+    format_map using a fresh _CyclingDict. This means that if the value
+    itself contains {tokens}, they are expanded recursively — with each
+    branch of expansion getting its own copy of the seen set, so sibling
+    expansions never interfere.
+
+    A cycle (A→{B}, B→{A}) raises RecursionError on the second visit.
     """
 
+    def __init__(self, data: dict, seen: frozenset):
+        super().__init__(data)
+        self._seen = seen
+
+    def __getitem__(self, key: str) -> str:
+        if key in self._seen:
+            raise RecursionError(f"variable cycle detected: '{key}'")
+        raw = super().__getitem__(key)
+        return raw.format_map(_CyclingDict(self, self._seen | {key}))
+
+
+class ConfigManager:
+    """Singleton that manages configuration variables and path resolution.
+
+    Subclasses should not inherit from this — use the class directly.
+
+    Class variables hold the resolved config state after init().
+
+    Variables are bootstrapped from environment variables prefixed with ``PETEOS_``.
+    The prefix is stripped, so ``PETEOS_CONFIG_DIR`` becomes key ``CONFIG_DIR``.
+    """
+
+    _variables: Dict[str, str] = {}
     _config_dir: Optional[str] = None
     _config_file: Optional[str] = None
+    _on_reloaded_hooks: Dict[str, Callable] = {}
+    _file_observer: Optional[Observer] = None
+    _file_observer_thread: Optional[threading.Thread] = None
+
+    @classmethod
+    def set_variable(cls, key: str, value: str, overwrite: bool = False) -> None:
+        """Add a variable to the shared variable dictionary.
+
+        Preconditions
+        The key must not already exist unless overwrite is True.
+
+        Args:
+            key: Variable name, used as ``{key}`` in templates.
+            value: Expansion value for this variable.
+            overwrite: If False, raise ValueError when overwriting an existing key.
+
+        Raises:
+            ValueError: If key exists and overwrite is False.
+        """
+        if key in cls._variables and not overwrite:
+            raise ValueError(f"variable '{key}' is already set; overwrite=True to replace")
+        cls._variables[key] = value
+
+    @classmethod
+    def get_variable(cls, key: str) -> str:
+        """Retrieve a variable from the shared dictionary.
+
+        Args:
+            key: Variable name.
+
+        Returns:
+            The expansion value for this variable.
+
+        Raises:
+            KeyError: If the variable is not set.
+        """
+        return cls._variables[key]
+
+    @classmethod
+    def resolve_path(
+        cls,
+        template: str,
+        overrides: Optional[Dict[str, str]] = None,
+    ) -> Path:
+        """Resolve a path template to a filesystem path by expanding variables.
+
+        The template is expanded using str.format_map with a cycling-aware
+        mapping. ``{{`` and ``}}`` escape to literal braces. Missing variables
+        raise KeyError. Overrides take precedence over the shared dictionary.
+
+        Args:
+            template: Path string containing ``{var}`` tokens to expand.
+            overrides: Optional per-call variables that take precedence.
+
+        Returns:
+            Resolved Path object.
+
+        Raises:
+            KeyError: If a variable token is not found.
+            RecursionError: If a cycle is detected during expansion.
+        """
+        working: Dict[str, str] = dict(cls._variables)
+        if overrides is not None:
+            working.update(overrides)
+
+        mapping = _CyclingDict(working, frozenset())
+        resolved = template.format_map(mapping)
+        return Path(resolved)
+
+    @classmethod
+    def register_on_reloaded_hook(cls, name: str, hook: Callable) -> None:
+        """Register a hook to be called when peteos.json is reloaded.
+
+        Args:
+            name: Unique identifier for this hook.
+            hook: Callable to invoke on reload. Takes no arguments.
+
+        Raises:
+            ValueError: If a hook with this name is already registered.
+        """
+        if name in cls._on_reloaded_hooks:
+            raise ValueError(f"on-reloaded hook '{name}' is already registered")
+        cls._on_reloaded_hooks[name] = hook
+
+    @classmethod
+    def unregister_on_reloaded_hook(cls, name: str) -> None:
+        """Unregister a previously registered on-reloaded hook.
+
+        Args:
+            name: Identifier of the hook to remove.
+
+        Raises:
+            KeyError: If no hook with this name is registered.
+        """
+        if name not in cls._on_reloaded_hooks:
+            raise KeyError(f"No on-reloaded hook named '{name}' is registered")
+        del cls._on_reloaded_hooks[name]
+
+    @classmethod
+    def _stop_file_watcher(cls) -> None:
+        """Stop the file observer and join its thread."""
+        # Stop the observer to unblock its event loop
+        if cls._file_observer is not None:
+            cls._file_observer.stop()
+            cls._file_observer = None
+
+        # Join the observer thread to ensure it has fully terminated
+        if cls._file_observer_thread is not None \
+                and cls._file_observer_thread is not threading.current_thread():
+            cls._file_observer_thread.join()
+            cls._file_observer_thread = None
+
+    @classmethod
+    def _start_file_watcher(cls, filepath: str) -> None:
+        """Start a watchdog observer that fires on-reloaded hooks when the config file changes."""
+        from watchdog.events import FileSystemEventHandler
+
+        # Define the file-system event handler that fires on_reloaded hooks on config file changes
+        class _ConfigFileHandler(FileSystemEventHandler):
+            def on_modified(self, event):
+                # Guard: only react to the exact config file we are watching
+                if event.src_path != filepath:
+                    return
+                _logger.debug("[config] peteos.json changed, firing %d hook(s)", len(cls._on_reloaded_hooks))
+
+                # Fire every registered on_reloaded hook — errors are logged but never propagated
+                for hook in cls._on_reloaded_hooks.values():
+                    try:
+                        hook()
+                    except Exception:
+                        _logger.exception("[config] on_reloaded hook %r raised", hook)
+
+        # Create and start the observer — blocks in its own thread
+        observer = Observer()
+        observer.schedule(_ConfigFileHandler(), path=str(Path(filepath).parent), recursive=False)
+        observer.start()
+
+        # Store observer and its thread on the class so stop() can find them
+        cls._file_observer = observer
+        cls._file_observer_thread = threading.current_thread()
+        _logger.debug("[config] watching config file: %s", filepath)
 
     @classmethod
     async def init(cls) -> bool:
@@ -102,6 +277,14 @@ class ConfigManager:
         if os.environ.get("PETEOS_DEBUG") == "1":
             from peteos.utils.logger import setup_logging
             setup_logging(level="DEBUG", debug=True)
+
+        # Bootstrap variables from PETEOS_* environment variables — strip the prefix
+        for key, value in os.environ.items():
+            if key.startswith("PETEOS_"):
+                var_name = key[len("PETEOS_") :]
+                cls._variables[var_name] = value
+        if cls._variables:
+            _logger.debug("[config] bootstrapped %d env variable(s)", len(cls._variables))
 
         # Discover peteos.json location — (config_file, config_dir) or (None, None) if absent
         config_file, config_dir = _resolve_config_path()
@@ -139,5 +322,9 @@ class ConfigManager:
             # roles directory doesn't exist — that's fine
             pass
 
+        # Start watchdog — fires on_reloaded hooks when peteos.json changes on disk
+        cls._start_file_watcher(config_file)
+
         # Initialization complete — callers can query ConfigManager._config_file
         return True
+
