@@ -371,7 +371,7 @@ class AgenticObject:
             dependencies=dependencies if dependencies is not None else [],
         )
 
-    def restore(self) -> None:
+    async def restore(self) -> None:
         """Run all registered restore hooks in dependency order on this instance.
 
         Hooks are topologically sorted (Kahn's algorithm) so that every
@@ -411,7 +411,9 @@ class AgenticObject:
 
         # Execute in topological order, passing self so hooks know their target
         for name in ordered:
-            hooks[name].callable_(self)
+            result = hooks[name].callable_(self)
+            if inspect.isawaitable(result):
+                await result
 
     def _create_agent(self) -> Agent:
         """Create an Agent wired to this object's role and tool_manager."""
