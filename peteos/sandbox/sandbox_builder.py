@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import textwrap
+from pathlib import Path
 from typing import Any, Callable
 
 from peteos.sandbox.sandbox import Sandbox
@@ -72,14 +73,85 @@ def _extract_func_name_and_params(func_obj: Callable) -> tuple[str, dict, bool, 
     return func_name, parameters, has_unbound_self, is_async
 
 
+def _import_as_module(
+    source_path: Path, static_functions: bool
+) -> tuple[list[Callable], list[Callable]]:
+    """Import a source file as a module and return its callable members.
+
+    Uses importlib to load the file so that the resulting function code objects
+    have their real co_filename pointing to the actual file — debuggers can
+    resolve breakpoints in the original source.
+
+    Args:
+        source_path: Absolute path to the Python source file to import.
+        static_functions: If True, global functions (no self) are included.
+
+    Returns:
+        A tuple of (member_functions, global_functions) as in _compile_and_extract.
+    """
+    import hashlib
+    import importlib
+    import importlib.util
+    import sys
+
+    # Generate a unique module name so re-importing overwrites rather than conflicts.
+    hash_input = str(source_path) + str(source_path.stat().st_mtime)
+    module_hash = hashlib.sha1(hash_input.encode()).hexdigest()[:12]
+    module_name = f"_sandbox_fn.{module_hash}"
+
+    # Use importlib to load the source file directly without needing a package.
+    spec = importlib.util.spec_from_loader(
+        module_name,
+        loader=None,
+        origin=str(source_path),
+    )
+    if spec is None:
+        raise ValueError(f"Could not create module spec for {source_path}")
+
+    # Read and compile the source into a code object for the module.
+    source = source_path.read_text()
+    try:
+        code = compile(source, str(source_path), "exec")
+    except SyntaxError as e:
+        raise ValueError(f"SyntaxError: {e}")
+
+    # Create the module and execute the code inside its namespace.
+    module = importlib.util.module_from_spec(spec)
+    exec(code, module.__dict__)
+
+    # Register in sys.modules so future imports get the same object.
+    sys.modules[module_name] = module
+
+    # Scan the module namespace for functions and classify by self-binding.
+    member_functions: list[Callable] = []
+    global_functions: list[Callable] = []
+    for key, obj in module.__dict__.items():
+        if key.startswith("_"):
+            continue
+        if not callable(obj) or not hasattr(obj, "__code__"):
+            continue
+        _, _, has_unbound_self, _is_async = _extract_func_name_and_params(obj)
+        if has_unbound_self:
+            member_functions.append(obj)
+        else:
+            global_functions.append(obj)
+
+    if static_functions:
+        member_functions.extend(global_functions)
+
+    return member_functions, global_functions
+
+
 def _compile_and_extract(
-    code: str, globals_dict: dict[str, Any]
+    code: str, globals_dict: dict[str, Any], filename: str = "<defined>"
 ) -> tuple[list[Callable], list[Callable]]:
     """Execute *code* in *globals_dict* and return member and global functions.
 
     Args:
         code: Python source code to compile.
         globals_dict: The globals namespace to exec into.
+        filename: Filename to attach to the compiled code object (used by debuggers
+            to resolve source locations; defaults to "<defined>").
 
     Returns:
         A tuple of (member_functions, global_functions) where member
@@ -91,7 +163,7 @@ def _compile_and_extract(
 
     # Validate syntax up front — avoid partial exec with broken code.
     try:
-        compile(code, "<defined>", "exec")
+        compile(code, filename, "exec")
     except SyntaxError as e:
         raise ValueError(f"SyntaxError: {e}")
 
@@ -443,18 +515,21 @@ class SandboxBuilder:
 
     def add_source_code(
         self,
-        code: str,
+        code: str | Path,
         static_functions: bool = True,
     ) -> list[tuple[str, dict]]:
         """Store agent source code, compile immediately, and register functions in the sandbox namespace.
 
-        Compiles in a merged globals namespace (inherited from all parent builders)
-        to extract function names and parameter schemas, registers each function
-        immediately in :attr:`sandbox_namespace`, registers each name in the internal
-        name-to-entry map, and returns the list of (name, parameters) tuples.
+        When *code* is a Path the source file is imported as a module via importlib,
+        so the resulting function code objects have their real co_filename pointing
+        to the file on disk and debuggers can resolve breakpoints in the original
+        source. When *code* is a string it is executed via exec as before.
 
         Args:
-            code: Python source code defining sandboxed functions.
+            code: Python source code defining sandboxed functions, or a file path
+                to import as a module. When a Path is given the file is loaded via
+                importlib so the resulting code objects carry the real filename and
+                debuggers can resolve breakpoints in the original source.
             static_functions: If ``True``, global functions in the code
                 (no ``self`` parameter) will be added as static member
                 functions on the sandbox instance.
@@ -463,13 +538,31 @@ class SandboxBuilder:
             List of (func_name, parameters) tuples for each function that
             is registered on the sandbox.
         """
+        # Resolve Path to content string and a filename for compile().
+        if isinstance(code, Path):
+            source_path = code.resolve()
+            source_str = source_path.read_text()
+            source_file = str(source_path)
+        else:
+            source_str = code
+            source_file = "<defined>"
+
         key = self._source_code_counter
-        self._source_code[key] = (code, static_functions)
+        self._source_code[key] = (source_str, static_functions)
         self._source_code_counter += 1
 
-        # Compile in a copy to gather names and parameters.
-        globals_ns = self.get_globals()
-        member_functions, global_functions = _compile_and_extract(code, globals_ns)
+        # When a Path is given, import as a module so the resulting code objects
+        # have their real co_filename for debugger breakpoint resolution.
+        if isinstance(code, Path):
+            member_functions, global_functions = _import_as_module(
+                source_path, static_functions
+            )
+        else:
+            # Compile in a copy to gather names and parameters.
+            globals_ns = self.get_globals()
+            member_functions, global_functions = _compile_and_extract(
+                source_str, globals_ns, filename=source_file
+            )
         if static_functions:
             member_functions.extend(global_functions)
 

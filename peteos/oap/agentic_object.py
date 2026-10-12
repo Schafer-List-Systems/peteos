@@ -35,6 +35,20 @@ _logger = get_logger(__name__)
 _AGENT_BASE_DIR = os.environ.get("PETEOS_AGENT_BASE_DIR", "/tmp/peteos")
 
 
+def _class_info(cls) -> dict[str, str]:
+    """Return the class identity for persistence: module path and qualified name.
+
+    Prefers __spec__.module (Python 3.12+, handles dynamic classes), falls back to
+    __module__, and finally falls back to no module with only __qualname__.
+    """
+    spec = getattr(cls, "__spec__", None)
+    if spec and (mod := spec.module):
+        return {"module": mod, "qualname": cls.__qualname__}
+    if (mod := getattr(cls, "__module__", None)):
+        return {"module": mod, "qualname": cls.__qualname__}
+    return {"module": None, "qualname": cls.__qualname__}
+
+
 def _find_outer_binding(name: str, policy_func: Callable) -> Any:
     """Resolve one freevar name from policy_func's enclosing scope to its live value.
 
@@ -297,10 +311,7 @@ class AgenticObject:
 
         # Initialize the serializable (the OAP state) part of the object.
         self._oap_json: dict[str, Any] = {
-            "class": {
-                "module": self.__class__.__module__,
-                "name": self.__class__.__name__,
-            },
+            "class": _class_info(self.__class__),
             "name": name or str(uuid.uuid4()),
             "persistent": persistent,
             "thread_store": {},

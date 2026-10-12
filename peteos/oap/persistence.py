@@ -39,7 +39,7 @@ def restore_instance(name: str) -> AgenticObject:
     # Import the class from its stored module path
     class_info = data["class"]
     mod = importlib.import_module(class_info["module"])
-    cls = getattr(mod, class_info["name"])
+    cls = getattr(mod, class_info["qualname"])
 
     # Instantiate with the persisted name — persistent=True ensures
     # the existing JSON is not overwritten on re-initialisation
