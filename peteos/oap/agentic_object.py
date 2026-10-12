@@ -935,6 +935,11 @@ class AgenticObject:
         self._oap_json["persistent"] = value
 
     @property
+    def name(self) -> str:
+        """The instance name, set at construction time."""
+        return self._oap_json["name"]
+
+    @property
     def instance_dir(self) -> Path:
         """The directory for this object's persisted state (derived from INSTANCES_DIR/name/)."""
         return ConfigManager.resolve_path(f"{{INSTANCES_DIR}}/{self._oap_json["name"]}/")
