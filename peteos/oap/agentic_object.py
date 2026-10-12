@@ -350,6 +350,27 @@ class AgenticObject:
         tool_names = [t.name for t in self._oap_tool_manager.get_tool_list()]
         _logger.debug("Registered tools for %s: %s", self.__class__.__name__, tool_names)
 
+    def _register_restore_hook(
+        self,
+        name: str,
+        callable_: Callable,
+        dependencies: list[str] | None = None,
+    ) -> None:
+        """Register a hook to be called during instance restoration.
+
+        The hook is stored in _oap_restore_hooks and fired by restore() in
+        topological dependency order. Raises KeyError if name is already registered.
+        """
+        # Guard: reject name collision — silent registration hides bugs.
+        if name in self._oap_restore_hooks:
+            raise KeyError(f"restore hook '{name}' already registered.")
+
+        # Commit the hook under its unique name with its dependency list.
+        self._oap_restore_hooks[name] = RestoreHook(
+            callable_=callable_,
+            dependencies=dependencies if dependencies is not None else [],
+        )
+
     def restore(self) -> None:
         """Run all registered restore hooks in dependency order on this instance.
 
