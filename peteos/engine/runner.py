@@ -278,6 +278,8 @@ class Runner(ActiveClass):
     async def append_and_notify(self, message: Message) -> None:
         """Append a message to active context and publish a notification."""
         self._session.active_context.append(message)
+        if self._session._autosave:
+            self._session.save()
         await self._call_after_message_append(message)
         await self.publish_notification(message)
 

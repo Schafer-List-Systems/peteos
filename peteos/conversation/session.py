@@ -194,6 +194,7 @@ class Session:
         self.save_active_context()
         self._active_context = context
         self.raw_dict["active_context_id"] = context.id
+        self.save_active_context()
 
     @property
     def active_context(self) -> Context | None:
