@@ -49,6 +49,72 @@ def _class_info(cls) -> dict[str, str]:
     return {"module": None, "qualname": cls.__qualname__}
 
 
+def _persist_oap_json(obj: "AgenticObject") -> None:
+    """Persist the OAP state dictionary to disk (thread_store, auto_approve_tools).
+
+    Writes the dictionary to instance_dir/agentic_object.json. Idempotent —
+    overwrites the file on every significant state change.
+    """
+    if not obj._oap_json["persistent"]:
+        return
+    json_path = obj.instance_dir / "agentic_object.json"
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(json_path, "w") as f:
+        json.dump(obj._oap_json, f, indent=2)
+
+
+async def _restore_agentic_object(obj: "AgenticObject") -> None:
+    """Core restore hook: rehydrates _oap_json, sessions, and runners from disk.
+
+    Loads agentic_object.json and updates _oap_json, then loads each
+    Session from {SESSIONS_DIR}/<uuid>/session.json, sets it inactive
+    (no mid-call stack to resume), and stores it in _oap_session_store.
+    Runner store is left empty — runners are created fresh on invoke_agent, then pre-warmed on restore.
+    """
+    from peteos.conversation import Session
+
+    # Guard: nothing to restore if the instance has never been persisted
+    json_path = obj.instance_dir / "agentic_object.json"
+    if not json_path.exists():
+        return
+
+    # Restore the OAP state dictionary from disk — thread_store is included
+    with open(json_path) as f:
+        loaded = json.load(f)
+    obj._oap_json.update(loaded)
+
+    # Iterate each restored thread, load its session, deactivate it, and
+    # register it in the session store so invoke_agent can route to it
+    for persistent_id, session_uuid in obj._oap_json["thread_store"].items():
+        # Attempt to load the session from its on-disk location
+        try:
+            session = Session.load(session_uuid)
+        # Session not on disk — log and skip this thread
+        except FileNotFoundError:
+            _logger.warning(
+                "AgenticObject[%s]: session %s not found, skipping thread %s",
+                obj.__class__.__name__,
+                session_uuid,
+                persistent_id,
+            )
+            continue
+
+        # Deactivate — no mid-call stack to resume on restart
+        session.is_active = False
+        obj._oap_session_store[session_uuid] = session
+        _logger.debug(
+            "AgenticObject[%s]: restored session %s for thread %s",
+            obj.__class__.__name__,
+            session_uuid,
+            persistent_id,
+        )
+
+    # Pre-warm a runner for each restored persistent thread so the object is
+    # immediately usable after restore
+    for persistent_id in obj._oap_json["thread_store"]:
+        await obj.start_runner(persistent_id)
+
+
 def _find_outer_binding(name: str, policy_func: Callable) -> Any:
     """Resolve one freevar name from policy_func's enclosing scope to its live value.
 
@@ -328,6 +394,11 @@ class AgenticObject:
                     json.dump(self._oap_json, f, indent=2)
 
         self._oap_restore_hooks: dict[str, RestoreHook] = {}
+        self._register_restore_hook(
+            "_restore_agentic_object",
+            _restore_agentic_object,
+            dependencies=None,
+        )
         self._oap_role: Role = AgenticObjectRegistry.create_role(self.__class__.__name__)
         self._inject_code_exec_section()
         self._oap_lock: asyncio.Lock = asyncio.Lock()
@@ -962,6 +1033,29 @@ class AgenticObject:
         """The instance name, set at construction time."""
         return self._oap_json["name"]
 
+    async def start_runner(self, persistent_thread_id: str) -> Runner:
+        """Start (or resume) a runner for a persistent thread.
+
+        Loads the session, starts it, registers the runner in runner_store.
+        Raises KeyError if the thread has no restored session.
+        """
+        # Look up the session UUID for this thread from the thread_store
+        stored_uuid = self._oap_json["thread_store"].get(persistent_thread_id)
+        if stored_uuid is None:
+            raise KeyError(f"No session found for persistent_thread_id: {persistent_thread_id}")
+
+        # Retrieve the restored session from the session store
+        session = self._oap_session_store.get(stored_uuid)
+        if session is None:
+            raise KeyError(f"Session {stored_uuid} not in session_store")
+
+        # Start the runner for this session and register it in the runner store
+        runner = await self._start_session(session)
+        self._oap_runner_store[persistent_thread_id] = runner
+
+        # Return the started runner so callers can attach channels to it
+        return runner
+
     @property
     def instance_dir(self) -> Path:
         """The directory for this object's persisted state (derived from INSTANCES_DIR/name/)."""
@@ -1060,6 +1154,9 @@ class AgenticObject:
                 self._oap_json["thread_store"][str(session.uuid)] = session.uuid
                 self._oap_runner_store[str(session.uuid)] = runner
             self._oap_session_store[str(session.uuid)] = session
+
+            # Persist the updated thread_store to disk
+            _persist_oap_json(self)
 
         if persistent_thread_id is not None:
             if runner.state.get("_persistent_thread_id") is None:

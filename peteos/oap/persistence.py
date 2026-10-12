@@ -1,6 +1,4 @@
-"""Persistence — list and restore persisted AgenticObject instances."""
-
-import importlib
+"""Persistence — list persisted AgenticObject instances."""
 
 from peteos.config import ConfigManager
 from peteos.oap.agentic_object import AgenticObject
@@ -24,29 +22,3 @@ def list_instances() -> list[str]:
     # Extract names in creation-order
     return [name for _, name in entries]
 
-
-def restore_instance(name: str) -> AgenticObject:
-    """Restore a persisted instance by name.
-
-    Loads agentic_object.json, imports the class, instantiates it,
-    then calls restore(). Returns the restored instance.
-    """
-    # Resolve and load the persisted JSON for this instance
-    json_path = ConfigManager.resolve_path(f"{{INSTANCES_DIR}}/{name}/agentic_object.json")
-    with open(json_path) as f:
-        data = json.load(f)
-
-    # Import the class from its stored module path
-    class_info = data["class"]
-    mod = importlib.import_module(class_info["module"])
-    cls = getattr(mod, class_info["qualname"])
-
-    # Instantiate with the persisted name — persistent=True ensures
-    # the existing JSON is not overwritten on re-initialisation
-    instance: AgenticObject = cls(name=name, persistent=True)
-
-    # Run all restore hooks in dependency order
-    instance.restore()
-
-    # Return the fully restored instance
-    return instance
