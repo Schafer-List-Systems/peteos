@@ -299,6 +299,10 @@ class Context:
             (n, idx) for n, idx in self._json_dict["anchor_points"] if n != name
         ]
 
+    def has_anchor(self, name: str) -> bool:
+        """Return True if an anchor by this name exists in the context."""
+        return any(n == name for n, _ in self._json_dict["anchor_points"])
+
     def add_anchor(self, name: str, msg_index: int, after_existing: bool = True) -> None:
         """Register a new anchor point.
 

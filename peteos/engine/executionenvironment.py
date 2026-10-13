@@ -158,11 +158,18 @@ class ToolCallGroup:
 
     def add_tool_call(self, tool_call: ContentPart) -> ToolCallRecord:
         """Create and link a record and its result placeholder, inject into the result message."""
-        # Create result placeholder ...
-        tool_result = ContentPart.create_tool_result(tool_call.call_id, "")
+        # We look for an existing result placeholder for this call_id first.
+        # On restore the placeholder may already be in the result message.
+        tool_result: ContentPart | None = None
+        for cp in self.result_message.content:
+            if cp.type == "tool_result" and cp.call_id == tool_call.call_id:
+                tool_result = cp
+                break
 
-        # ... and inject the tool_result into the message, so the LLM sees a result slot.
-        self.result_message.add_content(tool_result)
+        # If no existing placeholder was found, we create one and inject it into the message.
+        if tool_result is None:
+            tool_result = ContentPart.create_tool_result(tool_call.call_id, "")
+            self.result_message.add_content(tool_result)
 
         # Create a record PENDING / WAITING_FOR_APPROVAL tool call record.
         record = ToolCallRecord(
@@ -431,18 +438,29 @@ class ExecutionEnvironment:
         """Return the current foreground tool call group, or None."""
         return self._foreground_group
 
-    def create_tool_group(self, group_id: str, anchor_name: str) -> None:
+    def create_tool_group(
+        self, group_id: str, anchor_name: str, result_message: Message | None = None,
+    ) -> None:
         """Create a new tool call group and set it as the foreground group.
+
+        If result_message is provided, it is used as the group's result slot
+        (e.g. on restore). Otherwise a fresh empty result message is created.
 
         Raises an error if a foreground group already exists.
         """
         if self._foreground_group is not None:
             raise ValueError("A foreground tool call group already exists")
+
+        # We create the group — either from the provided result message or from a fresh one.
         group = ToolCallGroup(
             id=group_id,
             anchor_name=anchor_name,
-            result_message=Message.create("tool_result", []),
+            result_message=result_message
+            if result_message is not None
+            else Message.create("tool_result", []),
         )
+
+        # We register the group and mark it as the current foreground group.
         self._groups[group_id] = group
         self._foreground_group = group
 
@@ -463,8 +481,13 @@ class ExecutionEnvironment:
         if tool_call.call_id is None:
             raise ValueError("Tool call missing required 'call_id' field")
 
-        # Create the record and its result placeholder via the group.
+        # Create the tool call record and its result placeholder via the group.
         record = self._foreground_group.add_tool_call(tool_call)
+
+        # If the approval was already resolved (e.g. on restore), we skip the election.
+        if tool_call.approval_status != ToolApprovalStatus.PENDING:
+            record.queued = True
+            return record
 
         # Prepended policy layer: existence check runs before user hooks so
         # a missing tool is denied immediately. The auto_approve policy forces

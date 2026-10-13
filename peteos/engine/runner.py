@@ -74,6 +74,11 @@ class _Hooks:
         return pts
 
 
+def _tool_result_anchor(group_id: str) -> str:
+    """Derive the result placeholder anchor name for a tool call group."""
+    return f"{group_id}:tool_result"
+
+
 class Runner(ActiveClass):
     """Active event-loop with message queue and the REPL reasoning loop.
 
@@ -451,18 +456,20 @@ class Runner(ActiveClass):
         if not any(n == "last_assistant" for n, _ in context.anchor_points):
             return False
 
-        response_msg = context.messages[context.get_anchor_msg_index("last_assistant")]
+        # We retrieve the assistant message and its index from the last_assistant anchor.
+        assistant_msg_index = context.get_anchor_msg_index("last_assistant")
+        assistant_msg = context.messages[assistant_msg_index]
 
         # If there are no tool calls present, then there is nothing to set up
         # and we return early.
-        content_parts = response_msg.content
+        content_parts = assistant_msg.content
         if not any(cp.type == "tool_use" for cp in content_parts):
             return False
 
         # We derive the group identity from the message: the message ID is the
         # group ID, and the result placeholder anchor is derived from it.
-        group_id = response_msg.id
-        anchor_name = f"{group_id}:tool_result"
+        group_id = assistant_msg.id
+        tool_result_anchor = _tool_result_anchor(group_id)
 
         # If the group already exists, then the restore was already applied and
         # we skip silently.
@@ -470,21 +477,27 @@ class Runner(ActiveClass):
         if existing is not None and existing.id == group_id:
             return True
 
+        # We anchor the result placeholder right after the assistant message,
+        # or retrieve the existing one from the context on restore.
+        result_message: Message | None = None
+        if not context.has_anchor(tool_result_anchor):
+            context.add_anchor(tool_result_anchor, assistant_msg_index + 1, after_existing=False)
+        else:
+            result_message = context.messages[context.get_anchor_msg_index(tool_result_anchor)]
+
         # We create the foreground group, which registers it in the EE.
-        self._execution_environment.create_tool_group(group_id, anchor_name)
+        self._execution_environment.create_tool_group(group_id, tool_result_anchor, result_message)
+
+        # On a fresh run we append the empty result message so the LLM sees the slot.
+        if result_message is None:
+            result_msg = self._execution_environment.get_foreground_group().result_message
+            context.append(result_msg, anchor_point=tool_result_anchor)
 
         # We register each tool_use from the message as a pending record.
         for cp in content_parts:
             if cp.type == "tool_use":
                 await self._execution_environment.add_tool_call(cp, runner=self)
 
-        # We anchor the result placeholder after the current message sequence.
-        msg_index = context.get_anchor_msg_index("messages")
-        context.add_anchor(anchor_name, msg_index, after_existing=False)
-
-        # Then we append the empty result message so the LLM sees the slot.
-        result_msg = self._execution_environment.get_foreground_group().result_message
-        context.append(result_msg, anchor_point=anchor_name)
         return True
 
     async def _send_to_chatbot(self) -> Any:
