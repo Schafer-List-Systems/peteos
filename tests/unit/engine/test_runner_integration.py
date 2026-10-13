@@ -210,8 +210,14 @@ class TestRunnerStepChains:
         sid = _uuid.uuid4()
         mock_session = MagicMock()
         mock_session.uuid = str(sid)
+        ctx = MagicMock()
+        ctx.messages = [msg1]
+        ctx.anchor_points = [("message_in_process", 0)]
+        ctx.get_anchor_msg_index = MagicMock(return_value=0)
+        ctx.has_anchor = MagicMock(return_value=True)
+        ctx.total_token_count.return_value = 4096
+        mock_session.active_context = ctx
         runner = Runner(agent=agent, session=mock_session, chatbot=bot)
-        runner._session.active_context.total_token_count.return_value = 4096
 
         # Step 1: tool_use → CONTINUE, foreground group created
         status, resp = await runner.step()
@@ -252,8 +258,14 @@ class TestRunnerStepChains:
         sid = _uuid.uuid4()
         mock_session = MagicMock()
         mock_session.uuid = str(sid)
+        ctx = MagicMock()
+        ctx.messages = [msg1]
+        ctx.anchor_points = [("message_in_process", 0)]
+        ctx.get_anchor_msg_index = MagicMock(return_value=0)
+        ctx.has_anchor = MagicMock(return_value=True)
+        ctx.total_token_count.return_value = 4096
+        mock_session.active_context = ctx
         runner = Runner(agent=agent, session=mock_session, chatbot=bot)
-        runner._session.active_context.total_token_count.return_value = 4096
 
         status, resp = await runner.step()
         assert status is ExecStatus.CONTINUE
@@ -295,8 +307,14 @@ class TestRunnerStepChains:
         sid = _uuid.uuid4()
         mock_session = MagicMock()
         mock_session.uuid = str(sid)
+        ctx = MagicMock()
+        ctx.messages = [msg]
+        ctx.anchor_points = [("message_in_process", 0)]
+        ctx.get_anchor_msg_index = MagicMock(return_value=0)
+        ctx.has_anchor = MagicMock(return_value=True)
+        ctx.total_token_count.return_value = 4096
+        mock_session.active_context = ctx
         runner = Runner(agent=agent, session=mock_session, chatbot=bot)
-        runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
         assert status is ExecStatus.CONTINUE
@@ -684,7 +702,7 @@ class TestRunnerNotifications:
             _ctx_messages = []
             mock_ctx = MagicMock()
             mock_ctx.messages = _ctx_messages
-            mock_ctx.append = lambda msg: _ctx_messages.append(msg)
+            mock_ctx.append = lambda msg, anchor_point=None: _ctx_messages.append(msg)
             mock_ctx.total_token_count = MagicMock(return_value=0)
             mock_session = MagicMock()
             mock_session.uuid = str(_uuid.uuid4())
@@ -1414,8 +1432,14 @@ class TestRunnerFullCycle:
         sid = _uuid.uuid4()
         mock_session = MagicMock()
         mock_session.uuid = str(sid)
+        ctx = MagicMock()
+        ctx.messages = [msg1]
+        ctx.anchor_points = [("message_in_process", 0)]
+        ctx.get_anchor_msg_index = MagicMock(return_value=0)
+        ctx.has_anchor = MagicMock(return_value=True)
+        ctx.total_token_count.return_value = 4096
+        mock_session.active_context = ctx
         runner = Runner(agent=agent, session=mock_session, chatbot=bot)
-        runner._session.active_context.total_token_count.return_value = 4096
 
         status, _ = await runner.step()
         event = runner.event_queue.get_nowait()
@@ -1445,7 +1469,7 @@ class TestRunnerFullCycle:
             _ctx_messages = []
             mock_ctx = MagicMock()
             mock_ctx.messages = _ctx_messages
-            mock_ctx.append = lambda msg: _ctx_messages.append(msg)
+            mock_ctx.append = lambda msg, anchor_point=None: _ctx_messages.append(msg)
             mock_ctx.total_token_count = MagicMock(return_value=0)
             mock_session = MagicMock()
             mock_session.uuid = str(_uuid.uuid4())

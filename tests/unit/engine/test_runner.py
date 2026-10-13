@@ -362,8 +362,19 @@ class TestRunnerStepToolCalls:
         tool_mock.execute = MagicMock(return_value=3)
         tm.get_tool.return_value = tool_mock
 
+        # Create a mock chatbot that returns a response with a tool_use
+        chatbot = _make_mock_chatbot(
+            content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}],
+        )
+        response_msg = chatbot.send_context.return_value.message
+
+        # Set up a mock context with the message and a message_in_process anchor
+        # pointing to it — this mirrors what append_and_notify does on a real run.
         ctx = MagicMock()
-        ctx.messages = []
+        ctx.messages = [response_msg]
+        ctx.anchor_points = [("message_in_process", 0)]
+        ctx.get_anchor_msg_index = MagicMock(return_value=0)
+        ctx.has_anchor = MagicMock(return_value=True)
 
         session = MagicMock()
         session.role = role
@@ -371,9 +382,6 @@ class TestRunnerStepToolCalls:
         session.auto_approve_tools = list(role.auto_approve_tools)
         session.tool_failure_policy = "abort"
         session.active_context = ctx
-
-        # Patch _select_chatbot to return our mock
-        chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
 
         # Create a real runner — it pulls auto_approve_tools from role
         agent = MagicMock()
@@ -409,8 +417,16 @@ class TestRunnerStepToolCalls:
         tool_mock.execute = MagicMock(side_effect=ValueError("calculation error"))
         tm.get_tool.return_value = tool_mock
 
+        chatbot = _make_mock_chatbot(
+            content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}],
+        )
+        response_msg = chatbot.send_context.return_value.message
+
         ctx = MagicMock()
-        ctx.messages = []
+        ctx.messages = [response_msg]
+        ctx.anchor_points = [("message_in_process", 0)]
+        ctx.get_anchor_msg_index = MagicMock(return_value=0)
+        ctx.has_anchor = MagicMock(return_value=True)
 
         session = MagicMock()
         session.role = role
@@ -418,8 +434,6 @@ class TestRunnerStepToolCalls:
         session.auto_approve_tools = list(role.auto_approve_tools)
         session.tool_failure_policy = "abort"
         session.active_context = ctx
-
-        chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
 
         agent = MagicMock()
         agent.get_session.return_value = session
@@ -451,8 +465,16 @@ class TestRunnerStepToolCalls:
         tool_mock.execute = MagicMock(return_value=3)
         tm.get_tool.return_value = tool_mock
 
+        chatbot = _make_mock_chatbot(
+            content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}],
+        )
+        response_msg = chatbot.send_context.return_value.message
+
         ctx = MagicMock()
-        ctx.messages = []
+        ctx.messages = [response_msg]
+        ctx.anchor_points = [("message_in_process", 0)]
+        ctx.get_anchor_msg_index = MagicMock(return_value=0)
+        ctx.has_anchor = MagicMock(return_value=True)
 
         session = MagicMock()
         session.role = role
@@ -460,8 +482,6 @@ class TestRunnerStepToolCalls:
         session.auto_approve_tools = list(role.auto_approve_tools)
         session.tool_failure_policy = "abort"
         session.active_context = ctx
-
-        chatbot = _make_mock_chatbot(content=[{"type": "tool_use", "name": "add", "arguments": "{}", "call_id": "tc1"}])
 
         agent = MagicMock()
         agent.get_session.return_value = session
