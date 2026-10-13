@@ -1066,12 +1066,26 @@ class AgenticObject:
         return ConfigManager.resolve_path(f"{{INSTANCES_DIR}}/{self._oap_json["name"]}/")
 
     async def _start_session(self, session: Session) -> Runner:
+        """Create a runner for the session, optionally restore EE state, and start the loop."""
+        # Create the runner and configure it with the agent and auto-approve list.
         runner = Runner(self._oap_agent, session)
         runner._execution_environment.auto_approve_tools = list(self._oap_json["auto_approve_tools"])
+
+        # We build and attach the sandbox for tool execution.
         runner.sandbox_builder = self._create_sandbox_builder(
             _collect_oap_config(self.__class__), runner
         )
         runner.sandbox = runner.sandbox_builder.get_sandbox(freeze_namespaces=False)
+
+        # Check whether a message_in_process anchor is present — if so, the
+        # runner was mid-processing an assistant message (e.g. crashed during
+        # approval or execution). We restore the EE state from the persisted
+        # context so the runner resumes from where it left off.
+        context = session.active_context
+        if context.has_anchor("message_in_process"):
+            await runner._process_assistant_message(context)
+
+        # Start the runner loop and mark the session as active.
         await runner.start()
         session.is_active = True
         return runner
