@@ -415,7 +415,7 @@ class Runner(ActiveClass):
                 cp.set_approval_status(ToolApprovalStatus.PENDING)
 
         # We put the message into the queue and register it as the last assistant message.
-        await self.append_and_notify(response_msg, floating_anchor="last_assistant")
+        await self.append_and_notify(response_msg, floating_anchor="message_in_process")
         content_parts = response_msg.content
         has_text_part = response.has_text_part
 
@@ -452,12 +452,12 @@ class Runner(ActiveClass):
         Returns True when a group exists (created or pre-existing), False if the
         last message has no tool_use parts or the context is empty.
         """
-        # We guard against a missing last_assistant anchor.
-        if not any(n == "last_assistant" for n, _ in context.anchor_points):
+        # We guard against a missing message_in_process anchor.
+        if not any(n == "message_in_process" for n, _ in context.anchor_points):
             return False
 
-        # We retrieve the assistant message and its index from the last_assistant anchor.
-        assistant_msg_index = context.get_anchor_msg_index("last_assistant")
+        # We retrieve the assistant message and its index from the message_in_process anchor.
+        assistant_msg_index = context.get_anchor_msg_index("message_in_process")
         assistant_msg = context.messages[assistant_msg_index]
 
         # If there are no tool calls present, then there is nothing to set up
@@ -772,9 +772,19 @@ class Runner(ActiveClass):
 
             _logger.debug("Tool %s returned: %s", tool_name, result_str)
 
-        # Group is exhausted — close it and return whether a real result was produced (any non-None).
+        # Group is exhausted — close it, clean up, and return whether a real result was produced.
         if foreground.is_done():
+            # We close the foreground group and remove it from the EE.
             self._execution_environment.close_foreground_group()
+
+            # We remove the message_in_process anchor since this group is done.
+            self._session.active_context.remove_anchor("message_in_process")
+
+            # We persist the session so the cleaned-up state survives on disk.
+            if self._session._autosave:
+                self._session.save()
+
+            # We return whether a real result was produced by this group.
             return foreground.any_real_result
 
         # No reviewed calls remain — log the head of the pending queue for debugging.
