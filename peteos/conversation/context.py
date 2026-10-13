@@ -293,6 +293,12 @@ class Context:
         """Return the message index stored for anchor *name*."""
         return self._json_dict["anchor_points"][self.get_anchor_index(name)][1]
 
+    def remove_anchor(self, name: str) -> None:
+        """Remove an anchor point by name. Silently succeeds if the anchor does not exist."""
+        self._json_dict["anchor_points"] = [
+            (n, idx) for n, idx in self._json_dict["anchor_points"] if n != name
+        ]
+
     def add_anchor(self, name: str, msg_index: int, after_existing: bool = True) -> None:
         """Register a new anchor point.
 
@@ -310,18 +316,23 @@ class Context:
         Raises:
             ValueError: If *name* already exists.
         """
+        # We reject a duplicate anchor name.
         if any(n == name for n, _ in self._json_dict["anchor_points"]):
             raise ValueError(f"Anchor point already exists: {name}")
 
+        # We guard the index against out-of-bounds values.
         assert 0 <= msg_index <= len(self._messages), (
             f"Anchor '{name}' index {msg_index} is out of bounds "
             f"[0, {len(self._messages)}]"
         )
 
-        # Record the current mutation count for this anchor
+        # The mutation counter is recorded for forking; each anchor carries its birth mutation number.
         self._anchor_sequences.append(self._json_dict["_mutation_counter"])
         self._json_dict["_mutation_counter"] += 1
 
+        # The anchor list is kept sorted by the stored msg_index. We scan forward
+        # until we find the first anchor that passes our ordering threshold,
+        # then we insert before it.
         for pos, (_, existing_idx) in enumerate(self._json_dict["anchor_points"]):
             if after_existing and existing_idx > msg_index:
                 self._json_dict["anchor_points"].insert(pos, (name, msg_index))
@@ -329,11 +340,16 @@ class Context:
             if not after_existing and existing_idx >= msg_index:
                 self._json_dict["anchor_points"].insert(pos, (name, msg_index))
                 return
+
+        # No later anchor was found, so we append to the end of the list.
         self._json_dict["anchor_points"].append((name, msg_index))
 
     def _shift_anchors_after_insert(self, anchor_list_index: int) -> None:
         """Increment stored indices for all anchors at or after *anchor_list_index* in the list."""
+        # All anchors from the inserted position onward shift by one.
         for i in range(anchor_list_index, len(self._json_dict["anchor_points"])):
+            # Each stored index increments because a message was inserted
+            # at or before its position.
             n, idx = self._json_dict["anchor_points"][i]
             new_idx = idx + 1
             self._json_dict["anchor_points"][i] = (n, new_idx)
@@ -354,16 +370,23 @@ class Context:
             message: The Message to append.
             anchor_point: Name of the anchor point. Defaults to "messages".
         """
+        # The anchor name resolves to an anchor-list position, then the stored message index is read from it.
         anchor_list_index = self.get_anchor_index(anchor_point)
         msg_index = self.raw_dict["anchor_points"][anchor_list_index][1]
 
+        # The message goes into both the live object list and the serialized JSON.
         self._messages.insert(msg_index, message)
         self.raw_dict["messages"].insert(msg_index, message.raw_dict)
+
+        # The global message sequence counter increments; the message gets stamped with the current mutation counter.
         self._json_dict["message_sequence"] += 1
-        # Assign sequence number from the mutation counter (0-based, no remapping)
         message.raw_dict["_sequence_number"] = self._json_dict["_mutation_counter"]
         self._json_dict["_mutation_counter"] += 1
+
+        # All anchors at and after the target anchor shift forward by one to keep their positions valid.
         self._shift_anchors_after_insert(anchor_list_index)
+
+        # The message gets indexed in the hook lookup so hooks can reference it later.
         self._add_message_to_hook_index(message)
 
     def _fork(

@@ -326,7 +326,7 @@ class Session:
         session_path.parent.mkdir(parents=True, exist_ok=True)
         with open(session_path, "w") as f:
             json.dump(self._json_dict, f, indent=2)
-        _logger.info("Saved session.json to %s", session_path)
+        _logger.debug("Saved session.json to %s", session_path)
 
         self.save_active_context()
 

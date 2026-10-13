@@ -101,6 +101,10 @@ async def _restore_agentic_object(obj: "AgenticObject") -> None:
 
         # Deactivate — no mid-call stack to resume on restart
         session.is_active = False
+
+        # We restore the persona hooks so the session is fully functional again.
+        obj._oap_agent.restore_session_hooks(session)
+
         obj._oap_session_store[session_uuid] = session
         _logger.debug(
             "AgenticObject[%s]: restored session %s for thread %s",

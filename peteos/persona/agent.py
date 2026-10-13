@@ -45,13 +45,24 @@ class Agent:
         tool_defs_msg = ToolDefinitionsMessage()
         session = Session.create(system_prompt_msg, tool_defs_msg)
 
-        session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_LIST_HOOK_NAME, self._tool_list_hook)
-        session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_FILTER_HOOK_NAME, self._tool_filter_hook)
+        self.restore_session_hooks(session)
 
         # TODO: Register hooks (before_tool_execution, after_tool_execution,
         # before_notification_publish) on the environment
 
         return session
+
+    def restore_session_hooks(self, session: Session) -> None:
+        """Register the persona hooks on an existing session.
+
+        This restores the tool definitions message hooks using the session's
+        already-materialized tool_definitions_message. Safe to call on both
+        fresh sessions (where hooks are not yet registered) and on sessions
+        loaded from disk (where hooks need to be re-registered).
+        """
+        tool_defs_msg = session.active_context.tool_definitions_message
+        session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_LIST_HOOK_NAME, self._tool_list_hook)
+        session.register_hook(tool_defs_msg, ToolDefinitionsMessage.TOOL_FILTER_HOOK_NAME, self._tool_filter_hook)
 
     @property
     def role(self) -> Role:

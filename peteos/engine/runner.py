@@ -6,6 +6,7 @@ import asyncio
 import uuid as _uuid
 from typing import TYPE_CHECKING, Any, Callable
 
+from peteos.conversation import Context
 from peteos.conversation.session import SessionState
 
 from peteos.sandbox import Sandbox, SandboxBuilder
@@ -13,7 +14,7 @@ from peteos.chatbot import ChatBot, ChatBotResponse, ChatBotManager, Message, Co
 
 from peteos.utils.activeclass import ActiveClass
 from peteos.engine.exec_status import ExecStatus, _merge_exec_status
-from peteos.engine.events import ActivityEvent, ActivityState, ApprovalEvent, ToolExecutionEvent
+from peteos.engine.events import MessageEvent, ActivityEvent, ActivityState, ApprovalEvent, ToolExecutionEvent
 from peteos.engine.executionenvironment import (
     ExecutionEnvironment,
     ToolApprovalStatus,
@@ -275,11 +276,39 @@ class Runner(ActiveClass):
         self._channels.remove(channel)
         return True
 
-    async def append_and_notify(self, message: Message) -> None:
-        """Append a message to active context and publish a notification."""
-        self._session.active_context.append(message)
+    async def append_and_notify(
+        self, message: Message, floating_anchor: str | None = None,
+    ) -> None:
+        """
+        Append a message to active context and publish a notification.
+
+        If floating_anchor is provided, the anchor is removed first if it
+        exists, the message is appended at the messages anchor, and the
+        floating anchor is registered at the position where the message
+        landed — independent of any floating messages after the anchor.
+        """
+        context = self._session.active_context
+
+        # We remove any pre-existing floating anchor before appending.
+        if floating_anchor is not None:
+            context.remove_anchor(floating_anchor)
+
+        # We capture the current end-of-messages position before the insert,
+        # then append at the messages anchor — the message lands at messages_idx.
+        messages_idx = context.get_anchor_msg_index("messages")
+        context.append(message, anchor_point="messages")
+
+        # We register the floating anchor at the position where the message landed.
+        # Using the captured pre-append index keeps it stable even when
+        # floating messages exist after the messages anchor.
+        if floating_anchor is not None:
+            context.add_anchor(floating_anchor, messages_idx, after_existing=False)
+
+        # Save the context to disk.
         if self._session._autosave:
             self._session.save()
+
+        # Call hooks and notify channels.
         await self._call_after_message_append(message)
         await self.publish_notification(message)
 
@@ -361,22 +390,6 @@ class Runner(ActiveClass):
         # --- Phase 1: Call chatbot ---
         response = await self._send_to_chatbot()
 
-        # --- Phase 1.5: Debug output ---
-        _logger.debug(
-            "[runner] step(): Chatbot response — has_text=%s, content_parts=%d, message_id=%s",
-            response.has_text_part,
-            len(response.message.content) if response.message else 0,
-            response.message.id if response.message else None,
-        )
-        for i, part in enumerate(response.message.content if response.message else []):
-            _logger.debug("[runner] step():   content_part[%d] type=%s", i, part.type)
-            if part.type == "text":
-                _logger.debug("[runner] step():   content_part[%d] text=%s", i, json.dumps(part.text))
-            elif part.type == "tool_use":
-                _logger.debug("[runner] step():   content_part[%d] tool_use(name=%s, arguments=%s)", i, part.name, part.arguments)
-            elif part.type == "thinking":
-                _logger.debug("[runner] step():   content_part[%d] thinking=%s", i, json.dumps(part.text))
-
         # --- Phase 2: Error handling ---
         if "error" in response.data:
             _logger.warning("Chatbot returned error, skipping response: %s", response.data["error"])
@@ -396,22 +409,14 @@ class Runner(ActiveClass):
             if cp.type == "tool_use" and cp.approval_status is None:
                 cp.set_approval_status(ToolApprovalStatus.PENDING)
 
-        await self.append_and_notify(response_msg)
+        # We put the message into the queue and register it as the last assistant message.
+        await self.append_and_notify(response_msg, floating_anchor="last_assistant")
         content_parts = response_msg.content
         has_text_part = response.has_text_part
 
         # --- Phase 4: Create foreground tool call group if tool calls present ---
         if any(cp.type == "tool_use" for cp in content_parts):
-            group_id = response_msg.id
-            anchor_name = f"{group_id}:tool_result"
-            self._execution_environment.create_tool_group(group_id, anchor_name)
-            for cp in content_parts:
-                if cp.type == "tool_use":
-                    await self._execution_environment.add_tool_call(cp, runner=self)
-            msg_index = self._session.active_context.get_anchor_msg_index("messages")
-            self._session.active_context.add_anchor(anchor_name, msg_index, after_existing=False)
-            result_msg = self._execution_environment.get_foreground_group().result_message
-            self._session.active_context.append(result_msg, anchor_point=anchor_name)
+            await self._process_assistant_message(self._session.active_context)
 
         if any(cp.type == "tool_use" for cp in content_parts):
             _logger.debug("[runner] step(): Tool calls present, returning CONTINUE for tool execution.")
@@ -427,6 +432,60 @@ class Runner(ActiveClass):
 
         _logger.debug("[runner] step(): Had final answer.")
         return (ExecStatus.FINISHED, response_msg)
+
+    async def _process_assistant_message(self, context: Context) -> bool:
+        """
+        Set up the EE to handle tool calls from the last message in the context.
+
+        The last message is already in the context. This function bridges the
+        in-memory EE state to the already-persisted message: it creates the tool
+        call group, registers the calls, and appends the result placeholder.
+
+        Idempotent — if the group for this message already exists (e.g. on restore),
+        this is a no-op and returns True.
+
+        Returns True when a group exists (created or pre-existing), False if the
+        last message has no tool_use parts or the context is empty.
+        """
+        # We guard against a missing last_assistant anchor.
+        if not any(n == "last_assistant" for n, _ in context.anchor_points):
+            return False
+
+        response_msg = context.messages[context.get_anchor_msg_index("last_assistant")]
+
+        # If there are no tool calls present, then there is nothing to set up
+        # and we return early.
+        content_parts = response_msg.content
+        if not any(cp.type == "tool_use" for cp in content_parts):
+            return False
+
+        # We derive the group identity from the message: the message ID is the
+        # group ID, and the result placeholder anchor is derived from it.
+        group_id = response_msg.id
+        anchor_name = f"{group_id}:tool_result"
+
+        # If the group already exists, then the restore was already applied and
+        # we skip silently.
+        existing = self._execution_environment.get_foreground_group()
+        if existing is not None and existing.id == group_id:
+            return True
+
+        # We create the foreground group, which registers it in the EE.
+        self._execution_environment.create_tool_group(group_id, anchor_name)
+
+        # We register each tool_use from the message as a pending record.
+        for cp in content_parts:
+            if cp.type == "tool_use":
+                await self._execution_environment.add_tool_call(cp, runner=self)
+
+        # We anchor the result placeholder after the current message sequence.
+        msg_index = context.get_anchor_msg_index("messages")
+        context.add_anchor(anchor_name, msg_index, after_existing=False)
+
+        # Then we append the empty result message so the LLM sees the slot.
+        result_msg = self._execution_environment.get_foreground_group().result_message
+        context.append(result_msg, anchor_point=anchor_name)
+        return True
 
     async def _send_to_chatbot(self) -> Any:
         """Materialize context, send to the LLM, and drain the response stream.
@@ -479,6 +538,22 @@ class Runner(ActiveClass):
 
         # Confirm receipt so listeners can process the response.
         await self.call_hooks("after_receive_from_chatbot", response.message)
+
+        # Debug output
+        _logger.debug(
+            "[runner] step(): Chatbot response — has_text=%s, content_parts=%d, message_id=%s",
+            response.has_text_part,
+            len(response.message.content) if response.message else 0,
+            response.message.id if response.message else None,
+        )
+        for i, part in enumerate(response.message.content if response.message else []):
+            _logger.debug("[runner] step():   content_part[%d] type=%s", i, part.type)
+            if part.type == "text":
+                _logger.debug("[runner] step():   content_part[%d] text=%s", i, json.dumps(part.text))
+            elif part.type == "tool_use":
+                _logger.debug("[runner] step():   content_part[%d] tool_use(name=%s, arguments=%s)", i, part.name, part.arguments)
+            elif part.type == "thinking":
+                _logger.debug("[runner] step():   content_part[%d] thinking=%s", i, json.dumps(part.text))
 
         return response
 
@@ -669,6 +744,8 @@ class Runner(ActiveClass):
 
             # Execute the tool and inject its result into the conversation.
             result_str, success = await self._execution_environment.execute_and_inject(record, runner=self)
+            if self._session._autosave:
+                self._session.save()
 
             # Notify channels of the result and fire after_tool_execution hooks.
             await self._notify_channels(ToolExecutionEvent(tool_result=record.tool_result))
