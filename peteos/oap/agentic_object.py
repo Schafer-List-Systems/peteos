@@ -1071,6 +1071,11 @@ class AgenticObject:
         runner = Runner(self._oap_agent, session)
         runner._execution_environment.auto_approve_tools = list(self._oap_json["auto_approve_tools"])
 
+        # Register tool policy hook.
+        runner.hooks["policy", "on_tool_call"] = [
+            lambda ctx: _tool_policy_dispatcher(self, ctx)
+        ]
+
         # We build and attach the sandbox for tool execution.
         runner.sandbox_builder = self._create_sandbox_builder(
             _collect_oap_config(self.__class__), runner
@@ -1162,9 +1167,7 @@ class AgenticObject:
             for name, callback in self._oap_system_prompt_hooks.items():
                 session.register_hook(system_prompt_msg, name, callback)
             runner = await self._start_session(session)
-            runner.hooks["policy", "on_tool_call"] = [
-                lambda ctx: _tool_policy_dispatcher(self, ctx)
-            ]
+            
             if persistent_thread_id is not None:
                 self._oap_json["thread_store"][persistent_thread_id] = session.uuid
                 self._oap_runner_store[persistent_thread_id] = runner
