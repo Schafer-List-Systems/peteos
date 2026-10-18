@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import uuid as _uuid
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -207,6 +208,36 @@ class Runner(ActiveClass):
                 f"for role '{self._agent.role.name}'"
             )
         return chatbots[0][1]
+
+    # ------------------------------------------------------------------ #
+    # Context
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def getContext(cls) -> dict | None:
+        """Read the live Context from the call stack if Runner.run() is active.
+
+        Returns None if no Runner.run() frame is on the stack (i.e., the caller
+        is not running within a Runner).
+        """
+        # Compute the contract frame signature from the live method so it stays
+        # accurate across installations — not a hardcoded string.
+        frame_sig = (cls.run.__code__.co_filename, "run")
+
+        # Walk the call stack backwards, looking for the contract frame.
+        for frame_info in inspect.stack():
+            frame = frame_info.frame
+            if (
+                frame.f_code.co_filename == frame_sig[0]
+                and frame.f_code.co_name == frame_sig[1]
+            ):
+                # Contract frame found — return the live Context binding.
+                ctx = frame.f_locals.get("Context")
+                if ctx is not None:
+                    return ctx
+
+        # No contract frame on the stack — not called from within Runner.run().
+        return None
 
     # ------------------------------------------------------------------ #
     # Message queue
@@ -814,8 +845,12 @@ class Runner(ActiveClass):
         When a foreground group exists, calls ``_handle_tool_group`` for
         each approved tool call.
         """
-        have_new_message = False
+        # Establish the stack-frame context contract: this binding is read by
+        # Runner.getContext() to identify the active session and runner for the
+        # current call stack, without any shared mutable state.
+        Context = {"session_uuid": self.session_uuid, "runner": self}
 
+        have_new_message = False
         try:
             while self.is_running():
                 foreground = self._execution_environment.get_foreground_group()

@@ -1037,6 +1037,45 @@ class AgenticObject:
         """The instance name, set at construction time."""
         return self._oap_json["name"]
 
+    @classmethod
+    def get_current_session_uuid(cls) -> str | None:
+        """Return the session UUID of the Runner.run() that is currently active on the call stack.
+
+        Returns None if no Runner.run() frame is on the stack (i.e., called outside a
+        Runner context).
+
+        Returns:
+            The session UUID string, or None.
+        """
+        # Read the current context from the call stack.
+        ctx = Runner.getContext()
+        if ctx is None:
+            return None
+
+        # Return the session UUID from the context.
+        return ctx.get("session_uuid")
+
+    def get_current_thread_id(self) -> str | None:
+        """Return the persistent_thread_id for the Runner.run() that is currently active.
+
+        Returns None if no Runner.run() frame is on the stack or if the session UUID
+        is not registered in the thread_store.
+
+        Returns:
+            The persistent_thread_id string, or None.
+        """
+        # Resolve the current session UUID from the call stack.
+        session_uuid = self.get_current_session_uuid()
+        if session_uuid is None:
+            return None
+
+        # Walk the thread_store to find the matching persistent_thread_id.
+        for persistent_thread_id, stored_uuid in self._oap_json["thread_store"].items():
+            if stored_uuid == session_uuid:
+                return persistent_thread_id
+
+        return None
+
     async def start_runner(self, persistent_thread_id: str) -> Runner:
         """Start (or resume) a runner for a persistent thread.
 

@@ -1156,3 +1156,72 @@ class TestRunnerAfterReceiveFromChatbot:
 
         assert len(captured) == 1
         assert captured[0] is bot_response
+
+
+# ---------------------------------------------------------------------------
+# Runner.getContext — stack-frame-based context discovery
+# ---------------------------------------------------------------------------
+
+class TestRunnerGetContext:
+    def test_get_context_outside_run_returns_none(self, chatbot_manager_mock):
+        """Called outside any Runner.run() stack, getContext() returns None."""
+        session = _make_mock_session()
+        agent = _make_mock_agent(session)
+        runner = Runner(agent=agent, session=session)
+        assert Runner.getContext() is None
+
+    @pytest.mark.asyncio
+    async def test_get_context_inside_run_returns_context(self, chatbot_manager_mock):
+        """When the stack contains a frame matching the Runner.run() signature
+        with a Context dict in f_locals, getContext() returns it with the right
+        keys and values."""
+        session = _make_mock_session()
+        agent = _make_mock_agent(session)
+        runner = Runner(agent=agent, session=session)
+
+        # Build a synthetic frame that matches the Runner.run() signature.
+        real_context = {"session_uuid": runner._session_uuid, "runner": runner}
+        mock_frame = MagicMock()
+        mock_frame.f_code.co_filename = Runner.run.__code__.co_filename
+        mock_frame.f_code.co_name = "run"
+        mock_frame.f_locals = {"Context": real_context}
+        mock_frame_info = MagicMock()
+        mock_frame_info.frame = mock_frame
+
+        # Patch inspect.stack to return our synthetic stack with the matching frame.
+        # The patch target is the specific function in the module namespace.
+        stack_fixture = [mock_frame_info]
+
+        def fake_stack():
+            return stack_fixture
+
+        with patch("peteos.engine.runner.inspect.stack", side_effect=fake_stack):
+            result = Runner.getContext()
+
+        assert result is real_context
+        assert result is not None
+        assert "session_uuid" in result
+        assert "runner" in result
+        assert result["session_uuid"] == session.uuid
+        assert result["runner"] is runner
+
+    @pytest.mark.asyncio
+    async def test_get_context_returns_live_binding_not_copy(self, chatbot_manager_mock):
+        """The returned dict is the live f_locals binding, not a snapshot."""
+        session = _make_mock_session()
+        agent = _make_mock_agent(session)
+        runner = Runner(agent=agent, session=session)
+
+        ctx_refs: list[object] = []
+
+        async def mimic_run_contract():
+            Context = {"session_uuid": runner._session_uuid, "runner": runner}
+            ctx_refs.append(Runner.getContext())
+            return ctx_refs[-1]
+
+        async def outer():
+            return await mimic_run_contract()
+
+        result = await outer()
+        assert len(ctx_refs) == 1
+        assert ctx_refs[0] is result
