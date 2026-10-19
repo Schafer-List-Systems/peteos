@@ -103,7 +103,7 @@ class Context:
     @classmethod
     def load(cls, path: str) -> "Context":
         """Load a context from a file."""
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             json_dict = json.load(f)
         return cls.load_from_dict(json_dict)
 
@@ -126,7 +126,7 @@ class Context:
         """
         path = Path(session_dir) / f"{self.id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(self._json_dict, f, indent=2)
         _logger.debug("Saved context %s to %s", self.id, path)
 
@@ -630,10 +630,11 @@ class Context:
         # Token counts for non-special messages
         msg_tokens: list[tuple[int, Message, int]] = []
         for seq, msg in non_special:
-            tc = msg.count_tokens(encoding)
-            msg_tokens.append((seq, msg, tc))
+            token_count = msg.count_tokens(encoding)
+            msg_tokens.append((seq, msg, token_count))
 
-        total = special_tokens + sum(tc for _, _, tc in msg_tokens)
+        # Early exit — already within budget, no reduction needed.
+        total = special_tokens + sum(token_count for _, _, token_count in msg_tokens)
         if total <= max_tokens:
             return None
 
@@ -642,10 +643,10 @@ class Context:
         running = special_tokens
         kept = 0
         for i in range(len(msg_tokens) - 1, -1, -1):
-            tc = msg_tokens[i][2]
-            if running + tc > max_tokens:
+            token_count = msg_tokens[i][2]
+            if running + token_count > max_tokens:
                 break
-            running += tc
+            running += token_count
             kept += 1
 
         # Determine sequence range from the kept messages (last `kept`)
@@ -661,6 +662,10 @@ class Context:
         for seq, msg in non_special:
             if start_seq <= seq < hi:
                 selected.add(msg)
+
+        # Some LLM backends reject a context where the first non-special message is
+        # a tool_result with no matching tool_use. Remove such dangling results.
+        selected = set(self._strip_dangling_tool_results(list(selected)))
 
         # Fork via private method
         return self._fork(selected)
@@ -685,3 +690,50 @@ class Context:
         child._messages = stripped
         child._json_dict["messages"] = [m.raw_dict for m in stripped]
         return child
+
+    def _strip_dangling_tool_results(self, messages: list[Message]) -> list[Message]:
+        """Return the subset of messages that have no dangling tool_result content parts.
+
+        A tool_result is dangling when its call_id was never seen in a
+        preceding tool_use message within the provided list. This can happen
+        after context reduction removes the tool_use but leaves the result.
+
+        Does not mutate the input list or any messages. Only reads from them.
+
+        Args:
+            messages: The list of messages to filter.
+
+        Returns:
+            A new list of messages with dangling tool_result messages removed.
+        """
+        # Track call_ids of tool_use messages that have not yet been matched.
+        seen_call_ids: set[str] = set()
+        kept: list[Message] = []
+
+        # Walk all messages, removing dangling tool_result messages.
+        for msg in messages:
+            # Scan content parts — collect tool_use call_ids and detect dangling tool_results.
+            has_dangling = False
+            for part in msg.content:
+                # Register the call_id so later tool_results can be matched.
+                if part.type == "tool_use":
+                    seen_call_ids.add(part.call_id)
+
+                # If this result has no matching tool_use — mark the message as dangling.
+                elif part.type == "tool_result":
+                    if part.call_id not in seen_call_ids:
+                        has_dangling = True
+
+            # Remove messages with dangling content parts and invalidate their cached token count.
+            if has_dangling:
+                msg.raw_dict.pop("token_count", None)
+                continue
+
+            # Valid message — remove any tool_result call_ids from the set.
+            for part in msg.content:
+                if part.type == "tool_result":
+                    seen_call_ids.discard(part.call_id)
+            kept.append(msg)
+
+        # Return the filtered list without mutating the object.
+        return kept

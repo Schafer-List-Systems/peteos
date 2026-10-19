@@ -304,7 +304,7 @@ class Session:
         if not session_path.exists():
             raise FileNotFoundError(f"session.json not found in {session_path}")
 
-        with open(session_path, "r") as f:
+        with open(session_path, "r", encoding="utf-8") as f:
             json_dict = json.load(f)
 
         session = cls(json_dict)
@@ -324,7 +324,7 @@ class Session:
         """Save the session and its active context to disk."""
         session_path = self.session_dir / "session.json"
         session_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(session_path, "w") as f:
+        with open(session_path, "w", encoding="utf-8") as f:
             json.dump(self._json_dict, f, indent=2)
         _logger.debug("Saved session.json to %s", session_path)
 

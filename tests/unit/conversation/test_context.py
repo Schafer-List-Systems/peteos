@@ -748,3 +748,89 @@ class TestContextGatherDynamicMessages:
         ctx.append(msg)
         gathered = ctx._gather_dynamic_messages()
         assert len(gathered) == 1
+
+
+def _make_tool_use(call_id: str, name: str) -> Message:
+    return Message.create("assistant", [ContentPart.create_tool_use(call_id, name, "{}")])
+
+
+def _make_tool_result(call_id: str, content: str = "result") -> Message:
+    return Message.create("user", [ContentPart.create_tool_result(call_id, content)])
+
+
+class TestStripDanglingToolResults:
+    """Tests for Context._strip_dangling_tool_results()."""
+
+    def test_empty_list(self):
+        kept = Context.create()._strip_dangling_tool_results([])
+        assert kept == []
+
+    def test_all_dangling(self):
+        ctx = Context.create()
+        msg1 = _make_tool_result("call_1", "orphan result")
+        ctx.append(msg1)
+        msg2 = _make_tool_result("call_2", "another orphan")
+        ctx.append(msg2)
+        kept = ctx._strip_dangling_tool_results(ctx.messages)
+        assert kept == []
+
+    def test_tool_use_with_no_result_is_kept(self):
+        ctx = Context.create()
+        msg = _make_tool_use("call_1", "search")
+        ctx.append(msg)
+        kept = ctx._strip_dangling_tool_results(ctx.messages)
+        assert len(kept) == 1
+        assert kept[0] is msg
+
+    def test_matching_use_and_result_both_kept(self):
+        ctx = Context.create()
+        use_msg = _make_tool_use("call_1", "search")
+        ctx.append(use_msg)
+        result_msg = _make_tool_result("call_1", "search result")
+        ctx.append(result_msg)
+        kept = ctx._strip_dangling_tool_results(ctx.messages)
+        assert len(kept) == 2
+        assert kept[0] is use_msg
+        assert kept[1] is result_msg
+
+    def test_result_without_matching_use_is_dropped(self):
+        ctx = Context.create()
+        result_msg = _make_tool_result("call_orphan", "no matching use")
+        ctx.append(result_msg)
+        kept = ctx._strip_dangling_tool_results(ctx.messages)
+        assert kept == []
+
+    def test_mixed_messages_keeps_valid_drops_dangling(self):
+        ctx = Context.create()
+        use_msg = _make_tool_use("call_1", "search")
+        ctx.append(use_msg)
+        orphan_msg = _make_tool_result("call_orphan", "no use for this")
+        ctx.append(orphan_msg)
+        text_msg = Message.create("user", [ContentPart.create_text("hello")])
+        ctx.append(text_msg)
+        result_msg = _make_tool_result("call_1", "search result")
+        ctx.append(result_msg)
+        kept = ctx._strip_dangling_tool_results(ctx.messages)
+        assert len(kept) == 3
+        assert kept[0] is use_msg
+        assert kept[1] is text_msg
+        assert kept[2] is result_msg
+
+    def test_multiple_tool_result_parts_all_match_keeps_message(self):
+        ctx = Context.create()
+        # Two tool_use calls in sequence
+        use1 = _make_tool_use("call_1", "search")
+        use2 = _make_tool_use("call_2", "calc")
+        ctx.append(use1)
+        ctx.append(use2)
+        # Single message with two tool_result parts
+        combined = Message.create("user", [
+            ContentPart.create_tool_result("call_1", "result 1"),
+            ContentPart.create_tool_result("call_2", "result 2"),
+        ])
+        ctx.append(combined)
+        kept = ctx._strip_dangling_tool_results(ctx.messages)
+        assert len(kept) == 3
+        assert kept[0] is use1
+        assert kept[1] is use2
+        assert kept[2] is combined
