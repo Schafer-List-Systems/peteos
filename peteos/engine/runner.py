@@ -323,6 +323,12 @@ class Runner(ActiveClass):
         floating anchor is registered at the position where the message
         landed — independent of any floating messages after the anchor.
         """
+        # Fire before_message_append hooks with a completely untouched session.
+        # Callbacks can inspect session, context, and message — and optionally
+        # fork or compact the active context before any state is touched.
+        await self._call_before_message_append(self._session, message)
+
+        # Read the active context after hooks have had a chance to fork or replace it.
         context = self._session.active_context
 
         # We remove any pre-existing floating anchor before appending.
@@ -332,6 +338,8 @@ class Runner(ActiveClass):
         # We capture the current end-of-messages position before the insert,
         # then append at the messages anchor — the message lands at messages_idx.
         messages_idx = context.get_anchor_msg_index("messages")
+
+        # Append the message to the context at the messages anchor.
         context.append(message, anchor_point="messages")
 
         # We register the floating anchor at the position where the message landed.
@@ -402,6 +410,10 @@ class Runner(ActiveClass):
             if isinstance(result, tuple) and len(result) == 2 and result[0] is False:
                 return result
         return None
+
+    async def _call_before_message_append(self, session: Session, message: Message) -> None:
+        """Fire before_message_append hooks."""
+        await self.call_hooks("before_message_append", self, session, message)
 
     async def _call_after_message_append(self, message: Message) -> None:
         """Fire after_message_append hooks."""
