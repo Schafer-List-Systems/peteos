@@ -372,14 +372,24 @@ class Runner(ActiveClass):
 
     async def call_hooks(self, hook_point: str, *args: Any) -> Any | None:
         """Call all hooks for hook_point from the runner's hooks, merging ExecStatus results."""
+        # Get the flat merged list of all owners' hooks for this hook point, in owner order.
         callbacks = self.hooks.get(hook_point)
+
+        # Accumulate ExecStatus results across all callbacks. None means no status yet.
         merged: ExecStatus | None = None
+
         for callback in callbacks:
+            # Call the hook with the provided arguments. May be sync or async.
             result = callback(*args)
+
+            # Resolve a coroutine result before inspecting it.
             if asyncio.iscoroutine(result):
                 result = await result
+
+            # Merge the status if the hook returned one. Non-ExecStatus results are ignored.
             if isinstance(result, ExecStatus):
                 merged = _merge_exec_status(merged, result)
+
         return merged
 
     async def call_hooks_deny(self, hook_point: str, *args: Any) -> Any | None:
@@ -420,8 +430,9 @@ class Runner(ActiveClass):
         # --- If there's a foreground tool call group, don't call chatbot ---
         foreground = self._execution_environment.get_foreground_group()
         if foreground is not None:
-            _logger.debug("[runner] step(): Foreground tool call group exists, skipping chatbot.")
-            return (ExecStatus.PENDING, None)
+            if not await self._handle_tool_group():
+                _logger.debug("[runner] step(): Foreground tool call group exists, skipping chatbot.")
+                return (ExecStatus.PENDING, None)
 
         # --- Phase 1: Call chatbot ---
         response = await self._send_to_chatbot()
@@ -514,7 +525,11 @@ class Runner(ActiveClass):
         if not context.has_anchor(tool_result_anchor):
             context.add_anchor(tool_result_anchor, assistant_msg_index + 1, after_existing=False)
         else:
-            result_message = context.messages[context.get_anchor_msg_index(tool_result_anchor)]
+            # TODO: I encountered an out-of-bounds bug here:
+            #       The tool result message was not written, but the anchor index returned len(messages)
+            result_msg_index = context.get_anchor_msg_index(tool_result_anchor)
+            if result_msg_index < len(context.messages):
+                result_message = context.messages[result_msg_index]
 
         # We create the foreground group, which registers it in the EE.
         self._execution_environment.create_tool_group(group_id, tool_result_anchor, result_message)
@@ -896,7 +911,7 @@ class Runner(ActiveClass):
                         if await self._handle_tool_group():
                             require_reasoning = True
 
-                if not require_reasoning:
+                if not require_reasoning and (not foreground or not foreground.has_reviewed()):
                     continue
 
                 # Send context to chatbot and get a response, already passing the tool calls

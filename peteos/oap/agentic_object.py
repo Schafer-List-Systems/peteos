@@ -416,6 +416,11 @@ class AgenticObject:
             "on_truncation": [_on_truncation_hook],
         }
         self._oap_tool_policies: dict[str, dict[str, Callable]] = {}
+        self._oap_runner_hooks: dict[str, dict[str, Callable]] = {
+            "policy": {
+                "on_tool_call": _tool_policy_dispatcher,
+            },
+        }
         self._register_tools()
         self._register_output_schema_hook()
         self._oap_sandbox_builder: SandboxBuilder = self._init_sandbox_builder(_collect_oap_config(self.__class__))
@@ -520,15 +525,19 @@ class AgenticObject:
     def register_tool_policy(
         self, tool_name: str, policy: Callable, handle: str | None = None
     ) -> str:
-        # Validate the policy is a callable with the required signature (agent, tool_name, arguments)
+        # Validate the policy is a callable with the required signature.
         if not callable(policy):
             raise TypeError(f"policy for '{tool_name}' must be callable, got {type(policy).__name__}")
         try:
             sig = inspect.signature(policy)
         except (TypeError, ValueError):
             raise TypeError(f"policy for '{tool_name}' must be a callable with signature (agent, tool_name, arguments)")
+
+        # Extract the parameter names for the arity check below.
         required_params = ["agent", "tool_name", "arguments"]
         params = list(sig.parameters.keys())
+
+        # Reject var-positional or var-keyword — dispatcher passes 3 kwargs.
         if len(params) < 3 or any(
             p not in sig.parameters
             or sig.parameters[p].kind
@@ -540,17 +549,26 @@ class AgenticObject:
                 f"arguments (positional or keyword, not *args or **kwargs)"
             )
 
-        # Resolve the policy dict for this tool, creating an empty one if absent
+        # Resolve the policy sub-dict for this tool, allocating one if absent.
+        # The sub-dict feeds _tool_policy_dispatcher on the on_tool_call hook point
+        # when the runner evaluates tool approvals — see _start_session() for wiring.
         policies = self._oap_tool_policies.setdefault(tool_name, {})
-        # Resolve the handle: user-provided, or generate a unique one via loop
+
+        # Resolve the handle. Caller-provided takes precedence; None triggers generation.
         if handle is None:
+            # Loop until we find a UUID not in use for this tool.
             while True:
                 handle = str(uuid.uuid4())
                 if handle not in policies:
                     break
+
+        # Reject a handle already occupied on this tool — ambiguous.
         elif handle in policies:
             raise KeyError(f"handle '{handle}' already registered for tool '{tool_name}'")
+
+        # Commit the policy under its handle. Visible to dispatcher on next on_tool_call for this tool.
         policies[handle] = policy
+
         return handle
 
     def deregister_tool_policy(self, tool_name: str, handle: str) -> None:
@@ -561,6 +579,53 @@ class AgenticObject:
         if policies is None or handle not in policies:
             raise KeyError(f"handle '{handle}' not found for tool '{tool_name}'")
         del policies[handle]
+
+    def register_runner_hook(
+        self,
+        name: str,
+        hook_point: str,
+        callback: Callable,
+        apply_to_existing: bool = True,
+    ) -> None:
+        # Raise if a hook is already registered for this (name, hook_point) pair.
+        existing = self._oap_runner_hooks.get(name, {}).get(hook_point)
+        if existing is not None:
+            raise KeyError(f"hook already registered for '{name}' / '{hook_point}'")
+
+        # Store the callback for this (name, hook_point) pair.
+        self._oap_runner_hooks.setdefault(name, {})[hook_point] = callback
+
+        # Apply to all currently running runners, each wrapped with self bound.
+        # The wrapper bridges the runner/engine layer — runner calls with
+        # (runner, *args) but the custom hook expects (self, runner, *args).
+        if apply_to_existing:
+            for runner in self._oap_runner_store.values():
+                # Detect and warn if a hook was already set on this runner.
+                if runner.hooks.get(hook_point):
+                    _logger.error(
+                        "register_runner_hook: overwriting existing hook for '%s' / '%s' on runner %s",
+                        name, hook_point, runner.session_uuid,
+                    )
+                runner.hooks[name, hook_point][:] = [lambda *a, _cb=callback: _cb(self, *a)]
+
+    def unregister_runner_hook(
+        self,
+        name: str,
+        hook_point: str,
+        revoke_from_existing: bool = True,
+    ) -> None:
+        # Raise if the (name, hook_point) pair has no hooks registered.
+        hook_list = self._oap_runner_hooks.get(name, {}).get(hook_point)
+        if hook_list is None:
+            raise KeyError(f"no hooks found for '{name}' / '{hook_point}'")
+
+        # Clear all hooks for this (name, hook_point) pair.
+        hook_list.clear()
+
+        # Revoke from all currently running runners.
+        if revoke_from_existing:
+            for runner in self._oap_runner_store.values():
+                runner.hooks[name, hook_point].clear()
 
     def _register_output_schema_hook(self) -> None:
         """Register the output schema system prompt hook."""
@@ -1110,10 +1175,12 @@ class AgenticObject:
         runner = Runner(self._oap_agent, session)
         runner._execution_environment.auto_approve_tools = list(self._oap_json["auto_approve_tools"])
 
-        # Register tool policy hook.
-        runner.hooks["policy", "on_tool_call"] = [
-            lambda ctx: _tool_policy_dispatcher(self, ctx)
-        ]
+        # Apply all custom hooks to this runner, each wrapped with self bound.
+        # The wrapper bridges the gap: the runner calls with (runner, *args) but
+        # the custom hook expects (self, runner, *args) so we inject self.
+        for name, hook_dict in self._oap_runner_hooks.items():
+            for hook_point, callback in hook_dict.items():
+                runner.hooks[name, hook_point][:] = [lambda *a, _cb=callback: _cb(self, *a)]
 
         # We build and attach the sandbox for tool execution.
         runner.sandbox_builder = self._create_sandbox_builder(
