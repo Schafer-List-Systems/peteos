@@ -619,8 +619,8 @@ class AgenticObject:
         if hook_list is None:
             raise KeyError(f"no hooks found for '{name}' / '{hook_point}'")
 
-        # Clear all hooks for this (name, hook_point) pair.
-        hook_list.clear()
+        # Clear the hook for this (name, hook_point) pair.
+        del self._oap_runner_hooks[name][hook_point]
 
         # Revoke from all currently running runners.
         if revoke_from_existing:
