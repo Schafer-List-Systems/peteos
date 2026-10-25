@@ -1209,6 +1209,7 @@ class AgenticObject:
         timeout: float | None = None,
         image: str | None = None,
         hooks: dict[str, list[Callable]] | None = None,
+        origin: str = "invoke_agent",
     ) -> Any:
         """Invoke this object's agent.
 
@@ -1229,6 +1230,7 @@ class AgenticObject:
             hooks: Optional dictionary of hook names to lists of callables.
                 These hooks are stored on the session for the duration of the
                 invocation and forwarded recursively to sub-agents.
+            origin: Origin string to stamp on content parts (default "invoke_agent").
 
         Returns:
             Structured output, Error object, or raises Exception.
@@ -1373,9 +1375,11 @@ class AgenticObject:
                         f"If you have your final answer, call `produce_output` with arguments in the following schema:\n{schema_block} "
                     )
 
+                    reminder_part = ContentPart.create_text(reminder)
+                    reminder_part.origin = origin
                     await r.queue_message(Message.create(
                         role="user",
-                        content_parts=[ContentPart.create_text(reminder)],
+                        content_parts=[reminder_part],
                     ))
                 return None
 
@@ -1393,6 +1397,9 @@ class AgenticObject:
                 from peteos.conversation.media import create_media_content_part_async
                 image_part = await create_media_content_part_async(image, timeout=timeout or 30.0)
                 content.append(image_part)
+
+            for part in content:
+                part.origin = origin
 
             _logger.debug("invoke_agent[%s]: queuing prompt message", self.__class__.__name__)
             await runner.queue_message(Message.create(
@@ -1498,18 +1505,22 @@ class AgenticObject:
                         self.__class__.__name__,
                         iteration,
                     )
+                    waiting_part = ContentPart.create_text(
+                        "I am still waiting for your final answer. Please provide your output."
+                    )
+                    waiting_part.origin = origin
                     await runner.queue_message(Message.create(
                         role="user",
-                        content_parts=[ContentPart.create_text(
-                            "I am still waiting for your final answer. Please provide your output."
-                        )],
+                        content_parts=[waiting_part],
                     ))
                     continue
 
                 _logger.debug("invoke_agent[%s]: queuing reminder (iter %d)", self.__class__.__name__, iteration)
+                reminder_part = ContentPart.create_text(reminder_msg)
+                reminder_part.origin = origin
                 await runner.queue_message(Message.create(
                     role="user",
-                    content_parts=[ContentPart.create_text(reminder_msg)],
+                    content_parts=[reminder_part],
                 ))
 
         finally:
@@ -1638,6 +1649,7 @@ class AgenticObject:
         prompt: str,
         persistent_thread_id: str,
         image: str | None = None,
+        origin: str = "notify_agent",
     ) -> None:
         """Inject a user message directly into a running persistent thread.
 
@@ -1648,6 +1660,7 @@ class AgenticObject:
             prompt: The text message to inject.
             persistent_thread_id: The ID of the persistent thread to target.
             image: Optional local file path or HTTP(S) URL to attach an image.
+            origin: Optional origin string to stamp on each content part.
 
         Raises:
             KeyError: No runner found for the given persistent_thread_id.
@@ -1663,6 +1676,10 @@ class AgenticObject:
             from peteos.conversation.media import create_media_content_part_async
             image_part = await create_media_content_part_async(image, timeout=30.0)
             content.append(image_part)
+
+        # Stamp each content part with the provided origin.
+        for part in content:
+            part.origin = origin
 
         # Inject the message into the runner's queue.
         await runner.queue_message(Message.create(role="user", content_parts=content))

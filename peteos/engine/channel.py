@@ -18,8 +18,9 @@ if TYPE_CHECKING:
 class Channel(ABC):
     """Abstract base class for channels connecting runners to users."""
 
-    def __init__(self) -> None:
+    def __init__(self, name: str | None = None) -> None:
         self._id: str = str(_uuid.uuid4())
+        self.name = name if name is not None else self._id
         self._runner: "Runner | None" = None
         self._disabled_roles: set[str] = set()
         self._disabled_content_types: set[str] = set()
@@ -173,10 +174,16 @@ class Channel(ABC):
         Raises:
             RuntimeError: Channel is not attached to a runner.
         """
-        # Inject the message into the runner's queue.
+        # Raise an exception if there is no runner configured.
         if self._runner is None:
             raise RuntimeError("Channel is not attached to a runner")
 
+        # Set the origin of the message's content parts as "channel:name"
+        origin = f"channel:{self.name}"
+        for part in message.content:
+            part.origin = origin
+
+        # Inject the message into the runner's queue.
         await self._runner.queue_message(message)
 
     def enable_role(self, role: str, on: bool) -> None:

@@ -607,6 +607,11 @@ class Runner(ActiveClass):
             async for _ in response:
                 pass
 
+        # Stamp each content part with the backend and model of origin.
+        origin = f"{self._chatbot._config.name}:{self._chatbot._config.model}"
+        for part in response.message.content:
+            part.origin = origin
+
         # Confirm receipt so listeners can process the response.
         await self.call_hooks("after_receive_from_chatbot", response.message)
 

@@ -220,6 +220,16 @@ class ContentPart:
         """Set the execution status for a tool_result part."""
         self._json_dict["execution_status"] = status.value
 
+    @property
+    def origin(self) -> str | None:
+        """Return the origin string for this content part."""
+        return self._json_dict.get("origin")
+
+    @origin.setter
+    def origin(self, value: str) -> None:
+        """Set the origin string for this content part."""
+        self._json_dict["origin"] = value
+
 
 class Message:
     """Wrapper around a single serialized message dict.
@@ -341,6 +351,16 @@ class Message:
     def metadata(self) -> dict:
         """Return the message metadata dict."""
         return self._json_dict.get("metadata", {})
+
+    @property
+    def tags(self) -> list[str]:
+        """Return the list of tags for this message. The returned list IS the stored list — mutations write back."""
+        return self._json_dict.setdefault("tags", [])
+
+    @tags.setter
+    def tags(self, value: list[str]) -> None:
+        """Set the list of tags for this message."""
+        self._json_dict["tags"] = value
 
     @property
     def content(self) -> list[ContentPart]:

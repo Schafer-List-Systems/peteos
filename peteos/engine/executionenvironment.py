@@ -613,6 +613,7 @@ class ExecutionEnvironment:
         if result_str is not None:
             group.mark_real_result()
             record.tool_result.set_tool_result_content(result_str)
+            record.tool_result.origin = "runner"
 
         return result_str, success
 
