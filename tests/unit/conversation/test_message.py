@@ -257,3 +257,71 @@ class TestMessage:
         raw = {"content": []}
         msg = Message(raw)
         assert msg.role == ""
+
+
+class TestContentPartOrigin:
+    """Tests for ContentPart.origin property."""
+
+    def test_origin_default_none(self):
+        """Test that origin is None by default."""
+        part = ContentPart.create_text("hello")
+        assert part.origin is None
+
+    def test_origin_can_be_set(self):
+        """Test that origin can be set via the property setter."""
+        part = ContentPart.create_text("hello")
+        part.origin = "channel:shell"
+        assert part.origin == "channel:shell"
+
+    def test_origin_is_in_raw_dict(self):
+        """Test that origin is stored in the underlying JSON dict."""
+        part = ContentPart.create_text("hello")
+        part.origin = "runner"
+        assert part.raw_dict.get("origin") == "runner"
+
+    def test_origin_stores_in_dict_not_copy(self):
+        """Test that origin mutations write to the stored dict, not a copy."""
+        part = ContentPart.create_text("hello")
+        part.origin = "llm"
+        assert part.raw_dict["origin"] == "llm"
+
+
+class TestMessageTags:
+    """Tests for Message.tags property."""
+
+    def test_tags_default_empty(self):
+        """Test that tags is an empty list by default."""
+        part = ContentPart.create_text("hello")
+        msg = Message.create("user", [part])
+        assert msg.tags == []
+
+    def test_tags_is_mutable_in_place(self):
+        """Test that appending to tags mutates the stored list."""
+        part = ContentPart.create_text("hello")
+        msg = Message.create("user", [part])
+        msg.tags.append("tag-1")
+        assert "tag-1" in msg.tags
+
+    def test_remove_tag_via_list(self):
+        """Test removing a tag via the list interface."""
+        part = ContentPart.create_text("hello")
+        msg = Message.create("user", [part])
+        msg.tags.append("a")
+        msg.tags.append("b")
+        msg.tags.remove("a")
+        assert msg.tags == ["b"]
+
+    def test_tags_persist_in_raw_dict(self):
+        """Test that tags are stored in the underlying JSON dict."""
+        part = ContentPart.create_text("hello")
+        msg = Message.create("user", [part])
+        msg.tags.append("persist")
+        assert msg.raw_dict["tags"] == ["persist"]
+
+    def test_tags_setter_replaces_list(self):
+        """Test that setting tags replaces the stored list."""
+        part = ContentPart.create_text("hello")
+        msg = Message.create("user", [part])
+        msg.tags = ["replaced"]
+        assert msg.tags == ["replaced"]
+        assert msg.raw_dict["tags"] == ["replaced"]

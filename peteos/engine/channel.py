@@ -25,6 +25,12 @@ class Channel(ABC):
         self._disabled_roles: set[str] = set()
         self._disabled_content_types: set[str] = set()
         self._tool_calls: dict[str, ContentPart] = {}
+        self._tags: list[str] = []
+
+    @property
+    def tags(self) -> list[str]:
+        """Return the channel's tag list. The returned list IS the stored list — mutations write back."""
+        return self._tags
 
     async def attach(self, runner: "Runner", greeting: str | None = None) -> None:
         """Subscribe this channel to a runner.
@@ -182,6 +188,9 @@ class Channel(ABC):
         origin = f"channel:{self.name}"
         for part in message.content:
             part.origin = origin
+
+        # Append channel tags to the message's tags.
+        message.tags.extend(self.tags)
 
         # Inject the message into the runner's queue.
         await self._runner.queue_message(message)

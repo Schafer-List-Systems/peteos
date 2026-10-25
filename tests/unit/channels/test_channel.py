@@ -140,6 +140,45 @@ class TestChannelNotify:
         assert len(ch._sent_messages) == 0
 
 
+class TestChannelName:
+    """Test Channel.name property."""
+
+    def test_name_defaults_to_id(self):
+        """Test that name defaults to the channel's internal id when not provided."""
+        ch = _TestChannel()
+        assert ch.name == ch._id
+
+    def test_name_can_be_set_explicitly(self):
+        """Test that name can be set explicitly at construction."""
+        ch = _TestChannel()
+        ch._id = "fixed-id"
+        ch.name = "my-channel"
+        assert ch.name == "my-channel"
+
+
+class TestChannelTags:
+    """Test Channel.tags property."""
+
+    def test_tags_defaults_to_empty(self):
+        """Test that tags is an empty list by default."""
+        ch = _TestChannel()
+        assert ch.tags == []
+
+    def test_tags_is_mutable_in_place(self):
+        """Test that tags.append() mutates the stored list."""
+        ch = _TestChannel()
+        ch.tags.append("tag1")
+        assert "tag1" in ch.tags
+
+    def test_add_and_remove_tag(self):
+        """Test adding and removing tags."""
+        ch = _TestChannel()
+        ch.tags.append("a")
+        ch.tags.append("b")
+        ch.tags.remove("a")
+        assert ch.tags == ["b"]
+
+
 class TestChannelEnqueue:
     """Test enqueue method."""
 
@@ -167,6 +206,59 @@ class TestChannelEnqueue:
         )
         with pytest.raises(RuntimeError, match="not attached"):
             await ch.enqueue(test_msg)
+
+    @pytest.mark.asyncio
+    async def test_enqueue_stamps_origin_on_content_parts(self):
+        """Test that enqueue stamps each content part with channel:channel_name."""
+        mock_runner = MagicMock()
+        mock_runner.queue_message = AsyncMock()
+        ch = _TestChannel()
+        ch.name = "my-channel"
+        await ch.attach(mock_runner)
+        test_msg = Message.create(
+            role="user",
+            content_parts=[ContentPart.create_text("hello"), ContentPart.create_text("world")],
+        )
+        await ch.enqueue(test_msg)
+        # All parts stamped with the channel origin
+        for part in test_msg.content:
+            assert part.origin == "channel:my-channel"
+
+    @pytest.mark.asyncio
+    async def test_enqueue_appends_channel_tags_to_message(self):
+        """Test that enqueue appends the channel's tags to the message's tags."""
+        mock_runner = MagicMock()
+        mock_runner.queue_message = AsyncMock()
+        ch = _TestChannel()
+        ch.tags.append("channel-tag-1")
+        ch.tags.append("channel-tag-2")
+        await ch.attach(mock_runner)
+        test_msg = Message.create(
+            role="user",
+            content_parts=[ContentPart.create_text("hello")],
+        )
+        await ch.enqueue(test_msg)
+        # Channel tags are appended to the message's tags
+        assert "channel-tag-1" in test_msg.tags
+        assert "channel-tag-2" in test_msg.tags
+
+    @pytest.mark.asyncio
+    async def test_enqueue_tags_are_catenated_not_replaced(self):
+        """Test that enqueue appends to, not replaces, existing message tags."""
+        mock_runner = MagicMock()
+        mock_runner.queue_message = AsyncMock()
+        ch = _TestChannel()
+        ch.tags.append("chan-tag")
+        await ch.attach(mock_runner)
+        test_msg = Message.create(
+            role="user",
+            content_parts=[ContentPart.create_text("hello")],
+        )
+        test_msg.tags.append("pre-existing")
+        await ch.enqueue(test_msg)
+        # Both pre-existing and channel tag are present
+        assert "pre-existing" in test_msg.tags
+        assert "chan-tag" in test_msg.tags
 
 
 class TestChannelFilters:
