@@ -606,7 +606,7 @@ class AgenticObject:
                         "register_runner_hook: overwriting existing hook for '%s' / '%s' on runner %s",
                         name, hook_point, runner.session_uuid,
                     )
-                runner.hooks[name, hook_point][:] = [lambda *a, _cb=callback: _cb(self, *a)]
+                runner.hooks[name, hook_point] = [lambda *a, _cb=callback: _cb(self, *a)]
 
     def unregister_runner_hook(
         self,
@@ -1180,7 +1180,7 @@ class AgenticObject:
         # the custom hook expects (self, runner, *args) so we inject self.
         for name, hook_dict in self._oap_runner_hooks.items():
             for hook_point, callback in hook_dict.items():
-                runner.hooks[name, hook_point][:] = [lambda *a, _cb=callback: _cb(self, *a)]
+                runner.hooks[name, hook_point] = [lambda *a, _cb=callback: _cb(self, *a)]
 
         # We build and attach the sandbox for tool execution.
         runner.sandbox_builder = self._create_sandbox_builder(
