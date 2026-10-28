@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import ftfy
+
 from .message import Message
 from peteos.utils import get_logger, json
 
@@ -103,8 +105,36 @@ class Context:
     @classmethod
     def load(cls, path: str) -> "Context":
         """Load a context from a file."""
+        # The file is read as a raw string so its text can be sanitized before
+        # JSON parsing — lone surrogates (from malformed LLM output) are repaired
+        # here so they cannot corrupt the deserialized context or cause UTF-8
+        # errors at downstream serialization.
         with open(path, "r", encoding="utf-8") as f:
-            json_dict = json.load(f)
+            text = f.read()
+
+        # First parse converts all \uXXXX escapes to real Python Unicode code
+        # points — this is required so ftfy can detect lone surrogates in the
+        # text strings (ftfy needs actual code points, not escape sequences).
+        json_dict = json.loads(text)
+
+        # Re-serialize to string so ftfy can scan the full text and locate
+        # lone surrogates at any nesting level.
+        text = json.dumps(json_dict, ensure_ascii=False)
+
+        # ftfy repairs unpaired surrogates (e.g. \uD83D \uDCCB) by pairing
+        # them back to their proper Unicode code points.
+        fixed_text = ftfy.fix_text(text)
+        if fixed_text != text:
+            _logger.warning(
+                "[context] load: text repairs applied to %s — "
+                "malformed Unicode was detected and fixed",
+                path,
+            )
+
+            # Second parse uses the sanitized string to produce the final dict.
+            json_dict = json.loads(fixed_text)
+
+        # Load the context from the loaded (and sanitized) json dictionary.
         return cls.load_from_dict(json_dict)
 
     @classmethod
@@ -124,10 +154,27 @@ class Context:
         Args:
             session_dir: Path to the session directory on disk.
         """
+        # Resolve the file path and ensure the parent directory exists.
         path = Path(session_dir) / f"{self.id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Open the file for writing — the file handle is the target for JSON.dump.
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(self._json_dict, f, indent=2)
+            # Attempt to write with ensure_ascii=True first — this catches lone
+            # surrogates early and lets the JSON be saved in strict ASCII form.
+            try:
+                json.dump(self._json_dict, f, indent=2, ensure_ascii=True)
+
+            # Lone surrogates raise UnicodeEncodeError here — the context is
+            # still persisted (with ensure_ascii=False as fallback) so the
+            # session is not lost even when the data contains bad Unicode.
+            except UnicodeEncodeError:
+                _logger.warning(
+                    "[context] save: lone surrogate detected in context %s — "
+                    "saving with ensure_ascii=False",
+                    self.id,
+                )
+                json.dump(self._json_dict, f, indent=2, ensure_ascii=False)
         _logger.debug("Saved context %s to %s", self.id, path)
 
     def total_token_count(self, encoding: str = "cl100k_base") -> int:

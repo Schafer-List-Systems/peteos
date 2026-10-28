@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "peteos"
-version = "0.6.13"
+version = "0.6.14"
 description = "Agentic application framework"
 requires-python = ">=3.12"
 dependencies = [
+    "ftfy>=0.1.0",
     "json5>=0.15.0",
     "aiohttp>=3.9.0",
     "httpx>=0.27.0",
