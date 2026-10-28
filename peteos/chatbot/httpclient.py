@@ -6,6 +6,9 @@ from typing import AsyncGenerator, Callable, Optional
 
 from peteos.utils import get_logger
 
+import ftfy
+import json
+
 _logger = get_logger(__name__)
 
 
@@ -74,7 +77,31 @@ class HTTPClient:
         for attempt in range(self._max_retries + 1):
             try:
                 # Attempt one HTTP request against the target.
-                response = await client.get(url) if method == "GET" else await client.post(url, json=json_body)
+                if method == "GET":
+                    response = await client.get(url)
+                else:
+                    try:
+                        response = await client.post(url, json=json_body)
+                    except UnicodeEncodeError:
+                        # The request failed due to unencodable surrogates in the JSON body.
+                        # Serialize the dict to a JSON string — this always succeeds.
+                        content = json.dumps(json_body, ensure_ascii=False)
+
+                        # Repair lone surrogates in the serialized string using ftfy.
+                        # ftfy pairs unpaired surrogates back to their proper code points.
+                        fixed_content = ftfy.fix_text(content)
+                        _logger.warning(
+                            "[httpclient] request failed due to encoding errors "
+                            " in JSON body (probably lone surrogates) — repairs applied, retrying",
+                        )
+
+                        # Retry the request with the sanitized JSON body.
+                        # If it fails again the exception propagates naturally.
+                        response = await client.post(
+                            url,
+                            content=fixed_content.encode("utf-8"),
+                            headers={"Content-Type": "application/json"},
+                        )
 
                 # Surface non-success status codes as errors that will be caught below.
                 if response.status_code >= 300:
