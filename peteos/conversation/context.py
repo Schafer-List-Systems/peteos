@@ -5,10 +5,9 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import ftfy
-
 from .message import Message
 from peteos.utils import get_logger, json
+from peteos.utils.sanitizer import sanitize_encoding
 
 from .system_prompt_message import SystemPromptMessage
 from .tool_definitions_message import ToolDefinitionsMessage
@@ -105,36 +104,23 @@ class Context:
     @classmethod
     def load(cls, path: str) -> "Context":
         """Load a context from a file."""
-        # The file is read as a raw string so its text can be sanitized before
-        # JSON parsing — lone surrogates (from malformed LLM output) are repaired
-        # here so they cannot corrupt the deserialized context or cause UTF-8
-        # errors at downstream serialization.
+        # The file is read as a string and parsed as JSON — the raw dict
+        # may contain lone surrogates that corrupt downstream serialization.
         with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
+            json_dict = json.load(f)
 
-        # First parse converts all \uXXXX escapes to real Python Unicode code
-        # points — this is required so ftfy can detect lone surrogates in the
-        # text strings (ftfy needs actual code points, not escape sequences).
-        json_dict = json.loads(text)
-
-        # Re-serialize to string so ftfy can scan the full text and locate
-        # lone surrogates at any nesting level.
-        text = json.dumps(json_dict, ensure_ascii=False)
-
-        # ftfy repairs unpaired surrogates (e.g. \uD83D \uDCCB) by pairing
-        # them back to their proper Unicode code points.
-        fixed_text = ftfy.fix_text(text)
-        if fixed_text != text:
+        # Sanitize in-place: walks all strings in the dict and repairs lone
+        # surrogates. Returns the total count of repaired fields.
+        _, count = sanitize_encoding(json_dict)
+        if count > 0:
             _logger.warning(
-                "[context] load: text repairs applied to %s — "
+                "[context] load: %d encoding fix(es) applied to %s — "
                 "malformed Unicode was detected and fixed",
+                count,
                 path,
             )
 
-            # Second parse uses the sanitized string to produce the final dict.
-            json_dict = json.loads(fixed_text)
-
-        # Load the context from the loaded (and sanitized) json dictionary.
+        # Load the context from the sanitized json dictionary.
         return cls.load_from_dict(json_dict)
 
     @classmethod

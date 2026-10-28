@@ -1,34 +1,10 @@
-import ftfy
 import uuid
 from datetime import datetime
 from enum import Enum
 
 from .message_registry import MessageRegistry
-from peteos.utils import get_logger, json
-
-_logger = get_logger(__name__)
-
-
-def _sanitize_text(text: str) -> str:
-    """Sanitize text by repairing lone surrogates in-place.
-
-    Some LLM outputs emit unpaired Unicode surrogates (e.g. \\\\uD83D \\\\uDCCB)
-    which decode fine but corrupt downstream UTF-8 serialization. ftfy repairs
-    them by pairing back to proper Unicode code points.
-
-    Args:
-        text: The raw text string that may contain lone surrogates.
-
-    Returns:
-        The sanitized text with surrogates repaired where needed.
-    """
-    fixed = ftfy.fix_text(text)
-    if fixed != text:
-        _logger.warning(
-            "[message] _sanitize_text: text repairs applied — "
-            "malformed Unicode was detected and fixed",
-        )
-    return fixed
+from peteos.utils import json
+from peteos.utils.sanitizer import _sanitize_text
 
 
 class ToolApprovalStatus(str, Enum):
