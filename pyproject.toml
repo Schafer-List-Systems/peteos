@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "peteos"
-version = "0.6.17"
+version = "0.6.18"
 description = "Agentic application framework"
 requires-python = ">=3.12"
 dependencies = [

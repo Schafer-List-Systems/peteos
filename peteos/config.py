@@ -8,10 +8,8 @@ with ``{VAR}`` tokens that are expanded against a shared dictionary.
 """
 
 import os
-import threading
 from pathlib import Path
-from typing import Callable, Dict, Optional
-from watchdog.observers import Observer
+from typing import Dict, Optional
 
 from peteos.utils import get_logger
 from peteos.utils import json
@@ -111,9 +109,6 @@ class ConfigManager:
     _variables: Dict[str, str] = {}
     _config_dir: Optional[str] = None
     _config_file: Optional[str] = None
-    _on_reloaded_hooks: Dict[str, Callable] = {}
-    _file_observer: Optional[Observer] = None
-    _file_observer_thread: Optional[threading.Thread] = None
 
     @classmethod
     def set_variable(cls, key: str, value: str, overwrite: bool = False) -> bool:
@@ -184,79 +179,6 @@ class ConfigManager:
         return Path(resolved)
 
     @classmethod
-    def register_on_reloaded_hook(cls, name: str, hook: Callable) -> None:
-        """Register a hook to be called when peteos.json is reloaded.
-
-        Args:
-            name: Unique identifier for this hook.
-            hook: Callable to invoke on reload. Takes no arguments.
-
-        Raises:
-            ValueError: If a hook with this name is already registered.
-        """
-        if name in cls._on_reloaded_hooks:
-            raise ValueError(f"on-reloaded hook '{name}' is already registered")
-        cls._on_reloaded_hooks[name] = hook
-
-    @classmethod
-    def unregister_on_reloaded_hook(cls, name: str) -> None:
-        """Unregister a previously registered on-reloaded hook.
-
-        Args:
-            name: Identifier of the hook to remove.
-
-        Raises:
-            KeyError: If no hook with this name is registered.
-        """
-        if name not in cls._on_reloaded_hooks:
-            raise KeyError(f"No on-reloaded hook named '{name}' is registered")
-        del cls._on_reloaded_hooks[name]
-
-    @classmethod
-    def _stop_file_watcher(cls) -> None:
-        """Stop the file observer and join its thread."""
-        # Stop the observer to unblock its event loop
-        if cls._file_observer is not None:
-            cls._file_observer.stop()
-            cls._file_observer = None
-
-        # Join the observer thread to ensure it has fully terminated
-        if cls._file_observer_thread is not None \
-                and cls._file_observer_thread is not threading.current_thread():
-            cls._file_observer_thread.join()
-            cls._file_observer_thread = None
-
-    @classmethod
-    def _start_file_watcher(cls, filepath: str) -> None:
-        """Start a watchdog observer that fires on-reloaded hooks when the config file changes."""
-        from watchdog.events import FileSystemEventHandler
-
-        # Define the file-system event handler that fires on_reloaded hooks on config file changes
-        class _ConfigFileHandler(FileSystemEventHandler):
-            def on_modified(self, event):
-                # Guard: only react to the exact config file we are watching
-                if event.src_path != filepath:
-                    return
-                _logger.debug("[config] peteos.json changed, firing %d hook(s)", len(cls._on_reloaded_hooks))
-
-                # Fire every registered on_reloaded hook — errors are logged but never propagated
-                for hook in cls._on_reloaded_hooks.values():
-                    try:
-                        hook()
-                    except Exception:
-                        _logger.exception("[config] on_reloaded hook %r raised", hook)
-
-        # Create and start the observer — blocks in its own thread
-        observer = Observer()
-        observer.schedule(_ConfigFileHandler(), path=str(Path(filepath).parent), recursive=False)
-        observer.start()
-
-        # Store observer and its thread on the class so stop() can find them
-        cls._file_observer = observer
-        cls._file_observer_thread = threading.current_thread()
-        _logger.debug("[config] watching config file: %s", filepath)
-
-    @classmethod
     def init(cls) -> bool:
         """Resolve config and bootstrap all subsystems.
 
@@ -300,13 +222,9 @@ class ConfigManager:
         cls.set_variable("CONFIG", config_file, overwrite=False)
         cls.set_variable("CONFIG_DIR", config_dir, overwrite=False)
 
-        # Start watchdog — fires on_reloaded hooks when peteos.json changes on disk
-        cls._start_file_watcher(config_file)
-
         # Initialization complete
         return True
 
 
 # Auto-initialize on import
 ConfigManager.init()
-
