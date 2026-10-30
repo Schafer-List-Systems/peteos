@@ -237,9 +237,6 @@ class TestWatchdogIntegration:
 
         We watch the parent directory and filter for the target filename,
         since inotify monitors at the directory level.
-
-        Note: the callback is synchronous. Async callbacks require wrapping
-        in create_task and are a separate use case (not yet supported).
         """
         watchdog = Watchdog(name="integration")
         target = tmpdir / "eventloop.txt"
@@ -250,6 +247,33 @@ class TestWatchdogIntegration:
 
         def callback(event):
             # This runs synchronously on the event loop's thread via call_soon_threadsafe
+            received_loops.append(asyncio.get_running_loop())
+
+        await watchdog.watch("t", tmpdir, callback, events={"modified"})
+        target.touch()
+        await asyncio.sleep(0.3)
+
+        watchdog.stop()
+        assert len(received_loops) == 1
+        assert received_loops[0] is running_loop
+
+    @pytest.mark.asyncio
+    async def test_async_callback_runs_in_registering_event_loop(self, tmpdir):
+        """An async callback executes in the task's event loop via create_task.
+
+        We watch the parent directory and filter for the target filename,
+        since inotify monitors at the directory level.
+        Async callbacks are detected and scheduled as tasks rather than called directly.
+        """
+        watchdog = Watchdog(name="integration")
+        target = tmpdir / "async_eventloop.txt"
+        target.touch()
+        running_loop = asyncio.get_running_loop()
+
+        received_loops = []
+
+        async def callback(event):
+            # Runs as a task on the event loop — fully async
             received_loops.append(asyncio.get_running_loop())
 
         await watchdog.watch("t", tmpdir, callback, events={"modified"})

@@ -6,10 +6,12 @@ a unique name and can be unregistered independently. All callbacks fire in the e
 loop that was active at registration time, via call_soon_threadsafe.
 """
 
+from __future__ import annotations
+
 import asyncio
 import threading
 from pathlib import Path
-from typing import Callable, Dict, Optional, Set
+from typing import Callable, Coroutine, Dict, Optional, Set
 
 from watchdog.events import (
     FileSystemEvent,
@@ -58,7 +60,7 @@ class Watchdog:
         self,
         name: str,
         path: Path,
-        callback: Callable[[FileSystemEvent], None],
+        callback: Callable[[FileSystemEvent], None] | Callable[[FileSystemEvent], Coroutine],
         *,
         events: Optional[Set[str]] = None,
         recursive: bool = False,
@@ -66,12 +68,14 @@ class Watchdog:
         """Register a path to be watched and a callback to fire on matching events.
 
         The callback is invoked in the current task's event loop via
-        call_soon_threadsafe, ensuring it runs cooperatively with other tasks.
+        call_soon_threadsafe. Sync callbacks run synchronously; async callbacks
+        are scheduled as tasks via create_task, keeping execution cooperative.
 
         Args:
             name: Unique identifier for this registration on this Watchdog instance.
             path: File or directory to watch.
             callback: Called for each matching event, receives the FileSystemEvent.
+                     May be a sync def or an async def — both are fully supported.
             events: Set of event type strings to filter (e.g. {"created", "deleted"}).
                      None subscribes to all event types.
             recursive: If True, watch subdirectories of path as well.
@@ -103,9 +107,14 @@ class Watchdog:
                 resolved.update(_EVENT_CLASSES[ev])
             event_filter = frozenset(resolved)
 
-        # Create the dispatch closure that injects the callback into the captured event loop
+        # Create the dispatch closure that injects the callback into the captured event loop.
+        # Async callbacks are scheduled as tasks so they can be awaited; sync callbacks
+        # run synchronously on the next event loop iteration.
         def _dispatch(event: FileSystemEvent) -> None:
-            loop.call_soon_threadsafe(callback, event)
+            if asyncio.iscoroutinefunction(callback):
+                loop.call_soon_threadsafe(loop.create_task, callback(event))
+            else:
+                loop.call_soon_threadsafe(callback, event)
 
         # Instantiate a per-registration handler with the dispatch closure and event filter
         handler = _Handler(dispatch=_dispatch, event_filter=event_filter)
