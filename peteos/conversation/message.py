@@ -395,7 +395,13 @@ class Message:
         return "\n".join(parts)
 
     def _compute_token_count(self, encoding: str = "cl100k_base") -> int:
-        """Compute token count from serialized content without caching.
+        """Compute token count from the semantic payload of each content part.
+
+        Each part is counted by its provider-visible content, not by its
+        serialization envelope. Media parts (image, video, audio, pdf)
+        contribute nothing: their provider-side token cost is fixed and
+        unknown here, so excluding them underestimates the true context
+        size and keeps limit estimation conservative.
 
         Args:
             encoding: Tiktoken encoding to use.
@@ -405,9 +411,29 @@ class Message:
         """
         from peteos.utils.tiktoken import count_tiktoken
 
-        serialized = self._json_dict.get("content", [])
-        full_text = f"{self._json_dict.get('role', '')}: {json.dumps(serialized, ensure_ascii=False) if serialized else ''}"
-        return count_tiktoken(full_text, encoding)
+        # Collect the role prefix — approximates the per-message overhead providers charge.
+        parts: list[str] = [f"{self._json_dict.get('role', '')}:"]
+
+        # Count each part's semantic payload, skipping the serialization envelope.
+        for part in self.content:
+            # Text-like parts count their text.
+            if part.type in ("text", "thinking"):
+                parts.append(part.text or "")
+
+            # Tool calls count name plus the raw arguments string the model generates.
+            elif part.type == "tool_use":
+                parts.append(f"{part.name or ''} {part.arguments or ''}")
+
+            # Tool results count the result content.
+            elif part.type == "tool_result":
+                parts.append(part.content or "")
+
+            # Tool definitions count name, description and the schema as the provider receives it.
+            elif part.type == "tool":
+                parts.append(f"{part.name or ''} {part.description or ''} {json.dumps(part.parameters or {}, ensure_ascii=False)}")
+
+            # Media parts and unknown types count nothing rather than guess.
+        return count_tiktoken(" ".join(parts), encoding)
 
     def count_tokens(self, encoding: str = "cl100k_base") -> int:
         """Count tokens in this message's content.
