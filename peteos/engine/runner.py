@@ -759,7 +759,18 @@ class Runner(ActiveClass):
         # If still over budget, apply the rolling token window to finish reduction.
         # Check with some reserve (e.g. due to token counting errors).
         if reduced_size + cfg.max_tokens + 4096 > cfg.context_limit_floor:
-            reduced = reduced.rolling_token_window((cfg.context_limit_floor - cfg.max_tokens)//2)
+            # The cfg.context_limit_floor may still be 0. This is a tricky situation, because we don't know the
+            # safe haven. We can only guess. The approach here: take half the ceiling and reduce by max_tokens.
+            if cfg.context_limit_floor > 0:
+                target_floor = cfg.context_limit_floor
+            else:
+                target_floor = cfg.context_limit_ceil // 2 - cfg.max_tokens
+
+                # If even that is too small, we take the configured max_tokens, i.e., the allowed answer size.
+                if target_floor < 0:
+                    target_floor = cfg.max_tokens
+            
+            reduced = reduced.rolling_token_window((target_floor - cfg.max_tokens)//2)
             reduced_size = reduced.total_token_count()
             _logger.debug(
                 "[runner] _handle_context_exhaustion: After rolling_window: %d tokens",

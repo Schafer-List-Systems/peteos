@@ -16,7 +16,7 @@ def serialize(value: object) -> str:
         return value
     if isinstance(value, (dict, list, bool, int, float)) and value is not None:
         try:
-            return _json.dumps(value)
+            return _json.dumps(value, indent=2)
         except (TypeError, ValueError):
             pass
     return str(value)

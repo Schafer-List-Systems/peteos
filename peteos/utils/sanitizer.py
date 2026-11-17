@@ -27,8 +27,8 @@ def _sanitize_text(text: str) -> str:
 
     # A change means the text had bad surrogates — warn and return the fixed copy.
     if fixed != text:
-        _logger.warning(
-            "[sanitizer] _sanitize_text: text repairs applied — "
+        _logger.debug(
+            "[sanitizer] _sanitize_text: text repairs applied -- "
             "malformed Unicode was detected and fixed",
         )
         return fixed
