@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 import uuid as _uuid
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -238,6 +239,45 @@ class Runner(ActiveClass):
 
         # No contract frame on the stack — not called from within Runner.run().
         return None
+
+    @classmethod
+    def returns_to_context(cls) -> bool:
+        """Return True when the caller's return value flows directly into the agent context.
+
+        Walks the call stack from the caller up to the Runner.run() frame. The
+        return reaches the context only when every frame in between belongs to
+        the peteos tool-execution machinery. A user-code frame in between -- a
+        nested tool call, sandbox code, a hook -- receives the value instead.
+
+        Returns False when no Runner.run() frame is on the stack -- the caller
+        was invoked programmatically outside any runner.
+        """
+        # Compute the contract frame signature from the live method so it stays
+        # accurate across installations — not a hardcoded string.
+        frame_sig = (cls.run.__code__.co_filename, "run")
+
+        # Derive the machinery boundary from the live module file -- two levels
+        # above engine/runner.py is the peteos package root.
+        pkg_dir = os.path.dirname(os.path.dirname(cls.run.__code__.co_filename))
+
+        # Walk the call stack from the innermost frame outward.
+        stack = inspect.stack()
+        for idx, frame_info in enumerate(stack):
+            frame = frame_info.frame
+            if (
+                frame.f_code.co_filename == frame_sig[0]
+                and frame.f_code.co_name == frame_sig[1]
+            ):
+                # Contract frame found -- classify the frames between the caller
+                # and run(). stack[0] is this method, stack[1] is the caller.
+                for between in stack[2:idx]:
+                    # A user-code frame between caller and run receives the value.
+                    if not between.frame.f_code.co_filename.startswith(pkg_dir):
+                        return False
+                return True
+
+        # No contract frame on the stack — not called from within Runner.run().
+        return False
 
     # ------------------------------------------------------------------ #
     # Message queue
