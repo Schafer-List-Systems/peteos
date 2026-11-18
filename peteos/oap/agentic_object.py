@@ -1164,6 +1164,48 @@ class AgenticObject:
         # Return the started runner so callers can attach channels to it
         return runner
 
+    async def create_thread(self, persistent_thread_id: str | None = None) -> Session:
+        """Create a persistent thread without invoking the agent.
+
+        Creates the session, registers the system prompt hooks, pre-warms the
+        runner, and registers everything in the thread stores. The thread store
+        is persisted to disk. Unlike invoke_agent, no prompt is processed and
+        no cognition runs -- the thread is only materialized.
+
+        Args:
+            persistent_thread_id: The caller-supplied thread id to register.
+                When None, the session's own uuid keys the thread (anonymous).
+
+        Returns:
+            The newly created Session.
+
+        Contracts:
+            - Does not acquire the invocation lock -- thread registration is
+              additive state manipulation and safe to run concurrently with
+              an active invocation on a different thread.
+            - Overrides an existing thread_store entry for the same id.
+        """
+        # Create the session and register the system prompt hooks on it.
+        session = await self._oap_agent.create_session()
+        system_prompt_msg = session.active_context.system_prompt_message
+        for name, callback in self._oap_system_prompt_hooks.items():
+            session.register_hook(system_prompt_msg, name, callback)
+
+        # Pre-warm the runner so channels can attach without a wake-up call.
+        runner = await self._start_session(session)
+
+        # Register the session under the thread id -- the session's own uuid
+        # keys anonymous threads -- and persist.
+        key = persistent_thread_id if persistent_thread_id is not None else str(session.uuid)
+        self._oap_json["thread_store"][key] = session.uuid
+        self._oap_runner_store[key] = runner
+        self._oap_session_store[str(session.uuid)] = session
+
+        # Persist the updated thread_store to disk
+        _persist_oap_json(self)
+
+        return session
+
     @property
     def instance_dir(self) -> Path:
         """The directory for this object's persisted state (derived from INSTANCES_DIR/name/)."""
@@ -1270,22 +1312,11 @@ class AgenticObject:
                         runner = await self._start_session(session)
         if session is None or runner is None:
             _logger.debug("invoke_agent[%s]: creating new session and runner", self.__class__.__name__)
-            session = await self._oap_agent.create_session()
-            system_prompt_msg = session.active_context.system_prompt_message
-            for name, callback in self._oap_system_prompt_hooks.items():
-                session.register_hook(system_prompt_msg, name, callback)
-            runner = await self._start_session(session)
-            
-            if persistent_thread_id is not None:
-                self._oap_json["thread_store"][persistent_thread_id] = session.uuid
-                self._oap_runner_store[persistent_thread_id] = runner
-            else:
-                self._oap_json["thread_store"][str(session.uuid)] = session.uuid
-                self._oap_runner_store[str(session.uuid)] = runner
-            self._oap_session_store[str(session.uuid)] = session
 
-            # Persist the updated thread_store to disk
-            _persist_oap_json(self)
+            # Delegate all session creation to the dedicated method -- the
+            # thread id names the thread when given, else it is anonymous.
+            session = await self.create_thread(persistent_thread_id)
+            runner = self._oap_runner_store[persistent_thread_id or str(session.uuid)]
 
         if persistent_thread_id is not None:
             if runner.state.get("_persistent_thread_id") is None:
